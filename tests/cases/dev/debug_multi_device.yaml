@@ -1,0 +1,44 @@
+# Simple Multi-Device Screenshot Test
+name: Simple Multi-Device Screenshot Test
+description: Take screenshots of multiple device pages to analyze page structure
+tags:
+  - browser
+  - playwright
+  - device-config
+  - debug
+
+# Enable asynchronous execution
+async_execution: true
+max_workers: 3
+
+variables:
+  base_url: http://binary:SnapAV704@192.168.100.8
+  page: "unit"
+
+# Data array - each item represents one test iteration that will run concurrently
+data:
+  - endpoint_id: "1204"
+    device_name: "RX-D46A9121077B"
+  
+  - endpoint_id: "1012" 
+    device_name: "RX-D46A9121E8C0"
+    
+  - endpoint_id: "1156"
+    device_name: "RX-D46A91272239"
+
+steps:
+  - action: Open browser
+    url: ${base_url}/${page}/${endpoint_id}
+    description: Open device configuration page
+  
+  - action: Take screenshot
+    name: device_${endpoint_id}_debug
+    description: Capture full device page for analysis
+    
+  - action: Wait
+    time: 2
+    description: Wait 2 seconds for page to fully load
+    
+  - action: Take screenshot 
+    name: device_${endpoint_id}_final
+    description: Final screenshot after waiting

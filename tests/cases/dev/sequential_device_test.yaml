@@ -1,0 +1,42 @@
+# Sequential Multi-Device Test (explicit)
+name: Sequential Multi-Device Configuration Test  
+description: Test device configuration one device at a time
+tags:
+  - browser
+  - sequential
+  - device-config
+
+# Force sequential execution
+async_execution: false
+max_workers: 1
+
+variables:
+  base_url: http://binary:SnapAV704@192.168.100.8
+  page: "unit"
+
+# Same data, but will run one by one
+data:
+  - endpoint_id: "1204"
+    device_name: "RX-D46A9121077B"
+    expected_model: "B-900-MOIP-4K-RX"
+  
+  - endpoint_id: "1012" 
+    device_name: "RX-D46A9121E8C0"
+    expected_model: "B-900-MOIP-4K-RX"
+    
+  - endpoint_id: "1156"
+    device_name: "RX-D46A91272239" 
+    expected_model: "B-960-MOIP-4K-RX"
+
+steps:
+  - action: Open browser
+    url: ${base_url}/${page}/${endpoint_id}
+    description: Open device configuration page
+  
+  - action: Take screenshot
+    name: device_${endpoint_id}_sequential
+    description: Sequential screenshot
+    
+  - action: Wait
+    time: 2
+    description: Wait before next device

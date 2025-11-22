@@ -1,0 +1,67 @@
+# Complete Setup/Teardown Demo Test
+name: Setup and Teardown Demo Test
+description: Demonstrates proper setup, main test, and cleanup phases
+tags:
+  - browser
+  - demo
+  - setup-teardown
+
+# Run sequentially to see phases clearly
+async_execution: false
+max_workers: 1
+
+variables:
+  base_url: http://binary:SnapAV704@192.168.100.8
+  page: "unit"
+
+data:
+  - endpoint_id: "1204"
+    device_name: "RX-D46A9121077B"
+  
+  - endpoint_id: "1012" 
+    device_name: "RX-D46A9121E8C0"
+
+# Setup steps - run before each test iteration
+setup:
+  - action: Wait
+    time: 1
+    description: Initialize test environment
+  
+  - action: Open browser
+    url: ${base_url}
+    description: Open main page for setup
+
+# Main test steps
+steps:
+  - action: Take screenshot
+    name: setup_complete_${endpoint_id}
+    description: Verify setup completed
+  
+  - action: Open browser
+    url: ${base_url}/${page}/${endpoint_id}
+    description: Navigate to device page
+  
+  - action: Take screenshot
+    name: device_${endpoint_id}_main_test
+    description: Main test screenshot
+  
+  - action: Wait
+    time: 2
+    description: Main test wait
+
+# Cleanup steps - run after each test iteration
+cleanup:
+  - action: Take screenshot
+    name: before_cleanup_${endpoint_id}
+    description: State before cleanup
+  
+  - action: Navigate back
+    description: Return to main page
+  
+  - action: Take screenshot
+    name: after_cleanup_${endpoint_id}
+    description: State after cleanup
+  
+  - action: Wait
+    time: 1
+    description: Final cleanup wait

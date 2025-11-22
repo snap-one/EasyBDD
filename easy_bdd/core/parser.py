@@ -44,6 +44,9 @@ class TestDefinition:
     steps: List[TestStep]
     cleanup: List[TestStep]
     data_source: Optional[str] = None
+    data: Optional[List[Dict[str, Any]]] = None
+    async_execution: bool = False
+    max_workers: int = 1
     
     def __post_init__(self):
         # Ensure all list fields are lists
@@ -154,6 +157,11 @@ class YAMLParser:
         variables = data.get('variables', {})
         data_source = data.get('data_source')
         
+        # Extract data-driven fields
+        test_data = data.get('data', None)
+        async_execution = data.get('async_execution', False)
+        max_workers = data.get('max_workers', 1)
+        
         # Parse steps
         setup_steps = self._parse_steps(data.get('setup', []))
         test_steps = self._parse_steps(data['steps'])
@@ -168,7 +176,10 @@ class YAMLParser:
             setup=setup_steps,
             steps=test_steps,
             cleanup=cleanup_steps,
-            data_source=data_source
+            data_source=data_source,
+            data=test_data,
+            async_execution=async_execution,
+            max_workers=max_workers
         )
     
     def _parse_steps(self, steps_data: List[Dict[str, Any]]) -> List[TestStep]:

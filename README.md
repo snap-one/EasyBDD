@@ -1,53 +1,62 @@
 # Easy BDD Testing Framework
 
-A user-friendly BDD testing framework that supports multiple protocols and testing scenarios without requiring programming knowledge. This framework was designed to replace pipe-delimited syntax with simple, intuitive YAML-based test definitions.
-
-## ✨ Key Features
-
-- **📝 Simple YAML Syntax** - Write tests in plain English using YAML
-- **🎥 UI Recorder Integration** - Convert Playwright, Selenium, Cypress recordings to YAML
-- **🌐 Multi-Protocol Support** - Browser, REST API, WebSocket, Android, AWS, Serial
-- **🔄 Automatic Gherkin Generation** - Converts YAML to proper BDD scenarios
-- **📊 Rich Reporting** - HTML reports with screenshots and detailed logs
-- **🔧 Global Variables** - Reuse data across tests with `${variable}` syntax
-- **⚡ Parallel Execution** - Run tests concurrently for faster feedback
-- **🎯 Tag-Based Filtering** - Run specific test subsets using tags
-- **🔗 No TestRail Dependency** - File-based test management
+A user-friendly, YAML-based BDD testing framework that supports multiple protocols and doesn't require programming knowledge.
 
 ## 🚀 Quick Start
 
-### 1. Installation
+### Installation
 ```bash
-# Clone or set up your framework
-cd your-framework-directory
-
-# Install dependencies (virtual environment recommended)
+git clone <repository-url>
+cd Automation-Framework
+python -m venv .venv
+source .venv/bin/activate
 pip install -e .
+playwright install
 ```
 
-### 2. Create Your First Test
-Create `tests/cases/my_first_test.yaml`:
-
+### Your First Test
+Create `tests/cases/hello_world.yaml`:
 ```yaml
-name: "User Login Test"
-description: "Test user login functionality"
-tags: ["browser", "login"]
+name: Hello World Test
+description: My first Easy BDD test
+tags: [demo]
 
 variables:
-  username: "testuser@example.com"
-  password: "SecurePass123"
-  base_url: "https://app.example.com"
+  website: "https://example.com"
 
 steps:
-  - action: "Open browser"
-    url: "${base_url}/login"
-    
-  - action: "Fill form field"
-    field: "email"
-    value: "${username}"
-    
-  - action: "Fill form field"
-    field: "password"
+  - action: Open browser
+    url: ${website}
+  - action: Take screenshot
+    name: "homepage"
+  - action: Verify text
+    text: "Example Domain"
+```
+
+Run it:
+```bash
+python -m easy_bdd run tests/cases/hello_world.yaml --headed
+```
+
+## 📚 Complete Documentation
+
+### 📖 User Guides
+- **[Setup Guide](./docs/setup.md)** - Complete installation and configuration
+- **[Syntax Reference](./docs/syntax.md)** - YAML syntax and structure  
+- **[Actions Reference](./docs/actions.md)** - All available test actions
+- **[Data-Driven Testing](./docs/data-driven.md)** - Multiple data sets and async execution
+- **[Advanced Features](./docs/advanced.md)** - Setup/cleanup, async execution, performance
+- **[Examples Gallery](./docs/examples.md)** - Real-world test examples
+- **[Troubleshooting](./docs/troubleshooting.md)** - Common issues and solutions
+
+### 🎯 Key Features
+- **No Programming Required** - Write tests in simple YAML
+- **Multi-Protocol Support** - Browser, API, WebSocket, Mobile, AWS
+- **Data-Driven Testing** - Run same test with multiple data sets
+- **Async Execution** - 3x faster with concurrent test execution
+- **Setup/Cleanup** - Proper test phase organization
+- **Variable Substitution** - Use `${variable}` syntax throughout
+- **Rich Reporting** - Screenshots, logs, and detailed results
     value: "${password}"
     
   - action: "Click button"

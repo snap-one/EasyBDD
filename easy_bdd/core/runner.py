@@ -4,9 +4,11 @@ Test runner for executing Easy BDD tests
 
 import sys
 import time
+import threading
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .config import ConfigManager
 from .parser import YAMLParser, TestDefinition
@@ -170,10 +172,16 @@ class TestRunner:
                 iteration_test = TestDefinition(
                     name=f"{test.name} (Async Iteration {iteration_num})",
                     description=test.description,
+                    file_path=test.file_path,
                     tags=test.tags,
                     variables=iteration_variables,
+                    setup=test.setup,
                     steps=test.steps,
-                    file_path=test.file_path
+                    cleanup=test.cleanup,
+                    data_source=test.data_source,
+                    data=None,  # Don't pass data to avoid infinite recursion
+                    async_execution=False,  # Don't nest async execution
+                    max_workers=1
                 )
                 
                 print(f"    ⚙️  [Thread-{thread_id}] Starting iteration {iteration_num}...")
@@ -246,10 +254,16 @@ class TestRunner:
             iteration_test = TestDefinition(
                 name=f"{test.name} (Iteration {i})",
                 description=test.description,
+                file_path=test.file_path,
                 tags=test.tags,
                 variables=iteration_variables,
+                setup=test.setup,
                 steps=test.steps,
-                file_path=test.file_path
+                cleanup=test.cleanup,
+                data_source=test.data_source,
+                data=None,  # Don't pass data to avoid infinite recursion
+                async_execution=False,  # Don't nest async execution
+                max_workers=1
             )
             
             # Execute this iteration
@@ -263,11 +277,33 @@ class TestRunner:
         return all_passed
     
     def _execute_single_test(self, test: TestDefinition) -> bool:
-        """Execute a single test definition"""
+        """Execute a single test definition with setup, main steps, and cleanup"""
         services = {}
         
         try:
-            # Execute each step
+            # Execute setup steps first
+            if test.setup:
+                print(f"    === Setup Phase ===")
+                for i, step in enumerate(test.setup, 1):
+                    print(f"    Setup {i}: {step.action}")
+                    
+                    # Determine which service to use based on action
+                    service_type = self._get_service_type(step.action)
+                    
+                    if service_type not in services:
+                        services[service_type] = self._create_service(service_type)
+                    
+                    # Execute the setup step
+                    success = self._execute_step(services[service_type], step, test.variables)
+                    if not success:
+                        print(f"    ❌ Setup step {i} failed - continuing with main test")
+                        # Setup failures don't stop the test, but are logged
+                    
+                    # Small delay between steps
+                    time.sleep(0.5)
+            
+            # Execute main test steps
+            print(f"    === Main Test Phase ===")
             for i, step in enumerate(test.steps, 1):
                 print(f"    Step {i}: {step.action}")
                 
@@ -288,10 +324,35 @@ class TestRunner:
             return True
             
         except Exception as e:
-            print(f"      Error executing step: {e}")
+            print(f"      Error executing test: {e}")
             return False
             
         finally:
+            # Execute cleanup steps regardless of main test result
+            if test.cleanup:
+                try:
+                    print(f"    === Cleanup Phase ===")
+                    for i, step in enumerate(test.cleanup, 1):
+                        print(f"    Cleanup {i}: {step.action}")
+                        
+                        # Determine which service to use based on action
+                        service_type = self._get_service_type(step.action)
+                        
+                        if service_type not in services:
+                            services[service_type] = self._create_service(service_type)
+                        
+                        # Execute cleanup step - don't let failures stop cleanup
+                        try:
+                            self._execute_step(services[service_type], step, test.variables)
+                        except Exception as cleanup_error:
+                            print(f"    ⚠️  Cleanup step {i} failed: {cleanup_error}")
+                        
+                        # Small delay between cleanup steps
+                        time.sleep(0.5)
+                        
+                except Exception as cleanup_error:
+                    print(f"    ⚠️  Cleanup phase error: {cleanup_error}")
+            
             # Clean up services
             for service in services.values():
                 if hasattr(service, 'close'):
@@ -430,6 +491,17 @@ class TestRunner:
                 
             elif hasattr(service, 'navigate_forward') and 'navigate forward' in action:
                 service.navigate_forward()
+                return True
+                
+            elif 'wait' in action:
+                wait_time = step_params.get('time', '') or step_params.get('parameters', {}).get('time', 1)
+                if isinstance(wait_time, str):
+                    try:
+                        wait_time = float(wait_time)
+                    except ValueError:
+                        wait_time = 1
+                print(f"      Waiting {wait_time} seconds...")
+                time.sleep(wait_time)
                 return True
                 
             else:

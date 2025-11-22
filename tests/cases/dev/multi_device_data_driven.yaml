@@ -29,39 +29,17 @@ data:
     device_name: "RX-D46A91272239" 
     expected_model: "B-960-MOIP-4K-RX"
 
-steps:
-  - action: Open browser
-    url: ${base_url}/${page}/${endpoint_id}
-    description: Open device configuration page
-  
+# Setup steps - run before each data iteration
+setup:
   - action: Take screenshot
-    name: device_${endpoint_id}_async_loaded
-    description: Capture device page after loading
+    name: pre_test_${endpoint_id}_environment
+    description: Capture environment state before test
   
-  - action: Fill form field
-    field: '[role="textbox"][name="Name"]'
-    value: ${device_name}
-    description: Enter device name
-  
-  - action: Wait for element
-    selector: .btn.btn-outline:not([disabled])
-    state: visible
-    timeout: 10000
-    description: Wait for button to become enabled
-  
-  - action: Click element
-    selector: .btn.btn-outline
-    description: Click the outline button
-  
-  - action: Take screenshot
-    name: device_${endpoint_id}_async_configured
-    description: Capture page after configuration
-  
-  - action: Verify text
-    text: ${device_name}
-    description: Verify device name appears on page
+  - action: Wait
+    time: 1
+    description: Allow system to stabilize
 
-
+# Main test steps - run for each data iteration
 steps:
   - action: Open browser
     url: ${base_url}/${page}/${endpoint_id}
@@ -97,3 +75,20 @@ steps:
   - action: Verify text
     text: ${expected_model}
     description: Verify device model is correct
+
+# Cleanup steps - run after each data iteration (whether pass or fail)
+cleanup:
+  - action: Take screenshot
+    name: post_test_${endpoint_id}_final_state
+    description: Capture final state after test completion
+  
+  - action: Wait
+    time: 1
+    description: Brief pause before cleanup
+  
+  - action: Navigate back
+    description: Return to previous page if possible
+    
+  - action: Take screenshot
+    name: post_cleanup_${endpoint_id}_state
+    description: Capture state after cleanup
