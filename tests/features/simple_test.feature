@@ -1,0 +1,1 @@
+Feature: Simple Browser Test\n\n  Simple test to verify browser execution works\n\n  @browser @test\n  Scenario: Simple Browser Test\n    Given I open a browser to "${test_url}"\n    And I take a screenshot named "simple_test"

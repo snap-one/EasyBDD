@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+easy_bdd/__init__.py
+easy_bdd/__main__.py
+easy_bdd/core/__init__.py
+easy_bdd/core/config.py
+easy_bdd/core/generator.py
+easy_bdd/core/parser.py
+easy_bdd/core/recorder_converter.py
+easy_bdd/core/runner.py
+easy_bdd/services/browser_service.py
+easy_bdd_framework.egg-info/PKG-INFO
+easy_bdd_framework.egg-info/SOURCES.txt
+easy_bdd_framework.egg-info/dependency_links.txt
+easy_bdd_framework.egg-info/requires.txt
+easy_bdd_framework.egg-info/top_level.txt

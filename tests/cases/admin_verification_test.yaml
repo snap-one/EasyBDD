@@ -1,0 +1,31 @@
+name: "Admin User Verification Test"
+description: "Test admin login with nested shared steps"
+tags: ["admin", "nested-shared-steps"]
+
+variables:
+  admin_username: "admin@example.com"
+  admin_password: "AdminPass123"
+  base_url: "https://app.example.com"
+  user_name: "John Doe"
+  user_email: "john.doe@example.com"
+
+steps:
+  # Use nested shared step (admin_login_sequence calls login_sequence)
+  - shared_step: "admin_login_sequence"
+    parameters:
+      username: "${admin_username}"
+      password: "${admin_password}"
+      base_url: "${base_url}"
+  
+  # Navigate to user profile
+  - action: "Click element"
+    selector: "a[href='/admin/users/123']"
+  
+  # Use shared step for profile verification
+  - shared_step: "verify_user_profile"
+    parameters:
+      expected_name: "${user_name}"
+      expected_email: "${user_email}"
+
+cleanup:
+  - shared_step: "cleanup_browser"

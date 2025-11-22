@@ -1,0 +1,51 @@
+name: "User Registration with Shared Steps"
+description: "Test user registration using reusable shared steps"
+tags: ["browser", "registration", "shared-steps"]
+
+variables:
+  username: "newuser@example.com"
+  password: "NewUserPass123"
+  base_url: "https://app.example.com"
+  api_url: "https://api.example.com"
+  user_name: "John Doe"
+
+setup:
+  # Use shared step for browser setup
+  - shared_step: "browser_setup"
+    parameters:
+      base_url: "${base_url}"
+
+steps:
+  # Navigate to registration page
+  - action: "Click element"
+    selector: "a[href='/register']"
+    
+  # Fill registration form
+  - action: "Fill form field"
+    field: "name"
+    value: "${user_name}"
+    
+  - action: "Fill form field"
+    field: "email"
+    value: "${username}"
+    
+  - action: "Fill form field"
+    field: "password"
+    value: "${password}"
+    
+  - action: "Click button"
+    button: "Create Account"
+    
+  - action: "Verify page contains"
+    text: "Account created successfully"
+  
+  # Use shared step for login after registration
+  - shared_step: "login_sequence"
+    parameters:
+      username: "${username}"
+      password: "${password}"
+      base_url: "${base_url}"
+
+cleanup:
+  # Use shared cleanup step
+  - shared_step: "cleanup_browser"

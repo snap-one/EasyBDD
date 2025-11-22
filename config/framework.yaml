@@ -1,0 +1,44 @@
+config:
+  browser:
+    default: "chrome"
+    headless: false
+    headed: true  # Explicitly show browser window
+    window_size: [1920, 1080]
+    timeout: 30
+    implicit_wait: 10
+    ignore_https_errors: true
+    ignore_certificate_errors: true
+    disable_web_security: false
+    args:
+      - "--ignore-certificate-errors"
+      - "--ignore-ssl-errors"
+      - "--ignore-certificate-errors-spki-list"
+      - "--ignore-ssl-errors-on-localhost"
+      - "--allow-running-insecure-content"
+      - "--disable-web-security"
+      - "--disable-features=VizDisplayCompositor"
+  
+  api:
+    timeout: 30
+    verify_ssl: true
+    max_retries: 3
+    retry_delay: 1.0
+  
+  reporting:
+    output_dir: "reports"
+    screenshots: true
+    html_report: true
+  
+  parallel:
+    workers: 2
+
+environments:
+  default: {}
+  
+  staging:
+    base_url: "https://staging.example.com"
+    api_url: "https://api-staging.example.com"
+  
+  production:
+    base_url: "https://example.com"
+    api_url: "https://api.example.com"

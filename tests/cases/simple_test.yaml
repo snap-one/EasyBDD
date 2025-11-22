@@ -1,0 +1,13 @@
+name: "Simple Browser Test"
+description: "Simple test to verify browser execution works"
+tags: ["browser", "test"]
+
+variables:
+  test_url: "https://httpbin.org/get"
+
+steps:
+  - action: "Open browser"
+    url: "${test_url}"
+    
+  - action: "Take screenshot"
+    name: "simple_test"

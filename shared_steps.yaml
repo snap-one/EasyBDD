@@ -1,0 +1,127 @@
+# Shared Steps Library
+# Define reusable step sequences that can be used across multiple tests
+
+login_sequence:
+  description: "Standard user login process"
+  parameters:
+    - username
+    - password
+    - base_url
+  steps:
+    - action: "Open browser"
+      url: "${base_url}/login"
+    - action: "Fill form field"
+      field: "email"
+      value: "${username}"
+    - action: "Fill form field"
+      field: "password"
+      value: "${password}"
+    - action: "Click button"
+      button: "Sign In"
+    - action: "Verify page contains"
+      text: "Welcome"
+
+admin_login_sequence:
+  description: "Admin login with additional verification"
+  parameters:
+    - username
+    - password
+    - base_url
+  steps:
+    - shared_step: "login_sequence"
+      parameters:
+        username: "${username}"
+        password: "${password}"
+        base_url: "${base_url}"
+    - action: "Verify page contains"
+      text: "Admin Dashboard"
+    - action: "Wait for element"
+      selector: ".admin-menu"
+      timeout: 10
+
+api_authentication:
+  description: "Get API authentication token"
+  parameters:
+    - api_url
+    - client_id
+    - client_secret
+  steps:
+    - action: "Send API request"
+      method: "POST"
+      url: "${api_url}/auth/token"
+      body:
+        grant_type: "client_credentials"
+        client_id: "${client_id}"
+        client_secret: "${client_secret}"
+    - action: "Extract from response"
+      field: "access_token"
+      save_as: "auth_token"
+
+create_user_api:
+  description: "Create a new user via API"
+  parameters:
+    - api_url
+    - auth_token
+    - user_name
+    - user_email
+  steps:
+    - action: "Send API request"
+      method: "POST"
+      url: "${api_url}/users"
+      headers:
+        Authorization: "Bearer ${auth_token}"
+        Content-Type: "application/json"
+      body:
+        name: "${user_name}"
+        email: "${user_email}"
+    - action: "Verify API response"
+      status_code: 201
+    - action: "Extract from response"
+      field: "user.id"
+      save_as: "created_user_id"
+
+form_validation_check:
+  description: "Standard form validation verification"
+  parameters:
+    - form_selector
+    - error_message
+  steps:
+    - action: "Wait for element"
+      selector: "${form_selector} .error"
+      timeout: 5
+    - action: "Verify page contains"
+      text: "${error_message}"
+    - action: "Take screenshot"
+      name: "form_validation_error"
+
+browser_setup:
+  description: "Standard browser setup with common settings"
+  parameters:
+    - base_url
+  steps:
+    - action: "Open browser"
+      url: "${base_url}"
+      browser: "chrome"
+    - action: "Wait for element"
+      selector: "body"
+      timeout: 10
+
+cleanup_browser:
+  description: "Standard browser cleanup"
+  steps:
+    - action: "Take screenshot"
+      name: "final_state"
+    - action: "Close browser"
+
+verify_user_profile:
+  description: "Verify user profile information"
+  parameters:
+    - expected_name
+    - expected_email
+  steps:
+    - action: "Verify page contains"
+      text: "${expected_name}"
+    - action: "Verify page contains"
+      text: "${expected_email}"
+    - action: "Take screenshot"
+      name: "user_profile_verification"

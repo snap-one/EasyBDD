@@ -1,0 +1,57 @@
+# Method 3: Individual Test Files (Template-based)
+# Generate individual test files for each device using a template
+
+# Template file: device_config_template.yaml
+name: Device ${endpoint_id} Configuration Test
+description: Test configuration for device endpoint ${endpoint_id}
+tags:
+  - browser
+  - playwright
+  - device-config
+  - device-${endpoint_id}
+
+variables:
+  base_url: http://binary:SnapAV704@192.168.100.8
+  page: "unit"
+  endpoint_id: "${endpoint_id}"
+  device_name: "${device_name}"
+  expected_model: "${expected_model}"
+
+steps:
+  - action: Open browser
+    url: ${base_url}/${page}/${endpoint_id}
+    description: Open device ${endpoint_id} configuration page
+  
+  - action: Take screenshot
+    name: device_${endpoint_id}_initial
+    description: Capture initial state
+  
+  - action: Fill form field
+    field: '[role="textbox"][name="Name"]'
+    value: ${device_name}
+    description: Enter device name for ${endpoint_id}
+  
+  - action: Wait for element
+    selector: .btn.btn-outline:not([disabled])
+    state: visible
+    timeout: 10000
+    description: Wait for save button to be enabled
+  
+  - action: Click element
+    selector: .btn.btn-outline
+    description: Save configuration
+  
+  - action: Take screenshot
+    name: device_${endpoint_id}_final
+    description: Capture final state
+  
+  - action: Verify text
+    text: ${device_name}
+    description: Verify device name was saved
+    
+  - action: Verify text
+    text: ${expected_model}
+    description: Verify device model is correct
+
+# To use this approach, create individual files:
+# device_1204_config.yaml, device_1205_config.yaml, etc.

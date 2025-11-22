@@ -1,0 +1,125 @@
+name: Comprehensive Playwright API Test
+description: Demonstrates all Playwright native API patterns in Easy BDD YAML
+tags:
+  - browser
+  - playwright
+  - comprehensive
+  - api
+
+variables:
+  base_url: http://192.168.100.8
+  test_text: "Hello World"
+  device_name: "test-device"
+
+steps:
+  # ===== BASIC BROWSER ACTIONS =====
+  - action: Open browser
+    url: ${base_url}/main
+    description: Open browser to main page
+
+  - action: Take screenshot
+    name: page_loaded
+    description: Capture initial page state
+
+  - action: Refresh browser
+    description: Refresh the page
+
+  # ===== PLAYWRIGHT NATIVE API ACTIONS =====
+  
+  # Get by role (Playwright: page.get_by_role())
+  - action: Get by role
+    role: button
+    name: Submit
+    description: Click button with role and name
+
+  # Get by text (Playwright: page.get_by_text())
+  - action: Get by text
+    text: "Login"
+    exact: false
+    description: Click element containing text
+
+  # Get by label (Playwright: page.get_by_label())
+  - action: Get by label
+    label: "Username"
+    action_type: fill
+    value: ${device_name}
+    description: Fill form field by label
+
+  # Get by placeholder (Playwright: page.get_by_placeholder())
+  - action: Get by placeholder
+    placeholder: "Enter your name"
+    action_type: fill
+    value: ${test_text}
+    description: Fill field by placeholder
+
+  # Get by test ID (Playwright: page.get_by_test_id())
+  - action: Get by test id
+    test_id: login-button
+    description: Click element by test ID
+
+  # Hover (Playwright: page.hover())
+  - action: Hover
+    selector: ".menu-item"
+    description: Hover over menu item
+
+  # Double click (Playwright: page.dblclick())
+  - action: Double click
+    selector: ".file-item"
+    description: Double-click on file
+
+  # Press key (Playwright: page.press() / page.keyboard.press())
+  - action: Press key
+    key: "Enter"
+    selector: "input[name='search']"
+    description: Press Enter in search field
+
+  # Type text (Playwright: page.type())
+  - action: Type text
+    text: ${test_text}
+    selector: ".editor"
+    description: Type text in editor
+
+  # Wait for element (Playwright: page.wait_for_selector())
+  - action: Wait for element
+    selector: ".loading-spinner"
+    state: hidden
+    timeout: 5000
+    description: Wait for loading to complete
+
+  # Upload file (Playwright: page.set_input_files())
+  - action: Upload file
+    selector: "input[type='file']"
+    file_path: "/path/to/test-file.txt"
+    description: Upload a test file
+
+  # Navigate back (Playwright: page.go_back())
+  - action: Navigate back
+    description: Go back in browser history
+
+  # Navigate forward (Playwright: page.go_forward())
+  - action: Navigate forward
+    description: Go forward in browser history
+
+  # ===== FORM INTERACTIONS =====
+  
+  # Regular fill (enhanced with smart detection)
+  - action: Fill form field
+    field: '[role="textbox"][name="Name"]'
+    value: ${device_name}
+    description: Fill form field with smart detection
+
+  # Click element (enhanced with XPath support)
+  - action: Click element
+    selector: "//button[contains(text(), 'Save')]"
+    description: Click using XPath selector
+
+  # ===== VERIFICATION =====
+  
+  # Text verification (Playwright: expect().to_contain_text())
+  - action: Verify text
+    text: ${device_name}
+    description: Verify device name appears on page
+
+  - action: Take screenshot
+    name: final_state
+    description: Capture final page state

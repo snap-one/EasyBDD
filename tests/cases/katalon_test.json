@@ -1,0 +1,87 @@
+[
+  {
+    "command": "open",
+    "target": "http://192.168.100.8/group_tx/1038",
+    "value": ""
+  },
+  {
+    "command": "click",
+    "target": "xpath=(.//*[normalize-space(text()) and normalize-space(.)='STOPPED'])[13]/following::a[3]",
+    "value": ""
+  },
+  {
+    "command": "click",
+    "target": "xpath=(.//*[normalize-space(text()) and normalize-space(.)='STOPPED'])[13]/following::a[3]",
+    "value": ""
+  },
+  {
+    "command": "click",
+    "target": "xpath=(.//*[normalize-space(text()) and normalize-space(.)='STOPPED'])[13]/following::a[3]",
+    "value": ""
+  },
+  {
+    "command": "click",
+    "target": "xpath=(.//*[normalize-space(text()) and normalize-space(.)='STOPPED'])[13]/following::a[3]",
+    "value": ""
+  },
+  {
+    "command": "click",
+    "target": "xpath=//div",
+    "value": ""
+  },
+  {
+    "command": "click",
+    "target": "xpath=//div",
+    "value": ""
+  },
+  {
+    "command": "click",
+    "target": "xpath=//div",
+    "value": ""
+  },
+  {
+    "command": "click",
+    "target": "xpath=//div",
+    "value": ""
+  },
+  {
+    "command": "type",
+    "target": "xpath=//input[@value='B-960-MOIP-4K-TR']",
+    "value": "B-960-MOIP-4K-TR"
+  },
+  {
+    "command": "type",
+    "target": "xpath=//input[@value='B-960-MOIP-4K-TR']",
+    "value": "B-960-MOIP-4K-TR"
+  },
+  {
+    "command": "type",
+    "target": "xpath=//input[@value='B-960-MOIP-4K-TR']",
+    "value": "B-960-MOIP-4K-TR"
+  },
+  {
+    "command": "type",
+    "target": "xpath=//input[@value='B-960-MOIP-4K-TR']",
+    "value": "B-960-MOIP-4K-TR"
+  },
+  {
+    "command": "click",
+    "target": "xpath=(.//*[normalize-space(text()) and normalize-space(.)='Name'])[1]/following::*[name()='svg'][1]",
+    "value": ""
+  },
+  {
+    "command": "click",
+    "target": "xpath=(.//*[normalize-space(text()) and normalize-space(.)='Name'])[1]/following::*[name()='svg'][1]",
+    "value": ""
+  },
+  {
+    "command": "click",
+    "target": "xpath=(.//*[normalize-space(text()) and normalize-space(.)='Name'])[1]/following::*[name()='svg'][1]",
+    "value": ""
+  },
+  {
+    "command": "click",
+    "target": "xpath=(.//*[normalize-space(text()) and normalize-space(.)='Name'])[1]/following::*[name()='svg'][1]",
+    "value": ""
+  }
+]

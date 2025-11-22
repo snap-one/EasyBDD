@@ -1,0 +1,24 @@
+name: Login Test
+description: Auto-generated from recorded_login.json
+tags:
+- browser
+- recorded
+- playwright
+variables:
+  base_url: https://example.com
+steps:
+- action: Open browser
+  url: https://example.com/login
+- action: Fill form field
+  field: email
+  value: test@example.com
+- action: Fill form field
+  field: password
+  value: password123
+- action: Click element
+  selector: button[type="submit"]
+- action: Wait for element
+  selector: .welcome-message
+  timeout: 30
+- action: Take screenshot
+  name: login_success

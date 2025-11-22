@@ -1,0 +1,17 @@
+name: Katalon Test
+description: Auto-generated from Katalon Studio recording
+tags:
+- browser
+- recorded
+- katalon
+variables:
+  base_url: http://binary:SnapAV704@192.168.100.8
+steps:
+- action: Open browser
+  url: http://binary:SnapAV704@192.168.100.8/group_tx/1038
+- action: Fill form field
+  field: field_with_value_b_960_moip_4k_tr
+  value: B-960-MOIP-4K-TR
+  selector: (.//*[normalize-space(text()) and normalize-space(.)='Name'])[1]/following::*[name()='svg'][1]
+- action: Click element
+  selector: (.//*[normalize-space(text()) and normalize-space(.)='Name'])[1]/following::*[name()='svg'][1]

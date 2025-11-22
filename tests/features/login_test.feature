@@ -1,0 +1,1 @@
+Feature: Simple Login Test\n\n  Test user login with valid credentials\n\n  @browser @login\n  Scenario: Simple Login Test\n    Given I open a browser to "${base_url}/login"\n    When I fill the "email" field with "${username}"\n    When I fill the "password" field with "${password}"\n    When I click the "Sign In" button\n    Then the page should contain "Welcome"

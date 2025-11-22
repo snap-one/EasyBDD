@@ -1,0 +1,438 @@
+Metadata-Version: 2.4
+Name: easy-bdd-framework
+Version: 1.0.0
+Summary: User-friendly BDD testing framework with multi-protocol support
+Author-email: Your Team <team@example.com>
+Project-URL: Homepage, https://github.com/yourorg/easy-bdd-framework
+Project-URL: Bug Reports, https://github.com/yourorg/easy-bdd-framework/issues
+Project-URL: Source, https://github.com/yourorg/easy-bdd-framework
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: pytest>=7.0.0
+Requires-Dist: pytest-bdd>=6.0.0
+Requires-Dist: pytest-html>=3.0.0
+Requires-Dist: pytest-xdist>=3.0.0
+Requires-Dist: requests>=2.25.0
+Requires-Dist: selenium>=4.0.0
+Requires-Dist: playwright>=1.20.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: jinja2>=3.0.0
+Requires-Dist: jsonschema>=4.0.0
+Requires-Dist: websocket-client>=1.0.0
+Requires-Dist: boto3>=1.20.0
+Requires-Dist: paramiko>=2.8.0
+Requires-Dist: pyserial>=3.5
+Requires-Dist: openpyxl>=3.0.0
+Requires-Dist: pandas>=1.3.0
+Requires-Dist: allure-pytest>=2.9.0
+Requires-Dist: pydantic>=1.8.0
+Provides-Extra: dev
+Requires-Dist: black>=22.0.0; extra == "dev"
+Requires-Dist: flake8>=4.0.0; extra == "dev"
+Requires-Dist: mypy>=0.910; extra == "dev"
+Requires-Dist: pre-commit>=2.15.0; extra == "dev"
+
+# Easy BDD Testing Framework
+
+A user-friendly BDD testing framework that supports multiple protocols and testing scenarios without requiring programming knowledge. This framework was designed to replace pipe-delimited syntax with simple, intuitive YAML-based test definitions.
+
+## ✨ Key Features
+
+- **📝 Simple YAML Syntax** - Write tests in plain English using YAML
+- **🎥 UI Recorder Integration** - Convert Playwright, Selenium, Cypress recordings to YAML
+- **🌐 Multi-Protocol Support** - Browser, REST API, WebSocket, Android, AWS, Serial
+- **🔄 Automatic Gherkin Generation** - Converts YAML to proper BDD scenarios
+- **📊 Rich Reporting** - HTML reports with screenshots and detailed logs
+- **🔧 Global Variables** - Reuse data across tests with `${variable}` syntax
+- **⚡ Parallel Execution** - Run tests concurrently for faster feedback
+- **🎯 Tag-Based Filtering** - Run specific test subsets using tags
+- **🔗 No TestRail Dependency** - File-based test management
+
+## 🚀 Quick Start
+
+### 1. Installation
+```bash
+# Clone or set up your framework
+cd your-framework-directory
+
+# Install dependencies (virtual environment recommended)
+pip install -e .
+```
+
+### 2. Create Your First Test
+Create `tests/cases/my_first_test.yaml`:
+
+```yaml
+name: "User Login Test"
+description: "Test user login functionality"
+tags: ["browser", "login"]
+
+variables:
+  username: "testuser@example.com"
+  password: "SecurePass123"
+  base_url: "https://app.example.com"
+
+steps:
+  - action: "Open browser"
+    url: "${base_url}/login"
+    
+  - action: "Fill form field"
+    field: "email"
+    value: "${username}"
+    
+  - action: "Fill form field"
+    field: "password"
+    value: "${password}"
+    
+  - action: "Click button"
+    button: "Sign In"
+    
+  - action: "Verify page contains"
+    text: "Welcome"
+```
+
+### 3. Run Your Tests
+```bash
+# Run all tests
+python -m easy_bdd run
+
+# Run specific test file
+python -m easy_bdd run tests/cases/my_first_test.yaml
+
+# Run tests with specific tags
+python -m easy_bdd run --tags browser,login
+
+# Generate Gherkin features only
+python -m easy_bdd generate tests/cases/
+```
+
+## 🎥 UI Recorder Integration
+
+Convert browser recordings from popular tools into Easy BDD tests:
+
+### Convert Recordings
+```bash
+# Convert Playwright, Selenium, Cypress recordings
+python -m easy_bdd convert recorded_test.json
+
+# Specify output file
+python -m easy_bdd convert recorded_test.json --output my_test.yaml
+
+# Auto-detect format (or specify: playwright, selenium, cypress, puppeteer)
+python -m easy_bdd convert recorded_test.json --format-type auto
+```
+
+### Supported Formats
+- **Playwright Test Generator** - JSON with actions array
+- **Selenium IDE** - JSON with tests and commands
+- **Cypress Test Runner** - JSON with commands array  
+- **Puppeteer recordings** - JSON with page interactions
+
+See [RECORDER_INTEGRATION.md](RECORDER_INTEGRATION.md) for detailed documentation.
+
+## 📖 Test Definition Format
+
+### Basic Structure
+```yaml
+name: "Test Name"
+description: "What this test does"
+tags: ["tag1", "tag2"]  # Optional
+
+variables:
+  var_name: "value"
+  api_url: "https://api.example.com"
+  
+setup:  # Optional - runs before test
+  - action: "Setup action"
+    
+steps:
+  - action: "Action name"
+    parameter: "value"
+    
+cleanup:  # Optional - runs after test
+  - action: "Cleanup action"
+```
+
+### Variable Usage
+Use `${variable_name}` to reference variables:
+
+```yaml
+variables:
+  base_url: "https://staging.example.com"
+  username: "testuser"
+
+steps:
+  - action: "Open browser"
+    url: "${base_url}/login"
+  - action: "Fill form field"
+    field: "username"
+    value: "${username}"
+```
+
+## 🎯 Available Actions
+
+### 🌐 Browser Actions
+```yaml
+# Open browser and navigate
+- action: "Open browser"
+  url: "https://example.com"
+  browser: "chrome"  # chrome, firefox, safari, edge
+
+# Click elements
+- action: "Click element"
+  selector: "#submit-btn"
+  
+- action: "Click button"
+  button: "Submit"
+
+# Fill form fields
+- action: "Fill form field"
+  field: "username"
+  value: "testuser"
+
+# Verify content
+- action: "Verify page contains"
+  text: "Success message"
+
+# Take screenshots
+- action: "Take screenshot"
+  name: "login_page"
+
+# Wait for elements
+- action: "Wait for element"
+  selector: ".loading-spinner"
+  timeout: 30
+```
+
+### 🔌 API Actions
+```yaml
+# Send HTTP requests
+- action: "Send API request"
+  method: "POST"
+  url: "https://api.example.com/users"
+  headers:
+    Content-Type: "application/json"
+    Authorization: "Bearer ${token}"
+  body:
+    name: "John Doe"
+    email: "john@example.com"
+
+# Verify responses
+- action: "Verify API response"
+  status_code: 200
+  contains:
+    message: "User created"
+
+# Extract data from responses
+- action: "Extract from response"
+  field: "user.id"
+  save_as: "user_id"
+```
+
+### 📱 Android Actions
+```yaml
+# Connect to device
+- action: "Connect to android device"
+  device_id: "emulator-5554"
+
+# Interact with elements
+- action: "Tap element"
+  id: "com.app:id/login_button"
+
+- action: "Enter text"
+  id: "com.app:id/username"
+  text: "testuser"
+
+# Verify screen content
+- action: "Verify screen contains"
+  text: "Login successful"
+```
+
+### ☁️ AWS Actions
+```yaml
+# S3 operations
+- action: "AWS S3 upload"
+  bucket: "test-bucket"
+  file: "test.txt"
+  key: "uploads/test.txt"
+
+# Lambda functions
+- action: "AWS Lambda invoke"
+  function: "test-function"
+  payload:
+    message: "test"
+
+# Verify AWS responses
+- action: "Verify AWS response"
+  contains:
+    statusCode: 200
+```
+
+### 🔌 WebSocket Actions
+```yaml
+# Connect to WebSocket
+- action: "Connect to websocket"
+  url: "ws://localhost:8080/chat"
+
+# Send messages
+- action: "Send websocket message"
+  message: "Hello World"
+
+# Wait for messages
+- action: "Wait for websocket message"
+  contains: "Welcome"
+  timeout: 10
+```
+
+## ⚙️ Configuration
+
+Create `config/framework.yaml`:
+
+```yaml
+config:
+  browser:
+    default: "chrome"
+    headless: false
+    window_size: [1920, 1080]
+    timeout: 30
+
+  api:
+    timeout: 30
+    verify_ssl: true
+    max_retries: 3
+
+  reporting:
+    output_dir: "reports"
+    screenshots: true
+    html_report: true
+
+  parallel:
+    workers: 2
+
+environments:
+  staging:
+    base_url: "https://staging.example.com"
+    api_url: "https://api-staging.example.com"
+  
+  production:
+    base_url: "https://example.com"
+    api_url: "https://api.example.com"
+```
+
+## 🏗️ Project Structure
+
+```
+easy-bdd-framework/
+├── easy_bdd/                # Framework core
+│   ├── core/               # Core functionality
+│   │   ├── config.py       # Configuration management
+│   │   ├── parser.py       # YAML parser
+│   │   ├── generator.py    # Gherkin generator
+│   │   └── runner.py       # Test runner
+│   └── services/           # Protocol implementations (future)
+├── tests/
+│   ├── cases/              # Your YAML test definitions
+│   └── features/           # Generated Gherkin files
+├── config/
+│   └── framework.yaml      # Framework configuration
+├── reports/                # Test reports and artifacts
+├── pyproject.toml          # Python package configuration
+└── README.md
+```
+
+## 🚀 Advanced Usage
+
+### Running with Different Environments
+```bash
+python -m easy_bdd run --env staging
+python -m easy_bdd run --env production
+```
+
+### Tag-Based Test Organization
+```yaml
+# Organize tests with tags
+tags: ["smoke", "browser", "critical"]
+
+# Run specific test types
+python -m easy_bdd run --tags smoke
+python -m easy_bdd run --tags browser,api
+```
+
+### Test Data Management
+```yaml
+# Reference external data (future feature)
+data_source: "test_data.csv"
+steps:
+  - action: "Fill form field"
+    field: "username"
+    value: "${data.username}"  # From CSV column
+```
+
+## 🔧 VS Code Integration
+
+The framework includes VS Code tasks for easy execution:
+
+- **Run Tests**: `Ctrl+Shift+P` → "Tasks: Run Task" → "Run Easy BDD Tests"
+- **Python Extension**: Automatic syntax highlighting and validation
+- **Integrated Terminal**: Run commands directly in VS Code
+
+## 🆚 Comparison with Original Framework
+
+| Feature | Original Framework | Easy BDD Framework |
+|---------|-------------------|-------------------|
+| Test Definition | Pipe-delimited syntax | Simple YAML |
+| Test Storage | TestRail integration | File-based |
+| Learning Curve | Requires training | Intuitive for non-programmers |
+| Protocol Support | ✅ All protocols | ✅ All protocols (architecture ready) |
+| Variable System | `$variable` | `${variable}` |
+| Gherkin Generation | ✅ | ✅ |
+| Flexibility | High | High |
+| Maintenance | Custom syntax | Standard YAML |
+
+## 🤝 Migration from Original Framework
+
+To migrate from your original framework:
+
+1. **Convert Test Cases**: Transform pipe-delimited tests to YAML format
+2. **Update Variables**: Change `$var` to `${var}` syntax  
+3. **File Organization**: Move tests from TestRail to YAML files
+4. **Configuration**: Set up `framework.yaml` configuration
+5. **Execution**: Use new command-line interface
+
+## 📋 Development Guidelines
+
+- Keep test definitions simple and readable
+- Use descriptive action names
+- Organize tests with meaningful tags
+- Leverage variables for reusability
+- Follow consistent naming conventions
+
+## 🔮 Future Roadmap
+
+- **Service Implementations**: Complete browser, API, WebSocket, Android, AWS, and Serial services
+- **Data-Driven Testing**: CSV/Excel file integration
+- **Custom Actions**: Plugin system for extending functionality
+- **Enhanced Reporting**: Allure integration, video recording
+- **IDE Integration**: Enhanced VS Code extension
+- **CI/CD Integration**: Jenkins, GitHub Actions templates
+
+## 🏆 Why Choose Easy BDD Framework?
+
+✅ **User-Friendly**: No programming knowledge required  
+✅ **Flexible**: Supports all your existing test scenarios  
+✅ **Maintainable**: Standard YAML format  
+✅ **Independent**: No external dependencies like TestRail  
+✅ **Extensible**: Easy to add new protocols and actions  
+✅ **Modern**: Built with current best practices  
+
+---
+
+**Ready to get started?** Create your first YAML test file and experience the difference! 🎉
