@@ -1,27 +1,316 @@
-# Actions Reference Guide
+# Action Reference Guide
 
-Complete reference for all available test actions in the Easy BDD Framework.
+This document provides a comprehensive reference for all available actions in the Easy BDD framework.
 
-## 🌐 Browser Actions
+## Browser Actions
 
-### Open Browser
+### Navigation Actions
+
+#### open browser
 Opens a browser and navigates to a URL.
-
 ```yaml
-- action: Open browser
+- action: "open browser"
   url: "https://example.com"
-  description: Navigate to the website
 ```
 
-**Parameters:**
-- `url` (required): The URL to navigate to
-- `description` (optional): Step description
-
-**Variable Support:** ✅
+#### navigate back
+Navigates to the previous page in browser history.
 ```yaml
-- action: Open browser
-  url: "${base_url}/login"
+- action: "navigate back"
 ```
+
+#### navigate forward
+Navigates to the next page in browser history.
+```yaml
+- action: "navigate forward"
+```
+
+#### refresh browser
+Refreshes the current page.
+```yaml
+- action: "refresh browser"
+```
+
+### Element Interaction Actions
+
+#### click element
+Clicks on an element using various selector strategies.
+```yaml
+# By CSS selector
+- action: "click element"
+  selector: "#submit-button"
+
+# By visible text
+- action: "click element"
+  text: "Submit"
+
+# By button text (uses get_by_role internally)
+- action: "click element"
+  button: "Log In"
+
+# By role and name (Playwright native)
+- action: "click element"
+  role: "link"
+  name: "192.168.100.13"
+  exact: true  # Optional, for exact match
+
+# By role - common examples
+- action: "click element"
+  role: "button"
+  name: "Submit Form"
+
+- action: "click element"
+  role: "heading"
+  name: "Dashboard"
+
+- action: "click element"
+  role: "checkbox"
+  name: "Accept Terms"
+```
+
+#### fill field
+Fills a form field with text.
+```yaml
+- action: "fill field"
+  field: "username"  # Can use name, id, or label
+  value: "john@example.com"
+  # Alternative syntax
+  selector: "#username"
+```
+
+#### hover element
+Hovers over an element.
+```yaml
+- action: "hover element"
+  selector: ".dropdown-trigger"
+```
+
+#### double click element
+Double-clicks on an element.
+```yaml
+- action: "double click element"
+  selector: ".file-item"
+```
+
+#### press key
+Presses a keyboard key, optionally on a specific element.
+```yaml
+- action: "press key"
+  key: "Enter"
+  selector: "#search-input"  # Optional
+```
+
+#### get by label
+Interacts with elements by their label text.
+```yaml
+- action: "get by label"
+  label: "Email Address"
+  action_type: "fill"  # click, fill, etc.
+  value: "user@example.com"  # For fill actions
+```
+
+### Wait Actions
+
+#### wait for element
+Waits for an element to reach a certain state.
+```yaml
+- action: "wait for element"
+  selector: ".loading-spinner"
+  state: "hidden"  # visible, hidden, attached, detached
+  timeout: 10  # seconds (optional)
+```
+
+#### wait
+Waits for a specified time.
+```yaml
+- action: "wait"
+  time: 2  # seconds
+```
+
+### File Actions
+
+#### upload file
+Uploads a file to a file input.
+```yaml
+- action: "upload file"
+  selector: "input[type='file']"
+  file_path: "data/test-file.pdf"
+```
+
+#### take screenshot
+Takes a screenshot for documentation or debugging.
+```yaml
+- action: "take screenshot"
+  name: "login-page"  # Optional name
+```
+
+## API Actions
+
+### HTTP Methods
+
+#### api request
+Generic API request action supporting all HTTP methods.
+```yaml
+- action: "api request"
+  method: "GET"  # GET, POST, PUT, DELETE, PATCH
+  url: "https://api.example.com/users"
+  device_id: "device_1001"  # Optional, uses auth config
+  headers:  # Optional
+    Accept: "application/json"
+  params:  # Optional query parameters
+    page: 1
+    limit: 10
+  json_data:  # Optional JSON body
+    name: "John Doe"
+    email: "john@example.com"
+  data:  # Optional form data
+    field1: "value1"
+```
+
+#### api get
+Shorthand for GET requests.
+```yaml
+- action: "api get"
+  url: "https://api.example.com/users/123"
+  device_id: "device_1001"
+  headers:
+    Accept: "application/json"
+  params:
+    include: "profile"
+```
+
+#### api post
+Shorthand for POST requests.
+```yaml
+- action: "api post"
+  url: "https://api.example.com/users"
+  device_id: "device_1001"
+  json_data:
+    name: "John Doe"
+    email: "john@example.com"
+    role: "user"
+```
+
+#### api put
+Shorthand for PUT requests.
+```yaml
+- action: "api put"
+  url: "https://api.example.com/users/123"
+  device_id: "device_1001"
+  json_data:
+    name: "John Smith"
+```
+
+#### api delete
+Shorthand for DELETE requests.
+```yaml
+- action: "api delete"
+  url: "https://api.example.com/users/123"
+  device_id: "device_1001"
+```
+
+### Response Validation
+
+#### validate status
+Validates the HTTP status code of the last API response.
+```yaml
+- action: "validate status"
+  status: 200  # Expected status code
+```
+
+#### validate json
+Validates a field in the JSON response.
+```yaml
+- action: "validate json"
+  field: "user.name"  # Supports dot notation for nested fields
+  value: "John Doe"
+```
+
+## Selector Strategies
+
+The framework supports multiple ways to identify elements:
+
+### 1. CSS Selectors
+```yaml
+selector: "#username"           # ID
+selector: ".btn-primary"        # Class  
+selector: "input[type='email']" # Attribute
+selector: "div > p:first-child" # Complex selectors
+```
+
+### 2. Text Content
+```yaml
+text: "Click Here"              # Exact text
+text: "Submit"                  # Button text
+```
+
+### 3. Label Association
+```yaml
+label: "Email Address"          # Associated label
+field: "username"               # Form field name/id
+```
+
+### 4. Smart Fallbacks
+The framework automatically tries multiple strategies:
+1. CSS selector
+2. Text content matching
+3. Label association
+4. Name/ID attributes
+5. Placeholder text
+
+## Variable Usage
+
+All actions support variable substitution using `${variable}` syntax:
+
+```yaml
+variables:
+  base_url: "https://api.example.com"
+  user_id: "12345"
+  
+steps:
+  - action: "api get"
+    url: "${base_url}/users/${user_id}"
+    
+  - action: "fill field"
+    field: "email"
+    value: "${user_email}"
+```
+
+## Authentication Context
+
+API actions support device-specific authentication through the `device_id` parameter:
+
+```yaml
+- action: "api request"
+  method: "GET"
+  url: "https://api.example.com/protected"
+  device_id: "device_1001"  # Uses auth config for this device
+```
+
+Each device can have different:
+- Authentication endpoints
+- Token formats
+- Expiration handling
+- Credentials
+
+See [API Authentication Guide](api-authentication.md) for configuration details.
+
+## Error Handling
+
+Actions automatically handle common scenarios:
+- **Element not found**: Retries with different selector strategies
+- **Network errors**: Retries API requests with exponential backoff
+- **Authentication failures**: Automatically refreshes tokens
+- **Timeouts**: Configurable timeout values per action
+
+## Best Practices
+
+1. **Use descriptive selectors**: Prefer IDs and stable classes over complex CSS paths
+2. **Leverage smart selectors**: Use text and labels when possible for maintainability
+3. **Handle dynamic content**: Use wait actions for elements that load asynchronously
+4. **Organize API tests**: Group related API calls and use consistent device_ids
+5. **Validate responses**: Always validate both status codes and response content
+6. **Use variables**: Parameterize URLs, credentials, and test data
 
 ### Click Element
 Clicks on a web element.

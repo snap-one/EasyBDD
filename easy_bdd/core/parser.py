@@ -47,6 +47,7 @@ class TestDefinition:
     data: Optional[List[Dict[str, Any]]] = None
     async_execution: bool = False
     max_workers: int = 1
+    device_config: Optional[str] = None  # Device configuration file reference
     
     def __post_init__(self):
         # Ensure all list fields are lists
@@ -156,6 +157,7 @@ class YAMLParser:
         tags = data.get('tags', [])
         variables = data.get('variables', {})
         data_source = data.get('data_source')
+        device_config = data.get('device_config')  # Device configuration file reference
         
         # Extract data-driven fields
         test_data = data.get('data', None)
@@ -179,7 +181,8 @@ class YAMLParser:
             data_source=data_source,
             data=test_data,
             async_execution=async_execution,
-            max_workers=max_workers
+            max_workers=max_workers,
+            device_config=device_config
         )
     
     def _parse_steps(self, steps_data: List[Dict[str, Any]]) -> List[TestStep]:

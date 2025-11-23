@@ -1,6 +1,31 @@
 # Shared Steps Library
 # Define reusable step sequences that can be used across multiple tests
 
+ovrc_login:
+  description: "OvrC application login and navigation to devices"
+  parameters:
+    - email
+    - password
+    - base_url
+  steps:
+    - action: "Open browser"
+      url: "${base_url}/#/login"
+    - action: "Fill form field"
+      field: 'input[placeholder="Email"]'
+      value: "${email}"
+    - action: "Fill form field"
+      field: 'input[placeholder="Password"]'
+      value: "${password}"
+    - action: "Click element"
+      button: "Log In"
+    - action: "Wait for element"
+      selector: 'text="61"'
+      timeout: 10
+    - action: "Click element"
+      text: "61"
+    - action: "Click element"
+      selector: '#devices__tab'
+
 login_sequence:
   description: "Standard user login process"
   parameters:

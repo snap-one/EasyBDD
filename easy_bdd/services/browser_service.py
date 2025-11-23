@@ -33,6 +33,7 @@ except ImportError:
     SELENIUM_AVAILABLE = False
 
 from ..core.config import ConfigManager
+from .api_service import APIService
 
 
 class PlaywrightMCPBridge:
@@ -116,7 +117,17 @@ class BrowserService:
         self.playwright_page: Optional[Page] = None
         self.playwright_context: Optional[BrowserContext] = None
         self.playwright_playwright = None
-        self.screenshots_dir = Path(config.get("reporting.output_dir")) / "screenshots"
+        # Get reporting directory with compatibility for both config types
+        if hasattr(config, 'get_variable'):
+            # GlobalConfigManager
+            self.screenshots_dir = Path(
+                config.get_variable("reporting_output_dir", "reports")
+            ) / "screenshots"
+        else:
+            # Legacy ConfigManager
+            self.screenshots_dir = Path(
+                config.get("reporting.output_dir", "reports")
+            ) / "screenshots"
         self.screenshots_dir.mkdir(parents=True, exist_ok=True)
         
         # MCP Bridge
@@ -124,6 +135,20 @@ class BrowserService:
         
         # Preferred browser engine
         self.preferred_engine = "playwright" if PLAYWRIGHT_AVAILABLE else "selenium"
+    
+    def _get_config_value(self, config, key: str, default=None):
+        """Get config value with compatibility for both config types"""
+        if hasattr(config, 'get_variable'):
+            # GlobalConfigManager
+            return config.get_variable(key, default)
+        else:
+            # Legacy ConfigManager
+            return config.get(key.replace('_', '.'), default)
+    
+    def _get_browser_config(self, key: str, default=None):
+        """Get browser-specific configuration value"""
+        full_key = f'browser.{key}'
+        return self._get_config_value(self.config, full_key, default)
     
     def set_mcp_mode(self, enabled: bool = True):
         """Enable or disable MCP mode for recording"""
@@ -152,7 +177,12 @@ class BrowserService:
     
     def open_browser(self, url: str, browser: str = None, use_playwright: bool = None) -> None:
         """Open browser and navigate to URL"""
-        browser = browser or getattr(self.config.browser, 'default', 'chrome')
+        # Get browser preference from config
+        if browser is None:
+            if hasattr(self.config, 'get_variable'):
+                browser = self.config.get_variable('browser.default', 'chrome')
+            else:
+                browser = self.config.get('browser.default', 'chrome')
         
         # Auto-detect best engine
         if use_playwright is None:
@@ -177,7 +207,7 @@ class BrowserService:
         
         # Browser launch options
         launch_options = {
-            'headless': getattr(self.config.browser, 'headless', False),
+            'headless': self._get_browser_config('headless', False),
             'args': [
                 '--no-sandbox',
                 '--disable-dev-shm-usage',  # Better Docker compatibility
@@ -185,8 +215,8 @@ class BrowserService:
         }
         
         # Add HTTPS certificate handling
-        ignore_https = (getattr(self.config.browser, 'ignore_https_errors', False) or 
-                       getattr(self.config.browser, 'ignore_certificate_errors', False))
+        ignore_https = (self._get_browser_config('ignore_https_errors', False) or
+                        self._get_browser_config('ignore_certificate_errors', False))
         if ignore_https:
             launch_options['args'].extend([
                 '--ignore-certificate-errors',
@@ -198,14 +228,14 @@ class BrowserService:
             ])
         
         # Add configured browser args
-        browser_args = getattr(self.config.browser, 'args', [])
+        browser_args = self._get_browser_config('args', [])
         if browser_args:
             launch_options['args'].extend(browser_args)
         
         # Add debugging options for MCP mode
         if self.mcp_bridge.mcp_mode:
             launch_options['slow_mo'] = 50  # Slow down for better observation
-            launch_options['devtools'] = not getattr(self.config.browser, 'headless', False)
+            launch_options['devtools'] = not self._get_browser_config('headless', False)
         
         browser_type = getattr(self.playwright_playwright, self._get_playwright_browser_name(browser))
         self.playwright_browser = browser_type.launch(**launch_options)
@@ -213,12 +243,12 @@ class BrowserService:
         # Create context with enhanced options
         context_options = {
             'viewport': {
-                "width": getattr(self.config.browser, 'window_size', [1920, 1080])[0],
-                "height": getattr(self.config.browser, 'window_size', [1920, 1080])[1]
+                "width": self._get_browser_config('window_size', [1920, 1080])[0],
+                "height": self._get_browser_config('window_size', [1920, 1080])[1]
             },
-            'record_video_dir': str(self.screenshots_dir / "videos") if getattr(self.config.reporting, 'video', False) else None,
+            'record_video_dir': str(self.screenshots_dir / "videos") if self._get_config_value(self.config, 'reporting.video', False) else None,
             'record_har_path': str(self.screenshots_dir / "network.har") if self.mcp_bridge.mcp_mode else None,
-            'ignore_https_errors': getattr(self.config.browser, 'ignore_https_errors', True),
+            'ignore_https_errors': self._get_browser_config('ignore_https_errors', True),
             'accept_downloads': True
         }
         
@@ -377,19 +407,19 @@ class BrowserService:
         except Exception:
             pass
     
-    def click_element(self, selector: str = None, text: str = None, button: str = None, **kwargs) -> None:
+    def click_element(self, selector: str = None, text: str = None, button: str = None, role: str = None, name: str = None, **kwargs) -> None:
         """Enhanced click with multiple selector strategies"""
         if self.playwright_page:
-            self._playwright_click(selector, text, button, **kwargs)
+            self._playwright_click(selector, text, button, role, name, **kwargs)
         elif self.selenium_driver:
             self._selenium_click(selector, text, button)
         else:
             raise RuntimeError("No browser session active")
         
         # Record action for MCP
-        self.mcp_bridge.record_action('click', selector=selector, text=text, button=button, **kwargs)
+        self.mcp_bridge.record_action('click', selector=selector, text=text, button=button, role=role, name=name, **kwargs)
     
-    def _playwright_click(self, selector: str = None, text: str = None, button: str = None, **kwargs) -> None:
+    def _playwright_click(self, selector: str = None, text: str = None, button: str = None, role: str = None, name: str = None, **kwargs) -> None:
         """Enhanced Playwright click with XPath support"""
         click_options = kwargs.copy()
         
@@ -397,8 +427,36 @@ class BrowserService:
             click_options['button'] = button
         
         try:
+            # Handle get_by_role (e.g., page.get_by_role("link", name="..."))
+            if role and name:
+                print(f"      Finding element by role '{role}' with name: {name}")
+                exact = kwargs.get('exact', False)
+                self.playwright_page.get_by_role(role, name=name, exact=exact).click(timeout=5000)
+                print(f"      ✓ Clicked {role}: {name}")
+                return
+            
             if selector:
                 print(f"      Processing selector: {selector}")
+                
+                # Handle Chrome Recorder aria/ format
+                if selector.startswith('aria/'):
+                    aria_label = selector.replace('aria/', '', 1)
+                    print(f"      Using ARIA label: {aria_label}")
+                    # Try multiple ARIA-based strategies
+                    try:
+                        # First try exact role match
+                        self.playwright_page.get_by_role('button', name=aria_label).click(timeout=5000, **click_options)
+                        return
+                    except:
+                        try:
+                            # Try as text input
+                            self.playwright_page.get_by_label(aria_label).click(timeout=5000, **click_options)
+                            return
+                        except:
+                            # Fall back to text match
+                            self.playwright_page.get_by_text(aria_label).click(timeout=5000, **click_options)
+                            return
+                
                 print(f"      Is XPath: {self._is_xpath_selector(selector)}")
                 
                 # Handle XPath selectors
@@ -418,24 +476,31 @@ class BrowserService:
                 return
                 
             elif button:
-                # Try multiple button selectors
-                selectors_to_try = [
-                    f"button:has-text('{button}')",
-                    f"input[type='submit'][value='{button}']",
-                    f"input[type='button'][value='{button}']",
-                    f"[role='button']:has-text('{button}')",
-                    f"a:has-text('{button}')",
-                    f"*:has-text('{button}'):visible"
-                ]
-                
-                for sel in selectors_to_try:
-                    try:
-                        self.playwright_page.click(sel, timeout=2000, **click_options)
-                        return
-                    except Exception:
-                        continue
-                
-                raise ValueError(f"Button not found: {button}")
+                # Use Playwright's get_by_role for reliable button finding
+                print(f"      Finding button by role with name: {button}")
+                try:
+                    self.playwright_page.get_by_role('button', name=button).click(timeout=5000)
+                    print(f"      ✓ Clicked button: {button}")
+                    return
+                except Exception as first_error:
+                    # Fallback to text-based selectors
+                    print(f"      get_by_role failed, trying alternative selectors")
+                    selectors_to_try = [
+                        f"button:has-text('{button}')",
+                        f"input[type='submit'][value='{button}']",
+                        f"input[type='button'][value='{button}']",
+                        f"[role='button']:has-text('{button}')",
+                    ]
+                    
+                    for sel in selectors_to_try:
+                        try:
+                            self.playwright_page.click(sel, timeout=2000, **click_options)
+                            print(f"      ✓ Clicked using: {sel}")
+                            return
+                        except Exception:
+                            continue
+                    
+                    raise ValueError(f"Button not found: {button}. Original error: {first_error}")
             else:
                 raise ValueError("Must specify selector, text, or button")
                 
@@ -487,10 +552,10 @@ class BrowserService:
         else:
             raise ValueError(f"Element not found: selector={selector}, text={text}, button={button}")
     
-    def fill_form_field(self, field: str, value: str, **kwargs) -> None:
+    def fill_form_field(self, field: str, value: str, role: str = None, name: str = None, label: str = None, **kwargs) -> None:
         """Enhanced form filling with smart field detection"""
         if self.playwright_page:
-            self._playwright_fill_field(field, value, **kwargs)
+            self._playwright_fill_field(field, value, role=role, name=name, label=label, **kwargs)
         elif self.selenium_driver:
             self._selenium_fill_field(field, value)
         else:
@@ -499,8 +564,38 @@ class BrowserService:
         # Record action for MCP
         self.mcp_bridge.record_action('fill', field=field, value=value, **kwargs)
     
-    def _playwright_fill_field(self, field: str, value: str, **kwargs) -> None:
+    def _playwright_fill_field(self, field: str, value: str, role: str = None, name: str = None, label: str = None, **kwargs) -> None:
         """Enhanced Playwright form filling"""
+        
+        # Handle get_by_role with name
+        if role and name:
+            try:
+                self.playwright_page.get_by_role(role, name=name).fill(value, timeout=5000)
+                print(f"      ✓ Filled {role} '{name}' with value")
+                return
+            except Exception as e:
+                print(f"      get_by_role failed: {e}")
+        
+        # Handle get_by_label
+        if label:
+            try:
+                self.playwright_page.get_by_label(label).fill(value, timeout=5000)
+                print(f"      ✓ Filled field by label: {label}")
+                return
+            except Exception as e:
+                print(f"      get_by_label failed: {e}")
+        
+        # Handle Chrome Recorder aria/ format
+        if field and field.startswith('aria/'):
+            aria_label = field.replace('aria/', '', 1)
+            print(f"      Using ARIA label for fill: {aria_label}")
+            try:
+                self.playwright_page.get_by_label(aria_label).fill(value, timeout=5000)
+                print(f"      ✓ Filled field using ARIA label: {aria_label}")
+                return
+            except Exception as e:
+                print(f"      ARIA label failed: {e}")
+        
         # Try direct selector first (for complex selectors like [role="textbox"][name="Name"])
         try:
             self.playwright_page.fill(field, value, timeout=5000, **kwargs)
@@ -903,21 +998,89 @@ class BrowserService:
             raise RuntimeError(f"Failed to type text '{text}': {e}")
     
     def select_option(self, selector: str, value: str = None, label: str = None, **kwargs) -> None:
-        """Playwright select option equivalent"""
+        """Playwright select option equivalent with wildcard support"""
         if not self.playwright_page:
             raise RuntimeError("Playwright session not active")
             
         try:
+            # Convert wildcard selectors to CSS attribute selectors
+            processed_selector = self._process_wildcard_selector(selector)
+            print(f"      Selecting from: '{processed_selector}'")
+            
+            # Debug: Use JavaScript to find select elements directly
+            js_result = self.playwright_page.evaluate("""
+                () => {
+                    const selects = Array.from(document.querySelectorAll('select'));
+                    const iframes = Array.from(document.querySelectorAll('iframe'));
+                    return {
+                        selectCount: selects.length,
+                        selects: selects.slice(0, 5).map(s => ({
+                            id: s.id,
+                            name: s.name,
+                            className: s.className,
+                            visible: s.offsetParent !== null
+                        })),
+                        iframeCount: iframes.length,
+                        bodyHTML: document.body.innerHTML.substring(0, 500)
+                    };
+                }
+            """)
+            print(f"      JS Debug - Found {js_result['selectCount']} select elements")
+            print(f"      JS Debug - Found {js_result['iframeCount']} iframes")
+            if js_result['selectCount'] > 0:
+                for i, sel in enumerate(js_result['selects']):
+                    print(f"        [{i}] id='{sel['id']}', name='{sel['name']}', visible={sel['visible']}")
+            else:
+                print(f"      Page body preview: {js_result['bodyHTML'][:200]}...")
+            
+            # Wait for the select element to be visible and enabled
+            locator = self.playwright_page.locator(processed_selector)
+            locator.wait_for(state="visible", timeout=10000)
+            
+            # Try to scroll into view
+            try:
+                locator.scroll_into_view_if_needed(timeout=5000)
+            except:
+                pass
+            
             select_kwargs = {}
             if value:
                 select_kwargs['value'] = value
             elif label:
                 select_kwargs['label'] = label
-                
-            self.playwright_page.select_option(selector, **select_kwargs)
-            print(f"      ✓ Selected option in '{selector}'")
+            
+            # Use locator.select_option instead of page.select_option
+            locator.select_option(**select_kwargs)
+            print(f"      ✓ Selected option '{value or label}' in '{processed_selector}'")
         except Exception as e:
             raise RuntimeError(f"Failed to select option in '{selector}': {e}")
+    
+    def _process_wildcard_selector(self, selector: str) -> str:
+        """Convert wildcard selectors to CSS attribute selectors
+        
+        Examples:
+            select[id=":rg:*"] -> select[id^=":rg:"]
+            input[name="field_*"] -> input[name^="field_"]
+            div[class="*_container"] -> div[class*="_container"]
+        """
+        import re
+        
+        # Pattern: attribute[name="value*"] or attribute[name='value*']
+        # Convert trailing wildcard to ^= (starts with)
+        pattern_trailing = r'\[(\w+)=(["\'])([^"\']*)\*\2\]'
+        selector = re.sub(pattern_trailing, r'[\1^=\2\3\2]', selector)
+        
+        # Pattern: attribute[name="*value"] or attribute[name='*value']
+        # Convert leading wildcard to $= (ends with)
+        pattern_leading = r'\[(\w+)=(["\'])\*([^"\']*)\2\]'
+        selector = re.sub(pattern_leading, r'[\1$=\2\3\2]', selector)
+        
+        # Pattern: attribute[name="*value*"] or attribute[name='*value*']
+        # Convert middle wildcard to *= (contains)
+        pattern_middle = r'\[(\w+)=(["\'])\*([^"\']*)\*\2\]'
+        selector = re.sub(pattern_middle, r'[\1*=\2\3\2]', selector)
+        
+        return selector
     
     def check_checkbox(self, selector: str, checked: bool = True, **kwargs) -> None:
         """Playwright check/uncheck equivalent"""
@@ -940,7 +1103,11 @@ class BrowserService:
         if not self.playwright_page:
             raise RuntimeError("Playwright session not active")
             
-        timeout = timeout or self.config.get("browser.timeout", 30) * 1000
+        # Convert timeout to milliseconds if needed (assume seconds if < 1000)
+        if timeout is not None and timeout < 1000:
+            timeout = timeout * 1000
+        else:
+            timeout = timeout or self.config.get("browser.timeout", 30) * 1000
         
         try:
             if selector:

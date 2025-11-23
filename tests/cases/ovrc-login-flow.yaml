@@ -1,0 +1,45 @@
+name: OvrC Login Flow
+description: 'Optimized login using name-based selectors'
+tags:
+- browser
+- login
+- ovrc
+variables:
+  base_url: "https://app.ovrc.com"
+  email: "jpdsauto@gmail.com"
+  password: "Snapone704!"
+steps:
+- action: Open browser
+  url: "${base_url}/#/login"
+  
+# Fill email using label name
+- action: Fill form field
+  field: 'input[placeholder="Email"]'
+  value: "${email}"
+  description: Enter email by placeholder
+  
+# Fill password using label name  
+- action: Fill form field
+  field: 'input[placeholder="Password"]'
+  value: "${password}"
+  description: Enter password by placeholder
+  
+# Click login button by role+name (from Playwright codegen)
+- action: Click element
+  button: "Log In"
+  description: Click login button
+  
+# Wait for dashboard to load
+- action: Wait for element
+  selector: 'text="61"'
+  timeout: 10
+  
+# Click organization by text
+- action: Click element
+  text: "61"
+  description: Select organization
+  
+# Click devices tab by ID (more stable than the complex selector)
+- action: Click element
+  selector: '#devices__tab'
+  description: Go to devices tab

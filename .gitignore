@@ -1,3 +1,65 @@
-/.DS_Store
-/.venv
-/.vscode
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Test reports and artifacts
+reports/test_report_*.html
+reports/screenshots/*.png
+test_results.xml
+results.json
+results.csv
+comprehensive_results.json
+detailed_results.json
+detailed_results.csv
+
+# Generated features
+tests/features/*.feature
+
+# Playwright
+.playwright-mcp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Demo/experimental files
+demo_*.py
+test_*.py
+enhanced_cli.py
+frontend_demo.py
+convert_chrome_recording.py
+record_test.py
+*-flow.json
+
+# Temporary files
+*.tmp
+*.log
