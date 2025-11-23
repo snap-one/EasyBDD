@@ -1,0 +1,13 @@
+name: "Simple Web UI Test"
+description: "Basic test to verify web UI framework works"
+tags: ["smoke", "basic"]
+
+variables:
+  test_url: "https://httpbin.org"
+
+steps:
+  - action: open_browser
+    url: "${test_url}"
+    
+  - action: take_screenshot
+    name: "httpbin_homepage"

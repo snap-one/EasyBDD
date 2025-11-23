@@ -63,3 +63,5 @@ record_test.py
 # Temporary files
 *.tmp
 *.log
+Firmware/
+reports/

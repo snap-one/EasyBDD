@@ -1,0 +1,73 @@
+name: Form Validation with Soft Assertions
+description: Comprehensive form validation that checks all fields without stopping
+tags: ["soft-assertions", "form", "validation"]
+
+variables:
+  test_url: "https://the-internet.herokuapp.com/login"
+
+steps:
+  # Open login form
+  - action: Open browser
+    url: "${test_url}"
+  
+  # Verify page elements with soft assertions
+  - action: Verify text
+    text: "Login Page"
+    soft_assert: true
+  
+  - action: Verify element
+    selector: "#username"
+    soft_assert: true
+  
+  - action: Verify element
+    selector: "#password"
+    soft_assert: true
+  
+  - action: Verify element
+    selector: "button[type='submit']"
+    soft_assert: true
+  
+  # Verify form labels
+  - action: Verify text
+    text: "Username"
+    soft_assert: true
+  
+  - action: Verify text
+    text: "Password"
+    soft_assert: true
+  
+  # Check all structural validations passed
+  - action: Check soft assertions
+  
+  # Now test with invalid credentials
+  - action: Fill form field
+    selector: "#username"
+    value: "invalid_user"
+  
+  - action: Fill form field
+    selector: "#password"
+    value: "invalid_pass"
+  
+  - action: Click element
+    selector: "button[type='submit']"
+  
+  # Wait for error message
+  - action: Wait
+    seconds: 2
+  
+  # Verify error message appears
+  - action: Verify text
+    text: "Your username is invalid!"
+    soft_assert: true
+  
+  # Verify error styling
+  - action: Verify element
+    selector: "#flash.error"
+    soft_assert: true
+  
+  # Final soft assertion check
+  - action: Check soft assertions
+  
+  # Take screenshot
+  - action: Take screenshot
+    name: "form-validation-complete"

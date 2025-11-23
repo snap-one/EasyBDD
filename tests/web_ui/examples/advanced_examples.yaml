@@ -1,0 +1,394 @@
+name: "Advanced Web UI Testing Examples"
+description: "Advanced patterns and techniques for complex testing scenarios"
+web_app: "comprehensive_config"
+tags: ["advanced", "patterns", "complex"]
+
+variables:
+  # Advanced test configuration
+  performance_thresholds:
+    page_load: 3000
+    first_contentful_paint: 1800
+    largest_contentful_paint: 2500
+    
+  # Complex test data sets
+  bulk_test_data:
+    user_accounts:
+      - { username: "user1@test.com", role: "customer", orders: 5 }
+      - { username: "user2@test.com", role: "admin", permissions: "all" }
+      - { username: "user3@test.com", role: "editor", department: "content" }
+    
+  test_scenarios_matrix:
+    - { device: "mobile", browser: "chrome", network: "3g" }
+    - { device: "tablet", browser: "firefox", network: "wifi" }
+    - { device: "desktop", browser: "webkit", network: "fast" }
+
+test_scenarios:
+  # Advanced Pattern 1: State Management Testing
+  complex_state_management:
+    name: "Complex Application State Testing"
+    description: "Test complex state transitions and persistence"
+    steps:
+      # Initialize application state
+      - action: navigate_to
+        url: "${base_url}"
+        
+      - action: custom_action
+        name: "initialize_test_state"
+        parameters:
+          user_type: "premium"
+          cart_items: 3
+          preferences:
+            theme: "dark"
+            language: "en"
+            notifications: true
+            
+      # Test state persistence across navigation
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      - action: verify_state_preserved
+        state_keys: ["cart_count", "user_preferences", "session_data"]
+        
+      # Modify state and verify updates
+      - action: add_product_to_cart
+        product_id: "test-product-001"
+        
+      - action: update_user_preference
+        key: "theme"
+        value: "light"
+        
+      # Test state synchronization across tabs
+      - action: open_new_tab
+      - action: navigate_to
+        url: "${base_url}/cart"
+        
+      - action: verify_cart_synchronized
+        expected_count: 4
+        description: "Cart should sync across tabs"
+        
+      - action: switch_to_original_tab
+      
+      # Test state cleanup on logout
+      - action: logout_safely
+      
+      - action: verify_state_cleared
+        state_keys: ["cart_count", "user_data"]
+        preserved_keys: ["guest_preferences"]
+        
+  # Advanced Pattern 2: Real-time Updates Testing
+  real_time_updates:
+    name: "Real-time Data Updates"
+    description: "Test WebSocket connections and live data updates"
+    setup:
+      - action: enable_websocket_monitoring
+      - action: set_update_expectations
+        
+    steps:
+      - action: navigate_to
+        url: "${base_url}/dashboard"
+        
+      # Establish WebSocket connection
+      - action: wait_for_websocket_connection
+        timeout: 10000
+        description: "Wait for real-time connection"
+        
+      - action: verify_connection_status
+        element: ".connection-indicator.connected"
+        
+      # Trigger server-side update
+      - action: simulate_external_update
+        api_endpoint: "${api_url}/trigger-update"
+        update_type: "price_change"
+        target_product: "product-123"
+        new_value: "$199.99"
+        
+      # Verify real-time update received
+      - action: wait_for_element_text_change
+        element: ".product-123 .price"
+        expected_text: "$199.99"
+        timeout: 5000
+        description: "Price should update in real-time"
+        
+      # Test connection recovery
+      - action: simulate_connection_loss
+      
+      - action: verify_element_visible
+        element: ".connection-indicator.reconnecting"
+        
+      - action: wait_for_element
+        element: ".connection-indicator.connected"
+        timeout: 15000
+        description: "Connection should recover automatically"
+        
+      # Verify missed updates are synced
+      - action: verify_data_synchronized
+        description: "Missed updates should be caught up"
+        
+  # Advanced Pattern 3: Performance Regression Testing
+  performance_regression_detection:
+    name: "Performance Regression Detection"
+    description: "Automated performance regression testing"
+    matrix_iteration:
+      source: "test_scenarios_matrix"
+      steps:
+        # Configure test environment
+        - action: set_device_emulation
+          device: "${scenario_device}"
+          
+        - action: set_network_conditions
+          type: "${scenario_network}"
+          
+        - action: launch_browser
+          browser: "${scenario_browser}"
+          
+        # Baseline measurement
+        - action: navigate_to
+          url: "${base_url}"
+          clear_cache: true
+          
+        - action: measure_performance_metrics
+          store_as: "baseline_metrics"
+          
+        # Load test scenario
+        - action: simulate_user_journey
+          journey: "typical_shopping_session"
+          
+        - action: measure_performance_metrics
+          store_as: "loaded_metrics"
+          
+        # Compare against thresholds
+        - action: verify_performance_within_threshold
+          metric: "page_load_time"
+          baseline: "${baseline_metrics.page_load_time}"
+          current: "${loaded_metrics.page_load_time}"
+          threshold_percent: 20
+          description: "Page load time regression check"
+          
+        - action: verify_core_web_vitals
+          lcp_threshold: "${performance_thresholds.largest_contentful_paint}"
+          fcp_threshold: "${performance_thresholds.first_contentful_paint}"
+          
+        # Store results for trend analysis
+        - action: store_performance_data
+          metrics: "${loaded_metrics}"
+          environment: "${scenario_device}-${scenario_browser}-${scenario_network}"
+          timestamp: "${current_timestamp}"
+          
+  # Advanced Pattern 4: Accessibility Automation
+  comprehensive_accessibility_audit:
+    name: "Comprehensive Accessibility Testing"
+    description: "Automated accessibility testing with detailed reporting"
+    steps:
+      - action: navigate_to
+        url: "${base_url}"
+        
+      # Run automated accessibility audit
+      - action: run_axe_audit
+        level: "WCAG21AA"
+        rules:
+          include: ["color-contrast", "keyboard", "aria", "forms"]
+          exclude: ["landmark-no-duplicate-banner"]  # Known issue
+          
+      - action: capture_accessibility_violations
+        store_as: "axe_violations"
+        
+      # Manual accessibility checks
+      - action: test_keyboard_navigation
+        start_element: "body"
+        expected_tab_order:
+          - "header nav"
+          - "main content"
+          - "sidebar"
+          - "footer"
+          
+      - action: test_screen_reader_announcements
+        interactions:
+          - { action: "click", element: ".menu-toggle", expected: "Menu opened" }
+          - { action: "fill", element: "#search", expected: "Search field" }
+          
+      - action: test_color_contrast_compliance
+        minimum_ratio: 4.5
+        large_text_ratio: 3.0
+        
+      # Focus management testing
+      - action: test_focus_management
+        scenarios:
+          modal_open:
+            trigger: ".open-modal"
+            expected_focus: ".modal .first-focusable"
+          modal_close:
+            trigger: ".modal .close"
+            expected_focus: ".open-modal"
+            
+      # Generate accessibility report
+      - action: generate_accessibility_report
+        violations: "${axe_violations}"
+        manual_test_results: "${manual_a11y_results}"
+        output_file: "accessibility_report_${timestamp}.html"
+        
+  # Advanced Pattern 5: API Integration Testing
+  api_frontend_integration:
+    name: "API-Frontend Integration Testing"
+    description: "Test frontend-backend integration and error handling"
+    setup:
+      - action: mock_api_server
+        base_url: "${api_url}"
+        scenarios: "tests/data/api_scenarios.json"
+        
+    steps:
+      - action: navigate_to
+        url: "${base_url}/dashboard"
+        
+      # Test successful API integration
+      - action: configure_api_mock
+        endpoint: "/api/user-data"
+        response: 
+          status: 200
+          body: { "user": "test", "data": [1, 2, 3] }
+          
+      - action: trigger_api_call
+        element: ".refresh-data"
+        
+      - action: wait_for_api_response
+        endpoint: "/api/user-data"
+        timeout: 5000
+        
+      - action: verify_data_displayed
+        element: ".user-data"
+        contains: "test"
+        
+      # Test API error handling
+      - action: configure_api_mock
+        endpoint: "/api/user-data"
+        response:
+          status: 500
+          body: { "error": "Internal server error" }
+          
+      - action: trigger_api_call
+        element: ".refresh-data"
+        
+      - action: verify_error_handling
+        error_element: ".error-message"
+        expected_text: "Unable to load data"
+        
+      # Test network timeout
+      - action: configure_api_mock
+        endpoint: "/api/user-data"
+        response:
+          delay: 30000  # Simulate timeout
+          
+      - action: trigger_api_call
+        element: ".refresh-data"
+        
+      - action: verify_timeout_handling
+        timeout_element: ".loading-timeout"
+        
+  # Advanced Pattern 6: Visual Regression Testing
+  visual_regression_testing:
+    name: "Visual Regression Detection"
+    description: "Automated visual comparison testing"
+    steps:
+      - action: navigate_to
+        url: "${base_url}"
+        
+      # Capture baseline screenshots
+      - action: take_full_page_screenshot
+        filename: "baseline_homepage.png"
+        
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      - action: take_full_page_screenshot
+        filename: "baseline_products.png"
+        
+      # Test responsive design variations
+      - action: set_viewport_size
+        width: 375
+        height: 667
+        
+      - action: navigate_to
+        url: "${base_url}"
+        
+      - action: take_full_page_screenshot
+        filename: "mobile_homepage.png"
+        
+      # Compare against reference images
+      - action: compare_visual_regression
+        current: "baseline_homepage.png"
+        reference: "reference/homepage_expected.png"
+        threshold: 0.1  # 10% difference threshold
+        output: "homepage_diff.png"
+        
+      - action: compare_visual_regression
+        current: "mobile_homepage.png"
+        reference: "reference/mobile_homepage_expected.png"
+        threshold: 0.05
+        output: "mobile_diff.png"
+        
+      # Generate visual regression report
+      - action: generate_visual_report
+        comparisons:
+          - { name: "Homepage", diff: "homepage_diff.png" }
+          - { name: "Mobile Homepage", diff: "mobile_diff.png" }
+        output: "visual_regression_report.html"
+        
+  # Advanced Pattern 7: Load Testing Integration
+  frontend_load_testing:
+    name: "Frontend Load Testing"
+    description: "Test frontend behavior under load conditions"
+    setup:
+      - action: configure_load_simulation
+        concurrent_users: 50
+        duration: 300  # 5 minutes
+        
+    steps:
+      - action: start_load_simulation
+        target: "${base_url}"
+        
+      # Monitor frontend during load
+      - action: navigate_to
+        url: "${base_url}"
+        
+      - action: monitor_performance_during_load
+        metrics:
+          - "response_time"
+          - "memory_usage"
+          - "cpu_usage"
+          - "network_requests"
+        interval: 10000  # 10 seconds
+        
+      # Test critical user flows under load
+      - action: perform_user_journey
+        journey: "login_and_purchase"
+        expected_completion_time: 30000
+        
+      - action: verify_functionality_under_load
+        critical_features:
+          - "user_authentication"
+          - "product_search"
+          - "add_to_cart"
+          - "checkout_process"
+          
+      - action: stop_load_simulation
+      
+      # Analyze results
+      - action: analyze_load_test_results
+        performance_degradation_threshold: 50  # 50% slower is acceptable
+        error_rate_threshold: 5  # 5% error rate max
+        
+      - action: generate_load_test_report
+        output: "frontend_load_test_report.html"
+
+# Advanced cleanup with state verification
+cleanup:
+  - action: verify_no_memory_leaks
+    description: "Check for JavaScript memory leaks"
+    
+  - action: clear_all_test_data
+    description: "Clean up test data and state"
+    
+  - action: restore_original_state
+    description: "Reset application to original state"
+    
+  - action: close_all_browser_contexts
+    description: "Close all browser instances and contexts"

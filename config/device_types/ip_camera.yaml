@@ -1,0 +1,106 @@
+# IP Camera Device Template
+device_type: "ip_camera"
+description: "Template for IP cameras with ONVIF/RTSP support"
+
+# Common capabilities for IP cameras
+capabilities:
+  - web_ui
+  - api_rest
+  - rtsp_stream
+  - onvif
+  - ptz_control
+  - motion_detection
+
+# Default configuration structure
+default_config:
+  network:
+    base_url: "http://${device_ip}"
+    rtsp_port: 554
+    onvif_port: 80
+    web_port: 80
+    
+  authentication:
+    type: "digest_auth"  # Most IP cameras use digest
+    username: "admin"
+    password: "admin"
+    auth_endpoint: "/login"
+    success_codes: [200, 204]
+    
+  api:
+    endpoints:
+      info: "/api/v1/system/info"
+      status: "/api/v1/system/status"
+      config: "/api/v1/system/config"
+      reboot: "/api/v1/system/reboot"
+      streams: "/api/v1/media/streams"
+      ptz: "/api/v1/ptz/control"
+    content_type: "application/json"
+    
+  web_ui:
+    login_url: "/login.html"
+    main_page: "/index.html"
+    config_page: "/config.html"
+    selectors:
+      username_field: "input[name='username']"
+      password_field: "input[name='password']"
+      login_button: "input[type='submit']"
+      
+  protocols:
+    rtsp:
+      path: "/stream1"
+      auth_required: true
+    onvif:
+      wsdl_path: "/onvif/device_service"
+      
+# Test templates for this device type
+test_templates:
+  basic_connectivity:
+    - action: "ping_device"
+    - action: "api_get"
+      url: "${api_endpoints_info}"
+    - action: "validate_status"
+      status: 200
+      
+  authentication:
+    - action: "web_login"
+      username: "${auth_username}"
+      password: "${auth_password}"
+    - action: "api_authenticate"
+    - action: "validate_token_received"
+      
+  streaming:
+    - action: "rtsp_connect"
+      url: "rtsp://${device_ip}:${rtsp_port}${rtsp_path}"
+    - action: "validate_stream_active"
+    - action: "capture_frame"
+      
+  ptz_control:
+    - action: "api_post"
+      url: "${api_endpoints_ptz}"
+      data:
+        command: "move"
+        direction: "up"
+        speed: 50
+    - action: "validate_status"
+      status: 200
+
+# Common validation patterns
+validation_patterns:
+  system_info:
+    required_fields: ["model", "firmware_version", "serial_number"]
+  stream_config:
+    required_fields: ["resolution", "framerate", "codec"]
+  ptz_status:
+    required_fields: ["pan", "tilt", "zoom"]
+
+# Environment-specific overrides
+environments:
+  development:
+    timeouts:
+      api: 10
+      stream: 30
+  production:
+    timeouts:
+      api: 30
+      stream: 60
+    retry_attempts: 3

@@ -1,0 +1,216 @@
+name: "Web Accessibility Test Suite"
+description: "WCAG 2.1 compliance and accessibility testing"
+web_app: "web_app_config"
+tags: ["accessibility", "wcag", "a11y", "compliance"]
+
+variables:
+  wcag_level: "AA"  # A, AA, or AAA
+  test_pages: ["/", "/login", "/products", "/cart", "/checkout"]
+
+test_scenarios:
+  # Keyboard Navigation Testing
+  keyboard_navigation:
+    name: "Keyboard Navigation"
+    description: "Test full keyboard accessibility"
+    steps:
+      - action: navigate_to
+        url: "${base_url}/login"
+        
+      # Test tab order
+      - action: press_key
+        key: "Tab"
+      - action: verify_element_focused
+        element: "input[name='username']"
+        
+      - action: press_key
+        key: "Tab"
+      - action: verify_element_focused
+        element: "input[name='password']"
+        
+      - action: press_key
+        key: "Tab"
+      - action: verify_element_focused
+        element: "button[type='submit']"
+        
+      # Test form submission with Enter
+      - action: fill_field
+        element: "input[name='username']"
+        value: "test@example.com"
+      - action: fill_field
+        element: "input[name='password']"
+        value: "password"
+      - action: press_key
+        key: "Enter"
+      - action: wait_for_navigation
+      
+      # Test skip links
+      - action: navigate_to
+        url: "${base_url}"
+      - action: press_key
+        key: "Tab"
+      - action: verify_element_focused
+        element: "a[href='#main'], .skip-link"
+        description: "Skip link should be first focusable element"
+        
+  # Screen Reader Compatibility
+  screen_reader_support:
+    name: "Screen Reader Support"
+    description: "Test screen reader compatibility"
+    steps:
+      - action: navigate_to
+        url: "${base_url}"
+        
+      # Test page title
+      - action: verify_page_title
+        expected: "Home - MyWebApp"
+        description: "Page title should be descriptive"
+        
+      # Test heading structure
+      - action: verify_heading_hierarchy
+        description: "Headings should follow proper hierarchy (h1 > h2 > h3)"
+        
+      # Test image alt text
+      - action: verify_all_images_have_alt
+        description: "All images should have alt text or role='presentation'"
+        
+      # Test form labels
+      - action: navigate_to
+        url: "${base_url}/login"
+      - action: verify_form_labels
+        description: "All form inputs should have associated labels"
+        
+      # Test ARIA landmarks
+      - action: verify_landmarks
+        expected: ["banner", "main", "navigation", "contentinfo"]
+        description: "Page should have proper ARIA landmarks"
+        
+      # Test live regions
+      - action: fill_field
+        element: "input[name='username']"
+        value: "invalid-email"
+      - action: click_element
+        element: "button[type='submit']"
+      - action: verify_aria_live_region
+        element: ".error-message"
+        description: "Error messages should be announced to screen readers"
+        
+  # Color Contrast Testing
+  color_contrast:
+    name: "Color Contrast Compliance"
+    description: "Test WCAG color contrast requirements"
+    page_iteration:
+      source: "test_pages"
+      steps:
+        - action: navigate_to
+          url: "${base_url}${page_url}"
+          
+        - action: audit_color_contrast
+          level: "${wcag_level}"
+          description: "Check contrast ratios for ${page_url}"
+          
+        - action: verify_contrast_ratio
+          element: "body"
+          min_ratio: 4.5  # WCAG AA standard
+          description: "Body text should meet contrast requirements"
+          
+        - action: verify_contrast_ratio
+          element: "h1, h2, h3"
+          min_ratio: 3.0  # Large text requirement
+          description: "Headings should meet contrast requirements"
+          
+  # Focus Management
+  focus_management:
+    name: "Focus Management"
+    description: "Test focus handling in dynamic content"
+    steps:
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      # Test modal focus trap
+      - action: click_element
+        element: ".product-card:first-child .details-btn"
+      - action: verify_modal_open
+      - action: verify_focus_trapped
+        container: ".modal"
+        description: "Focus should be trapped within modal"
+        
+      # Test Escape key to close
+      - action: press_key
+        key: "Escape"
+      - action: verify_modal_closed
+      - action: verify_focus_restored
+        element: ".product-card:first-child .details-btn"
+        description: "Focus should return to trigger element"
+        
+      # Test dropdown focus
+      - action: click_element
+        element: ".user-menu-trigger"
+      - action: press_key
+        key: "ArrowDown"
+      - action: verify_element_focused
+        element: ".user-menu a:first-child"
+        
+  # ARIA Attributes Testing
+  aria_attributes:
+    name: "ARIA Attributes"
+    description: "Test proper ARIA attribute usage"
+    steps:
+      - action: navigate_to
+        url: "${base_url}/cart"
+        
+      # Test button states
+      - action: verify_aria_attribute
+        element: ".remove-item"
+        attribute: "aria-label"
+        expected: "Remove item from cart"
+        
+      # Test expandable sections
+      - action: click_element
+        element: ".collapsible-trigger"
+      - action: verify_aria_attribute
+        element: ".collapsible-trigger"
+        attribute: "aria-expanded"
+        expected: "true"
+        
+      # Test loading states
+      - action: click_element
+        element: ".load-more-btn"
+      - action: verify_aria_attribute
+        element: ".load-more-btn"
+        attribute: "aria-busy"
+        expected: "true"
+        description: "Loading button should indicate busy state"
+        
+  # Form Accessibility
+  form_accessibility:
+    name: "Form Accessibility"
+    description: "Test accessible form design"
+    steps:
+      - action: navigate_to
+        url: "${base_url}/checkout"
+        
+      # Test required field indicators
+      - action: verify_required_fields_marked
+        description: "Required fields should be clearly marked"
+        
+      # Test error handling
+      - action: click_element
+        element: ".place-order"
+      - action: verify_error_focus
+        description: "Focus should move to first error field"
+        
+      # Test fieldset grouping
+      - action: verify_fieldset_usage
+        description: "Related form controls should be grouped in fieldsets"
+        
+      # Test instructions and help text
+      - action: verify_form_instructions
+        description: "Complex forms should have clear instructions"
+
+reporting:
+  wcag_compliance_report: true
+  accessibility_score: true
+  remediation_suggestions: true
+  
+cleanup:
+  - action: close_browser

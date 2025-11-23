@@ -1,0 +1,109 @@
+name: Recorded Test
+description: Test recorded using Easy BDD Interactive Recorder
+
+variables:
+  device_ip: "192.168.100.16"
+  device_url: "http://${device_ip}"
+  mac: "D4:6A:91:E5:B7:3B"
+  bucket_name: "jpdsauto-senao"
+  folder_prefix: "Access-Points/AN-810-AP-I-AC"
+  
+
+setup:
+  - action: "AWS get latest firmware"
+    bucket_name: "${bucket_name}"
+    folder_prefix: "${folder_prefix}"
+    file_extension: ".bin"
+    download_dir: "Firmware"
+    store_filename_as: "firmware_s3_key"
+    store_version_as: "firmware_version"
+  - action: "Assert"
+    expression: "firmware_s3_key_basename is not None"
+    message: "Should download firmware file"
+    
+    # Get list of all firmware files from S3
+  - action: "AWS list firmware files"
+    bucket_name: "${bucket_name}"
+    folder_prefix: "${folder_prefix}"
+    file_extension: ".bin"
+    download_dir: "Firmware"
+    store_as: "firmware_list"
+  
+  # Get latest firmware
+  - action: "AWS get latest firmware"
+    bucket_name: "${bucket_name}"
+    folder_prefix: "${folder_prefix}"
+    file_extension: ".bin"
+    download_dir: "Firmware"
+    store_filename_as: "upgrade_firmware"
+    store_version_as: "upgrade_version"
+  
+  # Get second-to-last firmware
+  - action: "AWS get latest firmware"
+    bucket_name: "${bucket_name}"
+    folder_prefix: "${folder_prefix}"
+    file_extension: ".bin"
+    download_dir: "Firmware"
+    get_second_to_last: true
+    store_filename_as: "downgrade_firmware"
+    store_version_as: "downgrade_version"
+
+steps:
+- action: Open browser
+  url: http://${device_ip}/cgi-bin/luci
+- action: Click element
+  selector: '#user'
+  description: 'Click: #user'
+- action: Fill form field
+  field: '#user'
+  value: araknis
+  description: 'Fill: #user'
+- action: Click element
+  selector: '#pass'
+  description: 'Click: #pass'
+- action: Fill form field
+  field: '#pass'
+  value: SnapAV704
+  description: 'Fill: #pass'
+- action: Click element
+  role: button
+  name: Log In
+  description: 'Click button: Log In'
+- action: Click element
+  role: link
+  name: File Management
+  description: 'Click link: File Management'
+
+# Wait for iframe to load
+- action: Wait
+  timeout: 2000
+  description: 'Wait for iframe to load'
+
+# Upload firmware file to iframe (now supports iframe >> selector syntax)
+- action: Upload file
+  selector: 'iframe >> #image'
+  file_path: 'Firmware/${firmware_s3_key_basename}'
+  description: 'Upload firmware file to iframe'
+
+- action: Wait
+  timeout: 2000
+  description: 'Wait for file to be selected'
+
+# Click Upload button in iframe
+- action: Click element
+  selector: 'iframe >> #UploadButton'
+  description: 'Click Upload button in iframe'
+
+- action: Wait
+  timeout: 10000
+  description: 'Wait for upload to complete'
+
+# Click Upgrade button in iframe
+- action: Click element
+  selector: 'iframe >> input[name="Button"]'
+  description: 'Click Upgrade button in iframe'
+
+
+- action: Wait
+  timeout: 10000
+  description: 'Wait for firmware upgrade to start'

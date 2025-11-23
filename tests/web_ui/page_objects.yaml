@@ -1,0 +1,241 @@
+# Page Object Definitions
+# Define reusable page elements and actions
+
+pages:
+  # Login Page
+  login_page:
+    url: "${base_url}/login"
+    elements:
+      username_field: "input[name='username']"
+      password_field: "input[name='password']"
+      login_button: "button[type='submit']"
+      forgot_password_link: "a[href='/forgot-password']"
+      error_message: ".error-message"
+      remember_me_checkbox: "input[name='remember']"
+    
+    actions:
+      login:
+        description: "Login with username and password"
+        steps:
+          - action: "fill_field"
+            element: "username_field"
+            value: "${username}"
+          - action: "fill_field"
+            element: "password_field"
+            value: "${password}"
+          - action: "click_element"
+            element: "login_button"
+          - action: "wait_for_navigation"
+            
+      login_with_remember:
+        description: "Login and check remember me"
+        steps:
+          - action: "fill_field"
+            element: "username_field"
+            value: "${username}"
+          - action: "fill_field"
+            element: "password_field"
+            value: "${password}"
+          - action: "click_element"
+            element: "remember_me_checkbox"
+          - action: "click_element"
+            element: "login_button"
+
+  # Dashboard Page  
+  dashboard_page:
+    url: "${base_url}/dashboard"
+    elements:
+      welcome_message: "h1.welcome"
+      user_avatar: ".user-avatar"
+      navigation_menu: "nav.main-nav"
+      logout_button: "button.logout"
+      stats_cards: ".stat-card"
+      recent_activity: ".recent-activity"
+      
+    actions:
+      verify_logged_in:
+        description: "Verify user is logged in"
+        steps:
+          - action: "wait_for_element"
+            element: "welcome_message"
+          - action: "verify_element_visible"
+            element: "user_avatar"
+            
+      logout:
+        description: "Logout user"
+        steps:
+          - action: "click_element"
+            element: "logout_button"
+          - action: "wait_for_navigation"
+
+  # Product Catalog Page
+  products_page:
+    url: "${base_url}/products"
+    elements:
+      search_box: "input[name='search']"
+      search_button: "button.search-btn"
+      product_grid: ".product-grid"
+      product_card: ".product-card"
+      product_title: ".product-title"
+      product_price: ".product-price"
+      add_to_cart_button: ".add-to-cart"
+      filter_sidebar: ".filter-sidebar"
+      price_filter: "input[name='price-range']"
+      category_filter: "select[name='category']"
+      sort_dropdown: "select[name='sort']"
+      
+    actions:
+      search_products:
+        description: "Search for products"
+        steps:
+          - action: "fill_field"
+            element: "search_box"
+            value: "${search_term}"
+          - action: "click_element"
+            element: "search_button"
+          - action: "wait_for_element"
+            element: "product_grid"
+            
+      add_product_to_cart:
+        description: "Add specific product to cart"
+        steps:
+          - action: "click_element"
+            element: "product_card:nth-child(${product_index})"
+          - action: "click_element"
+            element: "add_to_cart_button"
+          - action: "wait_for_notification"
+            message: "Added to cart"
+            
+      filter_by_category:
+        description: "Filter products by category"
+        steps:
+          - action: "select_option"
+            element: "category_filter"
+            value: "${category}"
+          - action: "wait_for_element_update"
+            element: "product_grid"
+
+  # Shopping Cart Page
+  cart_page:
+    url: "${base_url}/cart"
+    elements:
+      cart_items: ".cart-item"
+      item_title: ".item-title"
+      item_price: ".item-price"
+      item_quantity: "input[name='quantity']"
+      remove_button: ".remove-item"
+      subtotal: ".subtotal"
+      tax: ".tax-amount"
+      total: ".total-amount"
+      checkout_button: ".checkout-btn"
+      continue_shopping: ".continue-shopping"
+      empty_cart_message: ".empty-cart"
+      
+    actions:
+      update_quantity:
+        description: "Update item quantity"
+        steps:
+          - action: "clear_field"
+            element: "item_quantity:nth-of-type(${item_index})"
+          - action: "fill_field"
+            element: "item_quantity:nth-of-type(${item_index})"
+            value: "${new_quantity}"
+          - action: "wait_for_element_update"
+            element: "subtotal"
+            
+      proceed_to_checkout:
+        description: "Go to checkout page"
+        steps:
+          - action: "click_element"
+            element: "checkout_button"
+          - action: "wait_for_navigation"
+
+  # Checkout Page
+  checkout_page:
+    url: "${base_url}/checkout"
+    elements:
+      billing_form: "form.billing-info"
+      first_name: "input[name='first_name']"
+      last_name: "input[name='last_name']"
+      email: "input[name='email']"
+      address: "input[name='address']"
+      city: "input[name='city']"
+      state: "select[name='state']"
+      zip_code: "input[name='zip']"
+      credit_card: "input[name='card_number']"
+      expiry_date: "input[name='expiry']"
+      cvv: "input[name='cvv']"
+      place_order_button: ".place-order"
+      order_summary: ".order-summary"
+      
+    actions:
+      fill_billing_info:
+        description: "Fill out billing information"
+        steps:
+          - action: "fill_field"
+            element: "first_name"
+            value: "${billing_first_name}"
+          - action: "fill_field"
+            element: "last_name"
+            value: "${billing_last_name}"
+          - action: "fill_field"
+            element: "email"
+            value: "${billing_email}"
+          - action: "fill_field"
+            element: "address"
+            value: "${billing_address}"
+          - action: "fill_field"
+            element: "city"
+            value: "${billing_city}"
+          - action: "select_option"
+            element: "state"
+            value: "${billing_state}"
+          - action: "fill_field"
+            element: "zip_code"
+            value: "${billing_zip}"
+            
+      fill_payment_info:
+        description: "Fill payment information"
+        steps:
+          - action: "fill_field"
+            element: "credit_card"
+            value: "${card_number}"
+          - action: "fill_field"
+            element: "expiry_date"
+            value: "${card_expiry}"
+          - action: "fill_field"
+            element: "cvv"
+            value: "${card_cvv}"
+            
+      complete_order:
+        description: "Complete the order"
+        steps:
+          - action: "click_element"
+            element: "place_order_button"
+          - action: "wait_for_navigation"
+          - action: "wait_for_element"
+            element: ".order-confirmation"
+
+# Common actions that can be reused across pages
+common_actions:
+  wait_for_page_load:
+    description: "Wait for page to fully load"
+    steps:
+      - action: "wait_for_element"
+        element: "body.loaded"
+      - action: "wait"
+        seconds: 1
+        
+  take_screenshot:
+    description: "Take a screenshot for documentation"
+    steps:
+      - action: "screenshot"
+        filename: "${test_name}_${timestamp}"
+        
+  verify_no_errors:
+    description: "Verify no error messages are displayed"
+    steps:
+      - action: "verify_element_not_visible"
+        element: ".error-message"
+      - action: "verify_element_not_visible"
+        element: ".alert-error"

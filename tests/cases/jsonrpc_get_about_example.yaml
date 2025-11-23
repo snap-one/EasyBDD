@@ -1,0 +1,69 @@
+name: "Get Device Information - dxGetAbout"
+description: "Retrieve device firmware, model, serial number, and network information"
+tags: ["jsonrpc", "device", "info"]
+
+variables:
+  # WebSocket connection details
+  server_url: "wss://firmware.testing.ovrc.com:10444"
+  device_id: "14:3F:C3:91:09:F7"
+  
+  # Datalake tracking (leave these out to disable for this test)
+  # product: "Demo"
+  # product_category: "Device Info"
+  # time_savings: 5.0
+
+setup:
+  # Connect to WebSocket server
+  - action: "JSONRPC connect"
+    server_url: "${server_url}"
+    device_id: "${device_id}"
+    protocol: "firmware-protocol"
+  
+  # Start monitoring device status
+  - action: "JSONRPC start device updates"
+
+steps:
+  # Send dxGetAbout request (version 0)
+  - action: "JSONRPC get about"
+    store_as: "dxGetAbout"
+  
+  # Assert firmware version starts with specific value
+  - action: "Assert"
+    expression: "'1.1.05' in dxGetAbout['firmware']"
+    message: "Firmware should be version 2.0.x"
+  
+  # Verify response received
+  - action: "Assert"
+    expression: "dxGetAbout is not None"
+    message: "Should receive device info response"
+ 
+  # Verify firmware field exists
+  - action: "Assert"
+    expression: "'firmware' in dxGetAbout"
+    message: "Response should include firmware version"
+  
+  # Verify platform field exists
+  - action: "Assert"
+    expression: "'platform' in dxGetAbout"
+    message: "Response should include platform"
+  
+  # Verify model field exists
+  - action: "Assert"
+    expression: "'model' in dxGetAbout"
+    message: "Response should include model"
+
+  # Verify MAC address field exists
+  - action: "Assert"
+    expression: "'macAddress' in dxGetAbout"
+    message: "Response should include MAC address"
+  
+  # Verify service tag (if present)
+  - action: "Assert"
+    expression: "'serviceTag' in dxGetAbout"
+    message: "Response should include service tag"
+  
+  # Verify LAN address (if present)
+  - action: "Assert"
+    expression: "'lanAddress' in dxGetAbout"
+    message: "Response should include LAN address"
+

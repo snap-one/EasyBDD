@@ -1,0 +1,86 @@
+# Shared API Endpoint Steps
+# These can be reused across multiple tests
+# Note: These steps inherit variables from the calling test (server_url, device_id, etc.)
+
+shared_steps:
+  # Connect to JSON-RPC server
+  - name: "Connect to Device"
+    description: "Establish WebSocket connection to device"
+    parameters: []
+    steps:
+      - action: "JSONRPC connect"
+        server_url: "${server_url}"
+        device_id: "${device_id}"
+        protocol: "firmware-protocol"
+      - action: "JSONRPC start device updates"
+  
+  # Disconnect from JSON-RPC server
+  - name: "Disconnect from Device"
+    description: "Close WebSocket connection"
+    parameters: []
+    steps:
+      - action: "JSONRPC stop device updates"
+      - action: "JSONRPC disconnect"
+  
+  # Get device information via JSON-RPC (simple version)
+  - name: "dxGetAbout"
+    description: "Call dxGetAbout API endpoint"
+    parameters: ["store_as"]
+    steps:
+      - action: "JSONRPC get about"
+        store_as: "${store_as}"
+  
+  # Alternative: Get device info with custom variable name
+  - name: "Get Device Info"
+    description: "Retrieve device information using dxGetAbout"
+    parameters: ["store_as"]
+    steps:
+      - action: "JSONRPC get about"
+        store_as: "${store_as}"
+  
+  # Check device network settings
+  - name: "Get Network Settings"
+    description: "Retrieve device network configuration"
+    parameters: ["store_as"]
+    steps:
+      - action: "JSONRPC get network settings"
+        store_as: "${store_as}"
+  
+  # Set device time configuration
+  - name: "Configure Device Time"
+    description: "Update device time settings"
+    parameters: ["ntp_enabled", "ntp_server", "timezone"]
+    steps:
+      - action: "JSONRPC set time settings"
+        ntp_enabled: "${ntp_enabled}"
+        ntp_server: "${ntp_server}"
+        timezone: "${timezone}"
+  
+  # Verify device is online
+  - name: "Verify Device Online"
+    description: "Check if device is connected"
+    parameters: []
+    steps:
+      - action: "JSONRPC get about"
+        store_as: "device_status"
+      - action: "Assert"
+        expression: "device_status is not None"
+        message: "Device should be reachable"
+      - action: "Assert"
+        expression: "'deviceId' in device_status"
+        message: "Device should have ID"
+  
+  # Complete device health check
+  - name: "Device Health Check"
+    description: "Full device diagnostics check"
+    parameters: ["device_name"]
+    steps:
+      - action: "JSONRPC get about"
+        store_as: "health_info"
+      - action: "JSONRPC get network settings"
+        store_as: "network_info"
+      - action: "JSONRPC get time settings"
+        store_as: "time_info"
+      - action: "Assert"
+        expression: "health_info is not None"
+        message: "${device_name} should respond to health check"

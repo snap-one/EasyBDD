@@ -1,0 +1,233 @@
+name: "Responsive Design Test Suite"
+description: "Test responsive design across different screen sizes and devices"
+web_app: "web_app_config"
+tags: ["responsive", "mobile", "tablet", "design"]
+
+variables:
+  test_pages: ["/", "/products", "/login", "/dashboard"]
+  
+  # Device configurations
+  devices:
+    mobile_portrait:
+      width: 375
+      height: 667
+      user_agent: "mobile"
+    mobile_landscape:
+      width: 667
+      height: 375
+      user_agent: "mobile"
+    tablet_portrait:
+      width: 768
+      height: 1024
+      user_agent: "tablet"
+    tablet_landscape:
+      width: 1024
+      height: 768
+      user_agent: "tablet"
+    desktop:
+      width: 1920
+      height: 1080
+      user_agent: "desktop"
+
+test_scenarios:
+  # Cross-device Layout Testing
+  cross_device_layout:
+    name: "Cross-Device Layout Validation"
+    description: "Test layout consistency across different devices"
+    device_iteration:
+      source: "devices"
+      steps:
+        - action: set_viewport_size
+          width: "${device_width}"
+          height: "${device_height}"
+          
+        - action: set_user_agent
+          agent: "${device_user_agent}"
+          
+        # Test each page on current device
+        - action: page_iteration
+          source: "test_pages"
+          steps:
+            - action: navigate_to
+              url: "${base_url}${page_url}"
+              
+            - action: wait_for_page_load
+            
+            # Take screenshot for visual comparison
+            - action: screenshot
+              filename: "${device_name}_${page_name}_layout"
+              
+            # Verify no horizontal scrollbars (except desktop)
+            - action: conditional_step
+              condition: "device_name != 'desktop'"
+              steps:
+                - action: verify_no_horizontal_scroll
+                  description: "No horizontal scrolling on ${device_name}"
+                  
+            # Verify navigation is accessible
+            - action: verify_element_visible
+              element: "nav, .navigation, .menu"
+              description: "Navigation should be visible"
+              
+            # Verify main content is visible
+            - action: verify_element_visible
+              element: "main, .main-content, .content"
+              description: "Main content should be visible"
+              
+  # Mobile-Specific Functionality
+  mobile_functionality:
+    name: "Mobile-Specific Features"
+    description: "Test mobile-specific UI elements and interactions"
+    setup:
+      - action: set_viewport_size
+        width: 375
+        height: 667
+      - action: set_user_agent
+        agent: "mobile"
+    steps:
+      - action: navigate_to
+        url: "${base_url}"
+        
+      # Test hamburger menu (if present)
+      - action: conditional_element_interaction
+        element: ".hamburger, .mobile-menu-toggle"
+        if_visible:
+          - action: click_element
+            element: ".hamburger, .mobile-menu-toggle"
+          - action: verify_element_visible
+            element: ".mobile-menu, .nav-menu.open"
+          - action: screenshot
+            filename: "mobile_menu_open"
+            
+      # Test touch interactions
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      # Test swipe gestures (if applicable)
+      - action: conditional_swipe_test
+        element: ".product-carousel, .image-gallery"
+        direction: "left"
+        
+      # Test form inputs on mobile
+      - action: navigate_to
+        url: "${base_url}/login"
+        
+      - action: tap_element
+        element: "input[name='username']"
+        
+      - action: verify_virtual_keyboard_space
+        description: "Ensure form is still visible with virtual keyboard"
+        
+  # Tablet Orientation Testing
+  tablet_orientation:
+    name: "Tablet Orientation Changes"
+    description: "Test layout adaptation to orientation changes"
+    steps:
+      # Start in portrait
+      - action: set_viewport_size
+        width: 768
+        height: 1024
+        
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      - action: screenshot
+        filename: "tablet_portrait_products"
+        
+      # Verify grid layout in portrait
+      - action: verify_element_grid_columns
+        element: ".product-grid"
+        expected_columns: 2
+        description: "Should show 2 columns in portrait"
+        
+      # Change to landscape
+      - action: set_viewport_size
+        width: 1024
+        height: 768
+        
+      - action: wait
+        seconds: 1
+        
+      - action: screenshot
+        filename: "tablet_landscape_products"
+        
+      # Verify grid layout in landscape
+      - action: verify_element_grid_columns
+        element: ".product-grid"
+        expected_columns: 3
+        description: "Should show 3 columns in landscape"
+        
+  # Touch and Gesture Testing
+  touch_gestures:
+    name: "Touch and Gesture Interactions"
+    description: "Test touch-specific interactions"
+    setup:
+      - action: set_viewport_size
+        width: 375
+        height: 667
+      - action: enable_touch_simulation
+    steps:
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      # Test tap interactions
+      - action: tap_element
+        element: ".product-card:first-child"
+        
+      - action: verify_element_state_change
+        element: ".product-card:first-child"
+        expected_state: "selected"
+        
+      # Test long press (if applicable)
+      - action: long_press_element
+        element: ".product-card:first-child"
+        duration: 1000
+        
+      # Test pinch zoom (if applicable)
+      - action: conditional_element_interaction
+        element: ".zoomable-image"
+        if_visible:
+          - action: pinch_zoom
+            element: ".zoomable-image"
+            scale: 2.0
+          - action: verify_element_scale
+            element: ".zoomable-image"
+            expected_scale: 2.0
+            
+  # Performance on Different Devices
+  device_performance:
+    name: "Performance Across Devices"
+    description: "Test loading performance on different devices"
+    device_iteration:
+      source: "devices"
+      steps:
+        - action: set_viewport_size
+          width: "${device_width}"
+          height: "${device_height}"
+          
+        - action: measure_page_load_time
+          url: "${base_url}"
+          
+        - action: verify_load_time_under
+          max_time: 5000
+          description: "Page should load under 5 seconds on ${device_name}"
+          
+        - action: measure_largest_contentful_paint
+        - action: verify_lcp_under
+          max_time: 2500
+          description: "LCP should be under 2.5s on ${device_name}"
+          
+        - action: measure_cumulative_layout_shift
+        - action: verify_cls_under
+          max_shift: 0.1
+          description: "CLS should be under 0.1 on ${device_name}"
+
+reporting:
+  generate_device_comparison: true
+  include_performance_metrics: true
+  visual_regression_testing: true
+  accessibility_audit: true
+
+cleanup:
+  - action: reset_viewport
+  - action: close_browser

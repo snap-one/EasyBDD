@@ -17,7 +17,8 @@ class HTMLReporter:
     
     def generate_report(self, test_details: List[Dict[str, Any]], 
                        total_tests: int, passed: int, failed: int, 
-                       execution_time: float) -> Path:
+                       execution_time: float,
+                       test_file_name: str = "test") -> Path:
         """Generate HTML report from test results"""
         
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -395,6 +396,26 @@ class HTMLReporter:
                 </div>
 """
             
+            # Add failure video if available
+            video_path = test.get('video_path')
+            if video_path and Path(f"reports/{video_path}").exists():
+                html_content += f"""
+                <div style="margin-top: 15px;">
+                    <strong>🎥 Failure Video:</strong>
+                    <div style="margin-top: 10px; border: 2px solid #f56565; border-radius: 8px; overflow: hidden; background: #000;">
+                        <video controls style="max-width: 100%; display: block;">
+                            <source src="{video_path}" type="video/webm">
+                            Your browser does not support the video tag.
+                        </video>
+                    </div>
+                    <div style="margin-top: 5px;">
+                        <a href="{video_path}" download style="color: #4299e1; text-decoration: none;">
+                            📥 Download Video
+                        </a>
+                    </div>
+                </div>
+"""
+            
             # Add failure screenshot if available
             failure_screenshot = test.get('failure_screenshot')
             if failure_screenshot and Path(f"reports/{failure_screenshot}").exists():
@@ -404,6 +425,37 @@ class HTMLReporter:
                     <div style="margin-top: 10px; border: 2px solid #f56565; border-radius: 8px; overflow: hidden;">
                         <img src="{failure_screenshot}" alt="Failure Screenshot" style="max-width: 100%; display: block;">
                     </div>
+                </div>
+"""
+            
+            # Add soft assertion failures
+            soft_assertions = test.get('soft_assertions')
+            if soft_assertions and soft_assertions.get('count', 0) > 0:
+                failures = soft_assertions.get('failures', [])
+                html_content += f"""
+                <div class="error-message" style="background: #fff5e6; border-left: 4px solid #f59e0b;">
+                    <strong>⚠️ Soft Assertion Failures: {soft_assertions['count']}</strong>
+                    <ul style="margin: 10px 0 0 20px; padding: 0;">
+"""
+                for failure in failures:
+                    step_num = failure.get('step_number', 'N/A')
+                    action = failure.get('action', 'Unknown')
+                    message = failure.get('message', '')
+                    expected = failure.get('expected')
+                    actual = failure.get('actual')
+                    
+                    html_content += f"""
+                        <li style="margin: 5px 0;">
+                            <strong>Step {step_num} ({action}):</strong> {message}
+"""
+                    if expected:
+                        html_content += f"<br>&nbsp;&nbsp;&nbsp;&nbsp;<em>Expected:</em> {expected}"
+                    if actual:
+                        html_content += f"<br>&nbsp;&nbsp;&nbsp;&nbsp;<em>Actual:</em> {actual}"
+                    html_content += "</li>"
+                
+                html_content += """
+                    </ul>
                 </div>
 """
             
@@ -486,8 +538,9 @@ class HTMLReporter:
 </html>
 """
         
-        # Write HTML file
-        report_path = self.output_dir / f"test_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        # Write HTML file with test file name prefix
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        report_path = self.output_dir / f"{test_file_name}_report_{timestamp}.html"
         with open(report_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
         

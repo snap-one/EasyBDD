@@ -1,0 +1,280 @@
+name: "Web Security Test Suite"
+description: "Frontend security and vulnerability testing"
+web_app: "web_app_config"
+tags: ["security", "xss", "csrf", "vulnerabilities"]
+
+variables:
+  # XSS payloads for testing
+  xss_payloads:
+    - "<script>alert('XSS')</script>"
+    - "javascript:alert('XSS')"
+    - "<img src=x onerror=alert('XSS')>"
+    - "<svg onload=alert('XSS')></svg>"
+    
+  # SQL injection payloads
+  sqli_payloads:
+    - "'; DROP TABLE users; --"
+    - "' OR '1'='1"
+    - "1' UNION SELECT * FROM users--"
+    
+  # Common sensitive data patterns
+  sensitive_patterns:
+    - "password"
+    - "credit.*card"
+    - "social.*security"
+    - "api.*key"
+
+test_scenarios:
+  # Cross-Site Scripting (XSS) Testing
+  xss_protection:
+    name: "XSS Protection Testing"
+    description: "Test protection against Cross-Site Scripting attacks"
+    steps:
+      # Test search input XSS protection
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      - action: payload_iteration
+        source: "xss_payloads"
+        steps:
+          - action: fill_field
+            element: "input[name='search']"
+            value: "${xss_payload}"
+            
+          - action: click_element
+            element: "button.search-btn"
+            
+          - action: verify_no_script_execution
+            description: "XSS payload should not execute: ${xss_payload}"
+            
+          - action: verify_payload_encoded
+            element: ".search-results"
+            payload: "${xss_payload}"
+            description: "Payload should be HTML encoded"
+            
+      # Test form input XSS protection
+      - action: navigate_to
+        url: "${base_url}/profile"
+        
+      - action: fill_field
+        element: "input[name='name']"
+        value: "<script>alert('XSS')</script>"
+        
+      - action: click_element
+        element: "button[type='submit']"
+        
+      - action: verify_no_script_execution
+      - action: verify_input_sanitized
+        element: "input[name='name']"
+        description: "User input should be sanitized"
+        
+  # Authentication Security
+  authentication_security:
+    name: "Authentication Security"
+    description: "Test authentication-related security measures"
+    steps:
+      # Test password field masking
+      - action: navigate_to
+        url: "${base_url}/login"
+        
+      - action: verify_password_field_masked
+        element: "input[name='password']"
+        description: "Password field should be masked"
+        
+      # Test login attempt rate limiting
+      - action: repeat_actions
+        count: 6
+        actions:
+          - action: fill_field
+            element: "input[name='username']"
+            value: "test@example.com"
+          - action: fill_field
+            element: "input[name='password']"
+            value: "wrongpassword"
+          - action: click_element
+            element: "button[type='submit']"
+          - action: wait
+            seconds: 1
+            
+      - action: verify_rate_limiting_active
+        description: "Account should be temporarily locked after failed attempts"
+        
+      # Test session timeout
+      - action: login_with_valid_credentials
+      - action: wait
+        seconds: 300  # 5 minutes
+      - action: navigate_to
+        url: "${base_url}/dashboard"
+      - action: verify_session_expired
+        description: "Session should expire after inactivity"
+        
+  # Data Protection
+  data_protection:
+    name: "Sensitive Data Protection"
+    description: "Test protection of sensitive information"
+    steps:
+      # Test credit card input masking
+      - action: navigate_to
+        url: "${base_url}/checkout"
+        
+      - action: fill_field
+        element: "input[name='card_number']"
+        value: "4111111111111111"
+        
+      - action: verify_input_masked
+        element: "input[name='card_number']"
+        pattern: "**** **** **** 1111"
+        description: "Credit card should be masked"
+        
+      # Test sensitive data in source code
+      - action: view_page_source
+      - action: verify_no_sensitive_data
+        patterns: "${sensitive_patterns}"
+        description: "Page source should not contain sensitive data"
+        
+      # Test autocomplete disabled on sensitive fields
+      - action: verify_autocomplete_disabled
+        elements: ["input[name='password']", "input[name='card_number']", "input[name='cvv']"]
+        description: "Sensitive fields should have autocomplete disabled"
+        
+  # HTTPS and Transport Security
+  transport_security:
+    name: "Transport Security"
+    description: "Test HTTPS implementation and transport security"
+    steps:
+      # Test HTTPS enforcement
+      - action: navigate_to
+        url: "http://${domain}"
+        
+      - action: verify_https_redirect
+        description: "HTTP should redirect to HTTPS"
+        
+      # Test security headers
+      - action: navigate_to
+        url: "${base_url}"
+        
+      - action: verify_security_headers
+        headers:
+          - "Strict-Transport-Security"
+          - "X-Content-Type-Options"
+          - "X-Frame-Options"
+          - "X-XSS-Protection"
+          - "Content-Security-Policy"
+        description: "Required security headers should be present"
+        
+      # Test mixed content
+      - action: verify_no_mixed_content
+        description: "Page should not load insecure content over HTTPS"
+        
+  # Content Security Policy
+  content_security_policy:
+    name: "Content Security Policy Testing"
+    description: "Test CSP implementation and effectiveness"
+    steps:
+      - action: navigate_to
+        url: "${base_url}"
+        
+      - action: verify_csp_header
+        description: "Content-Security-Policy header should be present"
+        
+      # Test inline script blocking
+      - action: inject_inline_script
+        script: "alert('CSP Test')"
+        
+      - action: verify_csp_violation
+        description: "CSP should block inline scripts"
+        
+      # Test external resource restrictions
+      - action: attempt_load_external_resource
+        url: "https://evil.example.com/malicious.js"
+        
+      - action: verify_external_resource_blocked
+        description: "CSP should block unauthorized external resources"
+        
+  # Session Management
+  session_management:
+    name: "Session Management Security"
+    description: "Test session handling security"
+    steps:
+      - action: login_with_valid_credentials
+      
+      # Test session token in cookies
+      - action: inspect_cookies
+      - action: verify_session_cookie_secure
+        description: "Session cookie should have Secure flag"
+        
+      - action: verify_session_cookie_httponly
+        description: "Session cookie should have HttpOnly flag"
+        
+      - action: verify_session_cookie_samesite
+        description: "Session cookie should have SameSite attribute"
+        
+      # Test session fixation protection
+      - action: get_session_id
+        store_as: "session_before_login"
+        
+      - action: logout
+      - action: login_with_valid_credentials
+      
+      - action: get_session_id
+        store_as: "session_after_login"
+        
+      - action: verify_session_changed
+        before: "${session_before_login}"
+        after: "${session_after_login}"
+        description: "Session ID should change after login"
+        
+  # Input Validation
+  input_validation:
+    name: "Input Validation Testing"
+    description: "Test client and server-side input validation"
+    steps:
+      # Test SQL injection protection
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      - action: payload_iteration
+        source: "sqli_payloads"
+        steps:
+          - action: fill_field
+            element: "input[name='search']"
+            value: "${sqli_payload}"
+            
+          - action: click_element
+            element: "button.search-btn"
+            
+          - action: verify_no_database_error
+            description: "SQL injection should not cause database errors"
+            
+          - action: verify_safe_query_execution
+            description: "Query should be parameterized/escaped"
+            
+      # Test file upload validation
+      - action: navigate_to
+        url: "${base_url}/profile"
+        
+      - action: attempt_file_upload
+        file: "malicious.php"
+        element: "input[type='file']"
+        
+      - action: verify_file_upload_rejected
+        description: "Malicious file uploads should be rejected"
+        
+      # Test input length limits
+      - action: fill_field
+        element: "input[name='username']"
+        value: "${'a' * 1000}"  # Very long string
+        
+      - action: verify_input_length_limited
+        description: "Input should be limited to reasonable length"
+
+reporting:
+  security_score: true
+  vulnerability_summary: true
+  owasp_top_10_coverage: true
+  remediation_recommendations: true
+
+cleanup:
+  - action: logout
+    ignore_errors: true
+  - action: close_browser

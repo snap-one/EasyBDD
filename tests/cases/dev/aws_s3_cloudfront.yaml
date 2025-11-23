@@ -1,0 +1,70 @@
+name: "AWS S3 - CloudFront URL Generation"
+description: "Generate CloudFront URLs for faster firmware distribution"
+tags: ["aws", "s3", "cloudfront", "cdn"]
+
+# CONFIGURATION REQUIRED:
+# 1. Replace 'your-firmware-bucket' with your actual S3 bucket name
+# 2. Update folder_prefix and cloudfront_domain
+# 3. Configure AWS credentials: aws configure
+
+variables:
+  # S3 Configuration
+  bucket_name: "your-firmware-bucket"  # ← CHANGE THIS
+  folder_prefix: "lumens/"
+  
+  # CloudFront configuration
+  cloudfront_domain: "d12345abcdef.cloudfront.net"
+
+steps:
+  # List firmware with S3 URLs
+  - action: "AWS list firmware files"
+    bucket_name: "${bucket_name}"
+    folder_prefix: "${folder_prefix}"
+    filename_pattern: "LUM-420"
+    file_extension: ".bin"
+    protocol: "https"
+    store_as: "s3_urls"
+  
+  - action: "Print"
+    message: "S3 URLs: ${s3_urls}"
+  
+  # List firmware with CloudFront URLs (full path)
+  - action: "AWS list firmware files"
+    bucket_name: "${bucket_name}"
+    folder_prefix: "${folder_prefix}"
+    filename_pattern: "LUM-420"
+    file_extension: ".bin"
+    cloudfront_url: "${cloudfront_domain}"
+    cloudfront_filename_only: false
+    protocol: "https"
+    store_as: "cloudfront_full_urls"
+  
+  - action: "Print"
+    message: "CloudFront URLs (full path): ${cloudfront_full_urls}"
+  
+  # List firmware with CloudFront URLs (filename only)
+  - action: "AWS list firmware files"
+    bucket_name: "${bucket_name}"
+    folder_prefix: "${folder_prefix}"
+    filename_pattern: "LUM-420"
+    file_extension: ".bin"
+    cloudfront_url: "${cloudfront_domain}"
+    cloudfront_filename_only: true
+    protocol: "https"
+    store_as: "cloudfront_filename_urls"
+  
+  - action: "Print"
+    message: "CloudFront URLs (filename only): ${cloudfront_filename_urls}"
+  
+  # Validate URLs
+  - action: "Assert"
+    expression: "len(s3_urls) > 0"
+    message: "Should find firmware files"
+  
+  - action: "Assert"
+    expression: "len(s3_urls) == len(cloudfront_full_urls)"
+    message: "Should have same number of S3 and CloudFront URLs"
+  
+  - action: "Assert"
+    expression: "cloudfront_domain in cloudfront_full_urls[0]"
+    message: "CloudFront URL should contain CloudFront domain"

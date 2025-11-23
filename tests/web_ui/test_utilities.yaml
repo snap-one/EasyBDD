@@ -1,0 +1,291 @@
+name: "Web UI Test Utilities"
+description: "Reusable utility actions and common test patterns"
+web_app: "web_app_config"
+tags: ["utilities", "helpers", "common"]
+
+# Global utility variables
+variables:
+  screenshot_path: "reports/screenshots"
+  test_data_path: "tests/data"
+  timeout_short: 5000
+  timeout_medium: 10000
+  timeout_long: 30000
+
+# Reusable action definitions
+action_definitions:
+  # Authentication utilities
+  quick_login:
+    description: "Fast login for test setup"
+    parameters:
+      - name: username
+        default: "${test_user.username}"
+      - name: password
+        default: "${test_user.password}"
+    steps:
+      - action: navigate_to
+        url: "${base_url}/login"
+      - action: fill_field
+        element: "input[name='username']"
+        value: "${username}"
+      - action: fill_field
+        element: "input[name='password']"
+        value: "${password}"
+      - action: click_element
+        element: "button[type='submit']"
+      - action: wait_for_element
+        element: ".dashboard, .user-menu"
+        timeout: "${timeout_medium}"
+        
+  logout_safely:
+    description: "Safe logout with error handling"
+    steps:
+      - action: click_element
+        element: ".user-menu"
+        ignore_if_missing: true
+      - action: click_element
+        element: "a[href*='logout'], .logout-btn"
+        ignore_if_missing: true
+      - action: wait_for_element
+        element: ".login-form, body[data-page='login']"
+        timeout: "${timeout_short}"
+        ignore_timeout: true
+        
+  # Data management utilities
+  clear_cart:
+    description: "Remove all items from shopping cart"
+    steps:
+      - action: navigate_to
+        url: "${base_url}/cart"
+      - action: repeat_while_exists
+        element: ".cart-item .remove-btn"
+        max_iterations: 20
+        actions:
+          - action: click_element
+            element: ".cart-item .remove-btn:first"
+          - action: wait_for_element_gone
+            element: ".removing"
+            timeout: "${timeout_short}"
+            
+  add_test_product_to_cart:
+    description: "Add a specific test product to cart"
+    parameters:
+      - name: product_name
+        default: "Test Product"
+      - name: quantity
+        default: 1
+    steps:
+      - action: navigate_to
+        url: "${base_url}/products"
+      - action: fill_field
+        element: "input[name='search']"
+        value: "${product_name}"
+      - action: click_element
+        element: ".search-btn"
+      - action: wait_for_element
+        element: ".product-card"
+      - action: click_element
+        element: ".product-card:first-child .add-to-cart"
+      - action: verify_notification
+        text: "Added to cart"
+        
+  # Form utilities
+  fill_checkout_form:
+    description: "Fill standard checkout form"
+    parameters:
+      - name: customer_data
+        default: "${test_customer}"
+    steps:
+      - action: fill_field
+        element: "input[name='first_name']"
+        value: "${customer_data.first_name}"
+      - action: fill_field
+        element: "input[name='last_name']"
+        value: "${customer_data.last_name}"
+      - action: fill_field
+        element: "input[name='email']"
+        value: "${customer_data.email}"
+      - action: fill_field
+        element: "input[name='address']"
+        value: "${customer_data.address}"
+      - action: fill_field
+        element: "input[name='city']"
+        value: "${customer_data.city}"
+      - action: select_option
+        element: "select[name='state']"
+        value: "${customer_data.state}"
+      - action: fill_field
+        element: "input[name='zip']"
+        value: "${customer_data.zip}"
+        
+  # Verification utilities
+  verify_page_loaded:
+    description: "Comprehensive page load verification"
+    parameters:
+      - name: page_identifier
+        required: true
+    steps:
+      - action: wait_for_element
+        element: "${page_identifier}"
+        timeout: "${timeout_medium}"
+      - action: verify_no_error_messages
+      - action: verify_page_title_not_empty
+      - action: verify_main_content_visible
+        
+  capture_full_page_evidence:
+    description: "Capture comprehensive evidence for test reporting"
+    parameters:
+      - name: test_step
+        required: true
+    steps:
+      - action: take_screenshot
+        filename: "${screenshot_path}/${test_step}_${timestamp}.png"
+      - action: capture_network_activity
+        filename: "${screenshot_path}/${test_step}_network_${timestamp}.har"
+      - action: capture_console_logs
+        filename: "${screenshot_path}/${test_step}_console_${timestamp}.json"
+        
+  # Error handling utilities
+  handle_modal_if_present:
+    description: "Dismiss modal dialogs if they appear"
+    steps:
+      - action: wait_for_element
+        element: ".modal, .dialog, .popup"
+        timeout: 2000
+        ignore_timeout: true
+      - action: click_element
+        element: ".modal .close-btn, .dialog .dismiss, .popup .ok"
+        ignore_if_missing: true
+      - action: press_key
+        key: "Escape"
+        ignore_errors: true
+        
+  retry_on_failure:
+    description: "Retry a set of actions if they fail"
+    parameters:
+      - name: actions
+        required: true
+      - name: max_retries
+        default: 3
+    steps:
+      - action: attempt_with_retries
+        retries: "${max_retries}"
+        actions: "${actions}"
+        delay_between_retries: 2000
+        
+# Test data management patterns
+test_data_management:
+  # Sample test user data
+  test_users:
+    admin:
+      username: "admin@test.com"
+      password: "AdminPass123!"
+      role: "administrator"
+      
+    customer:
+      username: "customer@test.com"
+      password: "CustomerPass123!"
+      role: "customer"
+      
+    guest:
+      username: "guest@test.com"
+      password: "GuestPass123!"
+      role: "guest"
+      
+  # Sample customer data
+  test_customers:
+    default:
+      first_name: "John"
+      last_name: "Doe"
+      email: "john.doe@test.com"
+      phone: "+1-555-123-4567"
+      address: "123 Test Street"
+      city: "Test City"
+      state: "CA"
+      zip: "90210"
+      
+    international:
+      first_name: "Jane"
+      last_name: "Smith"
+      email: "jane.smith@test.com"
+      phone: "+44-20-1234-5678"
+      address: "456 International Ave"
+      city: "London"
+      country: "UK"
+      postal_code: "SW1A 1AA"
+      
+  # Sample product data
+  test_products:
+    electronics:
+      name: "Test Laptop"
+      sku: "TEST-LAPTOP-001"
+      price: 999.99
+      category: "Electronics"
+      
+    clothing:
+      name: "Test T-Shirt"
+      sku: "TEST-SHIRT-001"
+      price: 29.99
+      category: "Clothing"
+      
+# Browser configuration presets
+browser_presets:
+  desktop_chrome:
+    browser: "chrome"
+    viewport:
+      width: 1920
+      height: 1080
+    options:
+      - "--disable-web-security"
+      - "--disable-features=TranslateUI"
+      
+  mobile_safari:
+    browser: "webkit"
+    viewport:
+      width: 375
+      height: 667
+    user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)"
+    
+  tablet_android:
+    browser: "chrome"
+    viewport:
+      width: 768
+      height: 1024
+    user_agent: "Mozilla/5.0 (Linux; Android 10; Tablet)"
+    
+# Common verification patterns
+verification_patterns:
+  successful_form_submission:
+    - action: verify_url_contains
+      text: "success"
+    - action: verify_element_visible
+      element: ".success-message, .confirmation"
+    - action: verify_no_error_messages
+    
+  failed_form_submission:
+    - action: verify_element_visible
+      element: ".error-message, .field-error"
+    - action: verify_url_unchanged
+    - action: verify_form_still_visible
+    
+  page_accessibility_check:
+    - action: verify_page_title_exists
+    - action: verify_heading_structure
+    - action: verify_all_images_have_alt
+    - action: verify_form_labels_present
+    
+# Performance testing patterns
+performance_patterns:
+  basic_performance_check:
+    - action: measure_page_load_time
+    - action: verify_load_time_under
+      threshold: 3000
+    - action: measure_first_contentful_paint
+    - action: verify_fcp_under
+      threshold: 1500
+      
+  comprehensive_performance_audit:
+    - action: measure_core_web_vitals
+    - action: audit_accessibility
+    - action: audit_best_practices
+    - action: audit_seo
+    - action: generate_performance_report

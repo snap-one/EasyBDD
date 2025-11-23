@@ -1,0 +1,248 @@
+name: "E-commerce Complete Workflow Test"
+description: "End-to-end testing of complete shopping workflow"
+web_app: "web_app_config"
+tags: ["e2e", "workflow", "shopping", "critical"]
+
+variables:
+  test_user_email: "shopper@example.com"
+  test_user_password: "ShopperPass123"
+  search_product: "laptop"
+  billing_info:
+    first_name: "John"
+    last_name: "Doe"
+    email: "john.doe@example.com"
+    address: "123 Main St"
+    city: "Anytown"
+    state: "CA"
+    zip: "12345"
+  payment_info:
+    card_number: "4111111111111111"
+    expiry: "12/25"
+    cvv: "123"
+
+setup:
+  - action: open_browser
+    url: "${base_url}"
+    browser: "chrome"
+    window_size: "1920x1080"
+  - action: common_action
+    action: "wait_for_page_load"
+
+test_scenarios:
+  # Complete Shopping Journey
+  complete_shopping_journey:
+    name: "Complete Shopping Workflow"
+    description: "Full e-commerce workflow from login to order completion"
+    steps:
+      # Step 1: Login
+      - action: navigate_to
+        url: "${base_url}/login"
+      - action: page_action
+        page: "login_page"
+        action: "login"
+        username: "${test_user_email}"
+        password: "${test_user_password}"
+      - action: common_action
+        action: "take_screenshot"
+        test_name: "after_login"
+        
+      # Step 2: Search for products
+      - action: navigate_to
+        url: "${base_url}/products"
+      - action: page_action
+        page: "products_page"
+        action: "search_products"
+        search_term: "${search_product}"
+        
+      - action: verify_element_count_greater_than
+        element: ".product-card"
+        count: 0
+        description: "Search should return products"
+        
+      # Step 3: Filter products
+      - action: page_action
+        page: "products_page"
+        action: "filter_by_category"
+        category: "Electronics"
+        
+      - action: wait
+        seconds: 2
+      - action: common_action
+        action: "take_screenshot"
+        test_name: "filtered_products"
+        
+      # Step 4: Add product to cart
+      - action: page_action
+        page: "products_page"
+        action: "add_product_to_cart"
+        product_index: 1
+        
+      - action: verify_notification_appears
+        message: "Added to cart"
+        
+      # Step 5: View cart
+      - action: navigate_to
+        url: "${base_url}/cart"
+      - action: verify_element_visible
+        element: ".cart-item"
+        description: "Cart should contain items"
+        
+      - action: verify_element_not_visible
+        element: ".empty-cart"
+        
+      # Step 6: Update quantity
+      - action: page_action
+        page: "cart_page"
+        action: "update_quantity"
+        item_index: 1
+        new_quantity: 2
+        
+      - action: wait
+        seconds: 2
+      - action: common_action
+        action: "take_screenshot"
+        test_name: "updated_cart"
+        
+      # Step 7: Proceed to checkout
+      - action: page_action
+        page: "cart_page"
+        action: "proceed_to_checkout"
+        
+      - action: verify_url_contains
+        expected: "/checkout"
+        
+      # Step 8: Fill billing information
+      - action: page_action
+        page: "checkout_page"
+        action: "fill_billing_info"
+        billing_first_name: "${billing_info.first_name}"
+        billing_last_name: "${billing_info.last_name}"
+        billing_email: "${billing_info.email}"
+        billing_address: "${billing_info.address}"
+        billing_city: "${billing_info.city}"
+        billing_state: "${billing_info.state}"
+        billing_zip: "${billing_info.zip}"
+        
+      # Step 9: Fill payment information
+      - action: page_action
+        page: "checkout_page"
+        action: "fill_payment_info"
+        card_number: "${payment_info.card_number}"
+        card_expiry: "${payment_info.expiry}"
+        card_cvv: "${payment_info.cvv}"
+        
+      - action: common_action
+        action: "take_screenshot"
+        test_name: "checkout_filled"
+        
+      # Step 10: Complete order (in test environment only)
+      - action: conditional_step
+        condition: "environment == 'development'"
+        steps:
+          - action: page_action
+            page: "checkout_page"
+            action: "complete_order"
+          - action: verify_element_visible
+            element: ".order-confirmation"
+          - action: verify_element_text_contains
+            element: ".confirmation-message"
+            expected: "Order confirmed"
+            
+  # Product Search and Filtering
+  product_search_and_filtering:
+    name: "Product Search and Filtering"
+    description: "Test product search and filtering functionality"
+    steps:
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      # Test search functionality
+      - action: page_action
+        page: "products_page"
+        action: "search_products"
+        search_term: "nonexistent-product"
+        
+      - action: verify_element_visible
+        element: ".no-results"
+        description: "Should show no results message"
+        
+      # Test valid search
+      - action: page_action
+        page: "products_page"
+        action: "search_products"
+        search_term: "${search_product}"
+        
+      - action: verify_element_count_greater_than
+        element: ".product-card"
+        count: 0
+        
+      # Test price filter
+      - action: set_price_range
+        element: "input[name='price-range']"
+        min_price: 100
+        max_price: 500
+        
+      - action: wait_for_element_update
+        element: ".product-grid"
+        
+      # Verify all displayed products are within price range
+      - action: verify_all_elements_price_in_range
+        element: ".product-price"
+        min_price: 100
+        max_price: 500
+
+  # Shopping Cart Management
+  cart_management:
+    name: "Shopping Cart Management"
+    description: "Test cart operations"
+    setup:
+      # Add some items to cart first
+      - action: navigate_to
+        url: "${base_url}/products"
+      - action: page_action
+        page: "products_page"
+        action: "add_product_to_cart"
+        product_index: 1
+      - action: page_action
+        page: "products_page"
+        action: "add_product_to_cart"
+        product_index: 2
+    steps:
+      - action: navigate_to
+        url: "${base_url}/cart"
+        
+      # Verify cart has items
+      - action: verify_element_count_equals
+        element: ".cart-item"
+        count: 2
+        
+      # Test quantity update
+      - action: page_action
+        page: "cart_page"
+        action: "update_quantity"
+        item_index: 1
+        new_quantity: 3
+        
+      # Test item removal
+      - action: click_element
+        element: ".cart-item:first-child .remove-item"
+      - action: wait
+        seconds: 2
+      - action: verify_element_count_equals
+        element: ".cart-item"
+        count: 1
+        
+      # Clear entire cart
+      - action: click_element
+        element: ".cart-item:first-child .remove-item"
+      - action: wait
+        seconds: 2
+      - action: verify_element_visible
+        element: ".empty-cart"
+        
+cleanup:
+  - action: clear_cart
+    ignore_errors: true
+  - action: logout
+    ignore_errors: true
+  - action: close_browser

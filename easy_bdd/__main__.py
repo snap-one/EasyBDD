@@ -10,6 +10,7 @@ from pathlib import Path
 from .core.runner import TestRunner
 from .core.generator import GherkinGenerator
 from .core.config import ConfigManager
+from .core.variable_manager import GlobalConfigManager
 
 
 def main():
@@ -58,6 +59,10 @@ Examples:
         "--browser",
         choices=["chrome", "firefox", "edge", "safari"],
         help="Browser to use for tests"
+    )
+    run_parser.add_argument(
+        "--export-results",
+        help="Export test results to file (JSON, CSV, XML format auto-detected by extension)"
     )
     
     # Generate command
@@ -148,24 +153,169 @@ def convert_recording(args):
         return 1
 
 
+def export_test_results(result, output_path):
+    """Export test results to various formats based on file extension"""
+    import json
+    import csv
+    import xml.etree.ElementTree as ET
+    from datetime import datetime
+    
+    output_path = Path(output_path)
+    extension = output_path.suffix.lower()
+    
+    # Prepare result data
+    result_data = {
+        "timestamp": datetime.now().isoformat(),
+        "summary": {
+            "total_tests": result.total_tests,
+            "passed": result.passed,
+            "failed": result.failed,
+            "skipped": result.skipped,
+            "success_rate": round((result.passed / result.total_tests) * 100, 2) if result.total_tests > 0 else 0,
+            "execution_time_seconds": round(result.execution_time, 2)
+        },
+        "status": "PASSED" if result.success else "FAILED",
+        "tests": result.test_details if result.test_details else []
+    }
+    
+    try:
+        # Create output directory if needed
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        if extension == '.json':
+            return export_to_json(result_data, output_path)
+        elif extension == '.csv':
+            return export_to_csv(result_data, output_path)
+        elif extension == '.xml':
+            return export_to_xml(result_data, output_path)
+        else:
+            # Default to JSON if no recognized extension
+            output_path = output_path.with_suffix('.json')
+            return export_to_json(result_data, output_path)
+            
+    except Exception as e:
+        print(f"Export error: {e}", file=sys.stderr)
+        return False
+
+
+def export_to_json(result_data, output_path):
+    """Export results to JSON format"""
+    import json
+    
+    with open(output_path, 'w') as f:
+        json.dump(result_data, f, indent=2)
+    return True
+
+
+def export_to_csv(result_data, output_path):
+    """Export results to CSV format"""
+    import csv
+    
+    summary = result_data['summary']
+    
+    with open(output_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        
+        # Write summary header
+        writer.writerow(['SUMMARY'])
+        writer.writerow(['Metric', 'Value'])
+        
+        # Write summary data
+        writer.writerow(['Timestamp', result_data['timestamp']])
+        writer.writerow(['Status', result_data['status']])
+        writer.writerow(['Total Tests', summary['total_tests']])
+        writer.writerow(['Passed', summary['passed']])
+        writer.writerow(['Failed', summary['failed']])
+        writer.writerow(['Skipped', summary['skipped']])
+        writer.writerow(['Success Rate %', summary['success_rate']])
+        writer.writerow(['Execution Time (s)', summary['execution_time_seconds']])
+        
+        # Write test details if available
+        if result_data.get('tests'):
+            writer.writerow([])  # Empty row
+            writer.writerow(['INDIVIDUAL TEST RESULTS'])
+            writer.writerow(['Test Name', 'Status', 'Description', 'Execution Time (s)', 'Tags', 'Error'])
+            
+            for test in result_data['tests']:
+                writer.writerow([
+                    test.get('name', ''),
+                    test.get('status', ''),
+                    test.get('description', ''),
+                    test.get('execution_time', ''),
+                    ', '.join(test.get('tags', [])),
+                    test.get('error', '')
+                ])
+        
+    return True
+
+
+def export_to_xml(result_data, output_path):
+    """Export results to XML format"""
+    import xml.etree.ElementTree as ET
+    
+    # Create root element
+    root = ET.Element('test_results')
+    root.set('timestamp', result_data['timestamp'])
+    root.set('status', result_data['status'])
+    
+    # Add summary element
+    summary_elem = ET.SubElement(root, 'summary')
+    
+    summary = result_data['summary']
+    for key, value in summary.items():
+        elem = ET.SubElement(summary_elem, key.replace('_', '-'))
+        elem.text = str(value)
+    
+    # Add individual tests if available
+    if result_data.get('tests'):
+        tests_elem = ET.SubElement(root, 'tests')
+        
+        for test in result_data['tests']:
+            test_elem = ET.SubElement(tests_elem, 'test')
+            test_elem.set('name', test.get('name', ''))
+            test_elem.set('status', test.get('status', ''))
+            
+            # Add test details
+            desc_elem = ET.SubElement(test_elem, 'description')
+            desc_elem.text = test.get('description', '')
+            
+            time_elem = ET.SubElement(test_elem, 'execution-time')
+            time_elem.text = str(test.get('execution_time', ''))
+            
+            if test.get('tags'):
+                tags_elem = ET.SubElement(test_elem, 'tags')
+                tags_elem.text = ', '.join(test.get('tags', []))
+            
+            if test.get('error'):
+                error_elem = ET.SubElement(test_elem, 'error')
+                error_elem.text = test.get('error', '')
+    
+    # Write to file
+    tree = ET.ElementTree(root)
+    tree.write(output_path, encoding='utf-8', xml_declaration=True)
+    
+    return True
+
+
 def run_tests(args) -> int:
     """Run tests with the given arguments"""
-    config = ConfigManager()
+    config = GlobalConfigManager()
     
-    # Override browser configuration from CLI arguments
-    if hasattr(args, 'headless') and args.headless:
-        config.browser.headless = True
+    # TODO: Implement browser configuration overrides for GlobalConfigManager
+    # Override browser configuration from CLI arguments  
+    # if hasattr(args, 'headless') and args.headless:
+    #     config.browser.headless = True
         
-    if hasattr(args, 'headed') and args.headed:
-        config.browser.headless = False
+    # if hasattr(args, 'headed') and args.headed:
+    #     config.browser.headless = False
         
-    if hasattr(args, 'ignore_https') and args.ignore_https:
-        # Add dynamic attributes for HTTPS handling
-        config.browser.ignore_https_errors = True
-        config.browser.ignore_certificate_errors = True
+    # if hasattr(args, 'ignore_https') and args.ignore_https:
+    #     # Add dynamic attributes for HTTPS handling
+    #     config.browser.ignore_https_errors = True
+    #     config.browser.ignore_certificate_errors = True
         
-    if hasattr(args, 'browser') and args.browser:
-        config.browser.default = args.browser
+    # if hasattr(args, 'browser') and args.browser:
+    #     config.browser.default = args.browser
     
     runner = TestRunner(config)
     
@@ -179,6 +329,14 @@ def run_tests(args) -> int:
         test_path=Path(args.path),
         tags=tags
     )
+    
+    # Export results if requested
+    if args.export_results:
+        export_success = export_test_results(result, args.export_results)
+        if export_success:
+            print(f"Test results exported to: {args.export_results}")
+        else:
+            print(f"Warning: Failed to export results to {args.export_results}", file=sys.stderr)
     
     return 0 if result.success else 1
 

@@ -1,0 +1,42 @@
+# Smart Home Hub Configuration
+# Example for devices that return various 2xx codes
+
+device_info:
+  name: "Smart Home Hub"
+  type: "hub"
+  manufacturer: "SmartTech"
+  model: "HUB-Pro"
+  location: "Main Controller"
+
+network:
+  ip_address: "192.168.1.50"
+  hostname: "smarthub"
+  port: 8080
+  protocol: "http"
+  base_url: "http://192.168.1.50:8080"
+
+# Authentication - Flexible IoT device that returns multiple success codes
+authentication:
+  type: "bearer_token"
+  auth_endpoint: "/auth/session"
+  auth_method: "POST"
+  username: "user"
+  password: "homepass"
+  username_field: "user"
+  password_field: "pwd"
+  token_field: "sessionId"
+  token_expires_field: "timeout"
+  default_expiry: 7200
+  # Flexible IoT device - accepts multiple success codes
+  success_codes: [200, 201, 202]  # OK, Created, or Accepted
+  verify_ssl: false
+  timeout: 10
+  headers:
+    Content-Type: "application/json"
+    Accept: "application/json"
+
+api_endpoints:
+  auth: "/auth/session"
+  devices: "/api/devices"
+  status: "/api/hub/status"
+  scenes: "/api/scenes"

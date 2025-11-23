@@ -1,0 +1,44 @@
+name: Soft Assertion Example Test
+description: Demonstrates soft assertion usage for comprehensive validation
+tags: ["example", "soft-assertions", "demo"]
+
+variables:
+  base_url: "https://example.com"
+
+steps:
+  # Open test page
+  - action: Open browser
+    url: "${base_url}"
+  
+  # Verify page loaded
+  - action: Verify text
+    text: "Example Domain"
+  
+  # Multiple soft assertions - all will execute even if some fail
+  - action: Verify text
+    text: "This domain is for use in documentation examples"
+    soft_assert: true
+  
+  - action: Verify text
+    text: "More information..."
+    soft_assert: true
+  
+  - action: Verify element
+    selector: "h1"
+    soft_assert: true
+  
+  - action: Verify element
+    selector: "p"
+    soft_assert: true
+  
+  # Verify link exists
+  - action: Verify element
+    selector: "a[href='https://www.iana.org/domains/example']"
+    soft_assert: true
+  
+  # Check all soft assertions - will fail test if any soft assertions failed
+  - action: Check soft assertions
+  
+  # Take screenshot of final state
+  - action: Take screenshot
+    name: "soft-assertions-example-final"

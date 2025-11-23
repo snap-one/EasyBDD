@@ -1,0 +1,352 @@
+# Comprehensive Web UI Testing Configuration
+# This file extends the base web_app_config.yaml with additional testing-specific settings
+
+name: "Comprehensive Web UI Test Configuration"
+description: "Extended configuration for comprehensive web application testing"
+extends: "web_app_config"  # Inherits from base config
+
+# Test Environment Management
+environments:
+  development:
+    base_url: "http://localhost:3000"
+    api_url: "http://localhost:3001/api"
+    debug: true
+    slow_mo: 100  # Slow down actions for debugging
+    screenshots_on_failure: true
+    video_recording: false
+    
+  staging:
+    base_url: "https://staging.mywebapp.com"
+    api_url: "https://staging-api.mywebapp.com/api"
+    debug: false
+    slow_mo: 0
+    screenshots_on_failure: true
+    video_recording: true
+    
+  production:
+    base_url: "https://mywebapp.com"
+    api_url: "https://api.mywebapp.com/api"
+    debug: false
+    slow_mo: 0
+    screenshots_on_failure: true
+    video_recording: false
+    read_only: true  # Prevents destructive actions
+
+# Browser Configuration Matrix
+browser_matrix:
+  chrome_desktop:
+    browser: "chrome"
+    viewport: { width: 1920, height: 1080 }
+    options:
+      - "--disable-web-security"
+      - "--disable-dev-shm-usage"
+      - "--no-sandbox"
+    extensions:
+      - "accessibility-checker"
+      
+  firefox_desktop:
+    browser: "firefox"
+    viewport: { width: 1920, height: 1080 }
+    options:
+      - "--disable-dev-shm-usage"
+      
+  safari_desktop:
+    browser: "webkit"
+    viewport: { width: 1920, height: 1080 }
+    
+  chrome_mobile:
+    browser: "chrome"
+    viewport: { width: 375, height: 667 }
+    user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)"
+    touch_enabled: true
+    
+  firefox_tablet:
+    browser: "firefox"
+    viewport: { width: 768, height: 1024 }
+    user_agent: "Mozilla/5.0 (iPad; CPU OS 15_0 like Mac OS X)"
+    touch_enabled: true
+
+# Test Data Configuration
+test_data:
+  # User accounts for different test scenarios
+  users:
+    admin:
+      username: "admin@test.example.com"
+      password: "AdminTest123!"
+      role: "administrator"
+      permissions: ["read", "write", "delete", "admin"]
+      
+    editor:
+      username: "editor@test.example.com"
+      password: "EditorTest123!"
+      role: "editor"
+      permissions: ["read", "write"]
+      
+    viewer:
+      username: "viewer@test.example.com"
+      password: "ViewerTest123!"
+      role: "viewer"
+      permissions: ["read"]
+      
+    customer:
+      username: "customer@test.example.com"
+      password: "CustomerTest123!"
+      role: "customer"
+      permissions: ["read", "purchase"]
+      
+  # Customer profiles for testing
+  customers:
+    us_customer:
+      personal:
+        first_name: "John"
+        last_name: "Doe"
+        email: "john.doe@test.example.com"
+        phone: "+1-555-123-4567"
+        date_of_birth: "1990-01-01"
+      address:
+        street: "123 Main Street"
+        city: "Anytown"
+        state: "CA"
+        zip: "90210"
+        country: "US"
+      payment:
+        card_type: "visa"
+        card_number: "4111111111111111"  # Test card
+        expiry: "12/25"
+        cvv: "123"
+        
+    international_customer:
+      personal:
+        first_name: "Jane"
+        last_name: "Smith"
+        email: "jane.smith@test.example.com"
+        phone: "+44-20-1234-5678"
+      address:
+        street: "456 High Street"
+        city: "London"
+        postal_code: "SW1A 1AA"
+        country: "GB"
+      payment:
+        card_type: "mastercard"
+        card_number: "5555555555554444"  # Test card
+        expiry: "06/26"
+        cvv: "456"
+        
+  # Product catalog for testing
+  products:
+    electronics:
+      laptop:
+        name: "Test Laptop Pro"
+        sku: "LAPTOP-PRO-001"
+        price: 1299.99
+        category: "Electronics"
+        subcategory: "Computers"
+        in_stock: true
+        
+      smartphone:
+        name: "Test Phone X"
+        sku: "PHONE-X-001"
+        price: 799.99
+        category: "Electronics"
+        subcategory: "Mobile"
+        in_stock: true
+        
+    clothing:
+      shirt:
+        name: "Test T-Shirt"
+        sku: "SHIRT-001"
+        price: 29.99
+        category: "Clothing"
+        sizes: ["S", "M", "L", "XL"]
+        colors: ["Red", "Blue", "Green"]
+        
+# Accessibility Testing Configuration
+accessibility:
+  wcag_level: "AA"  # A, AA, or AAA
+  standards:
+    - "WCAG21AA"
+    - "Section508"
+  automated_tools:
+    - "axe-core"
+    - "lighthouse"
+  manual_checks:
+    - "keyboard_navigation"
+    - "screen_reader_compatibility"
+    - "color_contrast"
+    
+# Performance Testing Configuration
+performance:
+  thresholds:
+    page_load_time: 3000      # milliseconds
+    first_contentful_paint: 1800
+    largest_contentful_paint: 2500
+    first_input_delay: 100
+    cumulative_layout_shift: 0.1
+    time_to_first_byte: 800
+    
+  network_conditions:
+    fast_3g:
+      download: 1600  # kbps
+      upload: 750
+      latency: 150    # milliseconds
+    slow_3g:
+      download: 500
+      upload: 500
+      latency: 400
+    wifi:
+      download: 30000
+      upload: 15000
+      latency: 2
+      
+  device_emulation:
+    mobile_cpu_throttling: 4  # 4x slower
+    tablet_cpu_throttling: 2  # 2x slower
+    
+# Security Testing Configuration
+security:
+  xss_payloads:
+    - "<script>alert('XSS')</script>"
+    - "javascript:alert('XSS')"
+    - "<img src=x onerror=alert('XSS')>"
+    - "<svg onload=alert('XSS')></svg>"
+    - "<iframe src=javascript:alert('XSS')></iframe>"
+    
+  sql_injection_payloads:
+    - "'; DROP TABLE users; --"
+    - "' OR '1'='1"
+    - "1' UNION SELECT * FROM users--"
+    - "'; UPDATE users SET password='hacked' WHERE '1'='1'--"
+    
+  csrf_protection:
+    verify_tokens: true
+    verify_same_origin: true
+    
+  content_security_policy:
+    verify_header_present: true
+    allowed_sources:
+      - "'self'"
+      - "https://trusted-cdn.com"
+      
+# Test Execution Configuration
+execution:
+  parallel_workers: 4
+  retry_attempts: 3
+  retry_delay: 2000  # milliseconds
+  timeout_default: 10000
+  timeout_navigation: 30000
+  timeout_action: 5000
+  
+  # Test tagging and filtering
+  tag_groups:
+    smoke: ["login", "critical_path", "health_check"]
+    regression: ["ui", "functionality", "integration"]
+    accessibility: ["a11y", "wcag", "screen_reader"]
+    performance: ["speed", "core_web_vitals", "load_time"]
+    security: ["xss", "csrf", "auth", "input_validation"]
+    
+  # Environment-specific test filtering
+  environment_filters:
+    development:
+      include_tags: ["unit", "integration", "smoke"]
+      exclude_tags: ["production_only"]
+    staging:
+      include_tags: ["integration", "e2e", "performance"]
+      exclude_tags: ["dev_only"]
+    production:
+      include_tags: ["smoke", "health_check", "monitoring"]
+      exclude_tags: ["destructive", "data_modification"]
+      
+# Reporting Configuration
+reporting:
+  formats: ["html", "json", "junit"]
+  output_directory: "reports/web_ui"
+  include_screenshots: true
+  include_video: true
+  include_network_logs: true
+  include_console_logs: true
+  
+  # Report sections
+  sections:
+    - "test_summary"
+    - "environment_info"
+    - "performance_metrics"
+    - "accessibility_score"
+    - "security_findings"
+    - "failed_tests"
+    - "screenshots"
+    
+  # Dashboard integration
+  dashboard:
+    enabled: true
+    endpoint: "https://test-dashboard.company.com/api/results"
+    api_key: "${DASHBOARD_API_KEY}"
+    
+# Data Management
+data_management:
+  # Test data cleanup
+  cleanup:
+    after_each_test: true
+    after_test_suite: true
+    preserve_on_failure: true
+    
+  # Database seeding
+  seed_data:
+    users: "tests/data/seed_users.json"
+    products: "tests/data/seed_products.json"
+    orders: "tests/data/seed_orders.json"
+    
+  # File uploads
+  upload_files:
+    images:
+      - "tests/data/test_image.jpg"
+      - "tests/data/test_avatar.png"
+    documents:
+      - "tests/data/test_document.pdf"
+      - "tests/data/test_spreadsheet.xlsx"
+    invalid:
+      - "tests/data/malicious.exe"
+      - "tests/data/oversized.zip"
+      
+# Integration Configuration
+integrations:
+  # CI/CD pipeline integration
+  ci_cd:
+    jenkins:
+      webhook: "https://jenkins.company.com/webhook"
+    github_actions:
+      status_checks: true
+    gitlab_ci:
+      artifact_reports: true
+      
+  # Monitoring integration
+  monitoring:
+    datadog:
+      api_key: "${DATADOG_API_KEY}"
+      tags: ["environment:${environment}", "team:qa"]
+    newrelic:
+      app_id: "${NEWRELIC_APP_ID}"
+      
+  # Communication
+  notifications:
+    slack:
+      webhook: "${SLACK_WEBHOOK_URL}"
+      channels:
+        - "#qa-alerts"
+        - "#dev-team"
+    email:
+      recipients: ["qa-team@company.com", "dev-leads@company.com"]
+      
+# Debug Configuration
+debug:
+  verbose_logging: false
+  save_page_source: false
+  save_network_traffic: false
+  pause_on_failure: false
+  interactive_mode: false
+  
+  # Development helpers
+  development:
+    auto_open_browser: true
+    keep_browser_open: false
+    highlight_elements: true
+    slow_motion: 500  # milliseconds

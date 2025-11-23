@@ -1,0 +1,158 @@
+# Network Switch Template
+device_type: "network_switch"
+description: "Template for managed network switches"
+
+capabilities:
+  - web_ui
+  - api_rest
+  - snmp
+  - ssh
+  - telnet
+  - vlan_management
+  - port_control
+  - spanning_tree
+
+default_config:
+  network:
+    base_url: "https://${device_ip}"
+    ssh_port: 22
+    telnet_port: 23
+    snmp_port: 161
+    web_port: 443
+    
+  authentication:
+    type: "form_auth"
+    username: "admin"
+    password: "admin"
+    auth_endpoint: "/login"
+    success_codes: [200, 302]
+    csrf_protection: true
+    
+  api:
+    endpoints:
+      system_info: "/api/system"
+      port_status: "/api/ports"
+      vlan_config: "/api/vlans"
+      spanning_tree: "/api/stp"
+      statistics: "/api/stats"
+    content_type: "application/json"
+    headers:
+      X-Requested-With: "XMLHttpRequest"
+      
+  web_ui:
+    login_url: "/login.html"
+    dashboard: "/dashboard.html"
+    port_config: "/ports.html"
+    vlan_config: "/vlans.html"
+    selectors:
+      username_field: "input[name='username']"
+      password_field: "input[name='password']"
+      login_button: "input[value='Login']"
+      port_enable: ".port-{port_id} .enable-btn"
+      
+  ports:
+    count: 24
+    types: ["ethernet", "sfp"]
+    speeds: ["10M", "100M", "1G", "10G"]
+    
+  vlans:
+    default_vlan: 1
+    management_vlan: 100
+    guest_vlan: 200
+    
+  snmp:
+    community: "public"
+    version: "2c"
+    oids:
+      system_name: "1.3.6.1.2.1.1.5.0"
+      port_status: "1.3.6.1.2.1.2.2.1.8"
+      port_speed: "1.3.6.1.2.1.2.2.1.5"
+
+test_templates:
+  basic_connectivity:
+    - action: "ping_device"
+    - action: "snmp_walk"
+      oid: "1.3.6.1.2.1.1"
+    - action: "ssh_connect"
+      command: "show version"
+      
+  port_management:
+    - action: "api_get"
+      url: "${api_endpoints_port_status}"
+    - action: "validate_json"
+      field: "ports"
+      condition: "is_array"
+    - action: "port_disable"
+      port: 1
+    - action: "validate_port_state"
+      port: 1
+      state: "disabled"
+    - action: "port_enable"
+      port: 1
+      
+  vlan_configuration:
+    - action: "create_vlan"
+      vlan_id: 500
+      name: "test_vlan"
+    - action: "assign_port_to_vlan"
+      port: 10
+      vlan: 500
+    - action: "validate_vlan_membership"
+      port: 10
+      vlan: 500
+    - action: "delete_vlan"
+      vlan_id: 500
+      
+  performance_monitoring:
+    - action: "api_get"
+      url: "${api_endpoints_statistics}"
+    - action: "validate_json"
+      field: "ports[0].rx_packets"
+      condition: "is_number"
+    - action: "validate_json"
+      field: "ports[0].tx_packets"
+      condition: "is_number"
+      
+  spanning_tree:
+    - action: "api_get"
+      url: "${api_endpoints_spanning_tree}"
+    - action: "validate_json"
+      field: "root_bridge"
+      condition: "exists"
+    - action: "validate_json"
+      field: "port_states"
+      condition: "is_array"
+
+validation_patterns:
+  port_status:
+    required_fields: ["port_id", "status", "speed", "duplex", "vlan"]
+  vlan_info:
+    required_fields: ["vlan_id", "name", "ports", "status"]
+  system_info:
+    required_fields: ["model", "firmware", "mac_address", "serial"]
+  statistics:
+    required_fields: ["rx_packets", "tx_packets", "rx_bytes", "tx_bytes"]
+
+# CLI command mappings for different vendors
+cli_commands:
+  cisco:
+    show_version: "show version"
+    show_ports: "show interfaces status"
+    show_vlans: "show vlan brief"
+  hp:
+    show_version: "show system"
+    show_ports: "show ports"
+    show_vlans: "show vlans"
+  netgear:
+    show_version: "show version"
+    show_ports: "show ports all"
+    show_vlans: "show vlan all"
+
+environments:
+  lab:
+    ports_count: 24
+    test_vlans: [500, 501, 502]
+  production:
+    ports_count: 48
+    readonly_mode: true
+    backup_config: true

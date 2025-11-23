@@ -5,6 +5,7 @@ Test runner for executing Easy BDD tests
 import sys
 import time
 import threading
+import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
@@ -16,7 +17,11 @@ from .variable_manager import GlobalConfigManager
 from .parser import YAMLParser, TestDefinition
 from .generator import GherkinGenerator
 from .html_reporter import HTMLReporter
+from .soft_assertions import SoftAssertionManager
+from .assertions import AssertionEngine, JSONSchemaValidator, ResponseValidator
+from .datalake_logger import get_logger, DatalakeLogger
 from ..services.browser_service import BrowserService
+from ..services.jsonrpc_service import JSONRPCWebSocketService
 # from ..actions import action_registry
 
 
@@ -189,13 +194,19 @@ class TestRunner:
         print(f"{'='*60}")
         
         # Generate HTML report
+        # Extract test file name for report naming
+        test_file_name = "test"
+        if tests and hasattr(tests[0], 'file_path'):
+            test_file_name = Path(tests[0].file_path).stem
+        
         reporter = HTMLReporter(Path("reports"))
         report_path = reporter.generate_report(
             test_details=test_details,
             total_tests=len(tests),
             passed=passed,
             failed=failed,
-            execution_time=execution_time
+            execution_time=execution_time,
+            test_file_name=test_file_name
         )
         print(f"\n📊 HTML Report generated: {report_path}")
         print(f"   Open with: open {report_path}")
@@ -214,6 +225,10 @@ class TestRunner:
     def _execute_test(self, test: TestDefinition, test_detail: Dict[str, Any] = None) -> bool:
         """Execute a single test with data iteration support"""
         try:
+            # Store current test file name for screenshot naming
+            if hasattr(test, 'file_path'):
+                self._current_test_file = Path(test.file_path).stem
+            
             # Check for data-driven testing
             if hasattr(test, 'data') and test.data:
                 return self._execute_data_driven_test(test)
@@ -366,10 +381,44 @@ class TestRunner:
     
     def _execute_single_test(self, test: TestDefinition, test_detail: Dict[str, Any] = None) -> bool:
         """Execute a single test definition with setup, main steps, and cleanup"""
+        # Capture start time for datalake metrics
+        start_time = datetime.datetime.now()
+        
         services = {}
         failed_step_info = None
         failure_screenshot = None
         step_logs = []
+        soft_assert_manager = SoftAssertionManager()
+        console_output = StringIO()
+        test_passed = False
+        
+        # Store original stdout to capture console output
+        original_stdout = sys.stdout
+        
+        # Create a dual writer for capturing console output
+        class DualWriter:
+            def __init__(self, original, capture):
+                self.original = original
+                self.capture = capture
+            def write(self, text):
+                self.original.write(text)
+                self.capture.write(text)
+            def flush(self):
+                self.original.flush()
+                self.capture.flush()
+        
+        # Initialize datalake logger if post_results enabled
+        datalake_logger = None
+        try:
+            datalake_logger = DatalakeLogger(
+                artifact_path="reports",
+                post_results=True
+            )
+        except Exception as e:
+            print(f"    ⚠️  Could not initialize datalake logger: {e}")
+        
+        # Redirect stdout to capture console output
+        sys.stdout = DualWriter(original_stdout, console_output)
         
         try:
             # Load device configuration if specified
@@ -398,7 +447,10 @@ class TestRunner:
                     
                     # Execute the setup step
                     try:
-                        success = self._execute_step(services[service_type], step, test.variables)
+                        success = self._execute_step(
+                            services[service_type], step, test.variables,
+                            soft_assert_manager, i
+                        )
                         if not success:
                             print(f"    ⚠️  Setup step {i} failed: {step.action}")
                             print(f"       Details: {step_description}")
@@ -429,7 +481,7 @@ class TestRunner:
                 
                 # Execute the step
                 try:
-                    success = self._execute_step(services[service_type], step, test.variables)
+                    success = self._execute_step(services[service_type], step, test.variables, soft_assert_manager, i)
                     if not success:
                         print(f"    ❌ STEP {i} FAILED: {step.action}")
                         print(f"       Details: {step_description}")
@@ -489,10 +541,20 @@ class TestRunner:
                 # Small delay between steps for visibility
                 time.sleep(0.5)
             
+            # Check soft assertions at end of main test phase
+            if soft_assert_manager and soft_assert_manager.has_failures():
+                print(soft_assert_manager.get_summary())
+                if test_detail is not None:
+                    test_detail['soft_assertions'] = soft_assert_manager.to_dict()
+                test_passed = False
+                return False
+            
+            test_passed = True
             return True
             
         except Exception as e:
             print(f"      Error executing test: {e}")
+            test_passed = False
             return False
             
         finally:
@@ -514,7 +576,10 @@ class TestRunner:
                         
                         # Execute cleanup step - don't let failures stop cleanup
                         try:
-                            success = self._execute_step(services[service_type], step, test.variables)
+                            success = self._execute_step(
+                                services[service_type], step, test.variables,
+                                soft_assert_manager, i
+                            )
                             if not success:
                                 print(f"    ⚠️  Cleanup step {i} failed: {step.action}")
                                 print(f"       Details: {step_description}")
@@ -529,26 +594,114 @@ class TestRunner:
                 except Exception as cleanup_error:
                     print(f"    ⚠️  Cleanup phase error: {cleanup_error}")
             
-            # Clean up services
+            # Clean up services first (browser needs to close to save video)
+            browser_service = services.get('browser')
             for service in services.values():
                 if hasattr(service, 'close'):
                     try:
                         service.close()
-                    except:
-                        pass
+                    except Exception as e:
+                        print(f"    ⚠️  Service cleanup error: {e}")
+            
+            # Handle video recording AFTER browser closes
+            if browser_service and hasattr(browser_service, 'get_video_path'):
+                try:
+                    # Give browser time to finalize video after closing
+                    time.sleep(1.0)
+                    
+                    video_path = browser_service.get_video_path()
+                    if video_path and video_path.exists():
+                        print(f"    🎥 Video recorded: {video_path.name}")
+                        
+                        # Store video path in test_detail
+                        if test_detail is not None:
+                            # Convert to relative path for HTML report
+                            relative_path = f"videos/{video_path.name}"
+                            test_detail['video_path'] = relative_path
+                        
+                        # Check video recording mode
+                        video_mode = browser_service._get_browser_config(
+                            'video_recording.mode', 'on-failure'
+                        )
+                        
+                        # Clean up video if test passed and mode is on-failure
+                        if video_mode == 'on-failure':
+                            test_status = test_detail.get('status') if test_detail else None
+                            if test_status == 'passed':
+                                print(f"    🗑️  Deleting video (test passed)")
+                                browser_service.cleanup_video(video_path)
+                                if test_detail:
+                                    test_detail['video_path'] = None
+                except Exception as e:
+                    print(f"    ⚠️  Video handling error: {e}")
+                    import traceback
+                    print(f"    Traceback: {traceback.format_exc()}")
+            
+            # Restore stdout before posting to datalake
+            sys.stdout = original_stdout
+            
+            # Check datalake configuration
+            datalake_enabled = True
+            post_on_failure_only = False
+            if hasattr(self.config, '_raw_config'):
+                config_dict = self.config._raw_config.get('config', {})
+                datalake_config = config_dict.get('datalake', {})
+                datalake_enabled = datalake_config.get('enabled', True)
+                post_on_failure_only = datalake_config.get(
+                    'post_on_failure_only', False)
+            
+            # Post test results to datalake (if enabled)
+            if datalake_logger and datalake_enabled:
+                # Skip if only posting failures and test passed
+                if post_on_failure_only and test_passed:
+                    print(f"    ⏭️  Skipping datalake post (test passed, failure-only mode)")
+                else:
+                    try:
+                        # Get test metadata from variables or use defaults
+                        product = test.variables.get('product', 'Unknown') if test.variables else 'Unknown'
+                        product_category = test.variables.get('product_category', 'Test') if test.variables else 'Test'
+                        mac_address = test.variables.get('mac_address', '00:00:00:00:00:00') if test.variables else '00:00:00:00:00:00'
+                        time_savings = test.variables.get('time_savings', 5.0) if test.variables else 5.0
+                        
+                        # Get console output (captured during test)
+                        console = console_output.getvalue() if console_output else ""
+                        
+                        # Post to datalake
+                        datalake_logger.datalake_post(
+                            test_name=test.name,
+                            product=product,
+                            product_category=product_category,
+                            mac_address=mac_address,
+                            time_savings=time_savings,
+                            start_time=start_time,
+                            console=console,
+                            run_url=test_detail.get('report_url', '') if test_detail else '',
+                            success=test_passed,
+                            type='testrail'
+                        )
+                        print(f"    📊 Test metrics posted to datalake")
+                    except Exception as e:
+                        print(f"    ⚠️  Datalake posting error: {e}")
+            elif not datalake_enabled:
+                print(f"    ⏭️  Datalake logging disabled")
     
     def _capture_failure_screenshot(self, browser_service, test_name: str, step_number: int) -> Optional[str]:
-        """Capture screenshot on test failure"""
+        """Capture screenshot on test failure (only for browser/UI tests)"""
         try:
-            if browser_service and hasattr(browser_service, 'take_screenshot'):
+            # Only capture screenshot if browser service exists and page is active
+            if (browser_service and 
+                hasattr(browser_service, 'take_screenshot') and
+                hasattr(browser_service, 'page') and 
+                browser_service.page):
                 # Create screenshots directory
                 screenshots_dir = Path("reports/screenshots")
                 screenshots_dir.mkdir(parents=True, exist_ok=True)
                 
-                # Generate filename (without .png - take_screenshot adds it)
+                # Generate filename with test file prefix (without .png)
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
-                safe_name = test_name.replace(" ", "_").replace("/", "_")
-                filename = f"failure_{safe_name}_step{step_number}_{timestamp}"
+                # Get test file name if available
+                test_file = getattr(self, '_current_test_file', 'test')
+                filename = f"{test_file}_failure_step{step_number}_{timestamp}"
                 
                 # Take screenshot
                 browser_service.take_screenshot(filename)
@@ -556,7 +709,8 @@ class TestRunner:
                 # Return relative path for HTML report (with .png extension)
                 return f"screenshots/{filename}.png"
         except Exception as e:
-            print(f"       ⚠️  Failed to capture screenshot: {e}")
+            # Silently skip screenshot for non-UI tests
+            pass
         return None
     
     def _get_step_description(self, step) -> str:
@@ -620,9 +774,36 @@ class TestRunner:
             return MockService(service_type)
     
     def _execute_custom_action(self, action: str, step_params: dict,
-                               variables: dict) -> bool:
+                               variables: dict,
+                               soft_assert_manager: SoftAssertionManager = None) -> bool:
         """Execute custom actions if available"""
         try:
+            # Check soft assertions action
+            if action == 'check soft assertions':
+                if soft_assert_manager and soft_assert_manager.has_failures():
+                    soft_assert_manager.raise_if_failures()
+                else:
+                    print("      ✓ No soft assertion failures")
+                return True
+            
+            # Custom assertion actions
+            if action == 'assert':
+                return self._handle_assert_action(step_params, variables)
+            elif action == 'assert json schema':
+                return self._handle_json_schema_action(step_params, variables)
+            elif action == 'assert response':
+                return self._handle_response_assertion(step_params, variables)
+            
+            # JSON-RPC WebSocket actions
+            if action.startswith('jsonrpc'):
+                return self._handle_jsonrpc_action(
+                    action, step_params, variables)
+            
+            # AWS S3 actions
+            if action.startswith('aws') or 's3' in action:
+                return self._handle_aws_action(
+                    action, step_params, variables)
+            
             # Check if we have custom actions defined
             if hasattr(self.config, 'get_custom_action'):
                 custom_action = self.config.get_custom_action(action)
@@ -642,12 +823,539 @@ class TestRunner:
                 
             return False
         except Exception as e:
+            # Don't catch JSON-RPC failures - let them propagate
+            # to avoid "Unknown action" fallthrough
+            if action.startswith('jsonrpc'):
+                raise
             print(f"      Warning: Custom action '{action}' failed: {e}")
             return False
     
-    def _execute_step(self, service, step, variables: dict) -> bool:
+    def _execute_conditional_step(self, service, step, variables: dict,
+                                  soft_assert_manager=None,
+                                  step_number: int = 0) -> bool:
+        """Execute a conditional if/then/else step"""
+        condition = step.condition
+        
+        # Substitute variables in condition
+        if hasattr(self.config, 'substitute_variables'):
+            condition = self.config.substitute_variables(
+                condition, variables)
+        
+        print(f"      Evaluating condition: {condition}")
+        
+        # Evaluate the condition
+        try:
+            # Create a safe evaluation context
+            eval_context = variables.copy()
+            result = eval(condition, {"__builtins__": {}}, eval_context)
+            
+            print(f"      Condition result: {result}")
+            
+            # Execute appropriate branch
+            if result:
+                if step.then_steps:
+                    print(f"      → Executing THEN branch "
+                          f"({len(step.then_steps)} steps)")
+                    for i, then_step in enumerate(step.then_steps, 1):
+                        svc_type = self._get_service_type(then_step.action)
+                        svc = self._create_service(svc_type)
+                        success = self._execute_step(
+                            svc, then_step, variables,
+                            soft_assert_manager, step_number)
+                        if not success:
+                            return False
+                    return True
+                else:
+                    print(f"      → Condition true, no THEN steps")
+                    return True
+            else:
+                if step.else_steps:
+                    print(f"      → Executing ELSE branch "
+                          f"({len(step.else_steps)} steps)")
+                    for i, else_step in enumerate(step.else_steps, 1):
+                        svc_type = self._get_service_type(else_step.action)
+                        svc = self._create_service(svc_type)
+                        success = self._execute_step(
+                            svc, else_step, variables,
+                            soft_assert_manager, step_number)
+                        if not success:
+                            return False
+                    return True
+                else:
+                    print(f"      → Condition false, no ELSE steps")
+                    return True
+        except Exception as e:
+            print(f"      ✗ Condition evaluation failed: {e}")
+            raise ValueError(f"Invalid condition '{condition}': {e}")
+    
+    def _handle_assert_action(self, step_params: dict, variables: dict) -> bool:
+        """Handle Assert action for custom expression evaluation."""
+        # Extract from nested structure or top level
+        params_dict = step_params.get('parameters', {})
+        expression = step_params.get('expression', '') or params_dict.get('expression', '')
+        message = step_params.get('message', '') or params_dict.get('message', f"Assertion failed: {expression}")
+        
+        if not expression:
+            raise ValueError("Assert action requires 'expression' parameter")
+        
+        # Create assertion engine with variables context
+        engine = AssertionEngine(context=variables)
+        result = engine.assert_expression(expression, message, variables)
+        
+        if result.passed:
+            print(f"      ✓ Assertion passed: {expression}")
+            return True
+        else:
+            print(f"      ✗ Assertion failed: {result.message}")
+            if result.expected is not None and result.actual is not None:
+                print(f"        Expected: {result.expected}")
+                print(f"        Actual: {result.actual}")
+            raise AssertionError(result.message)
+    
+    def _handle_json_schema_action(self, step_params: dict, variables: dict) -> bool:
+        """Handle Assert JSON schema action."""
+        # Extract from nested structure or top level
+        params_dict = step_params.get('parameters', {})
+        data = (step_params.get('data') or step_params.get('response') or
+                params_dict.get('data') or params_dict.get('response'))
+        schema = (step_params.get('schema') or step_params.get('schema_file') or
+                  params_dict.get('schema') or params_dict.get('schema_file'))
+        
+        if not data:
+            raise ValueError("Assert JSON schema requires 'data' or 'response' parameter")
+        if not schema:
+            raise ValueError("Assert JSON schema requires 'schema' or 'schema_file' parameter")
+        
+        # Resolve data from variables
+        # The variable substitution converts dicts to strings, so check variables directly
+        if isinstance(data, str):
+            # Try to find the variable from the stringified value
+            if data.startswith('{') or data.startswith('['):
+                # This is a stringified dict/list from variable substitution
+                # Find the original variable by checking which matches
+                for var_name, var_value in variables.items():
+                    if (isinstance(var_value, (dict, list)) and 
+                        str(var_value).startswith(data[:50])):
+                        data = var_value
+                        break
+            # Try direct variable lookup
+            elif data in variables:
+                data = variables[data]
+        
+        # Create validator and validate
+        validator = JSONSchemaValidator()
+        result = validator.validate(data, schema)
+        
+        if result.passed:
+            print(f"      ✓ JSON schema validation passed")
+            return True
+        else:
+            print(f"      ✗ JSON schema validation failed: {result.message}")
+            if result.details:
+                print(f"        Details: {result.details}")
+            raise AssertionError(result.message)
+    
+    def _handle_response_assertion(self, step_params: dict, variables: dict) -> bool:
+        """Handle Assert response action for HTTP response validation."""
+        # Extract from nested structure or top level
+        params_dict = step_params.get('parameters', {})
+        response = step_params.get('response') or params_dict.get('response')
+        expectations = (step_params.get('expect') or step_params.get('expectations') or
+                       params_dict.get('expect') or params_dict.get('expectations'))
+        
+        if not response:
+            raise ValueError("Assert response requires 'response' parameter")
+        if not expectations:
+            raise ValueError("Assert response requires 'expect' or 'expectations' parameter")
+        
+        # Resolve response from variables
+        # The variable substitution converts dicts to strings, so we need to check variables directly
+        if isinstance(response, str):
+            # Try to find the variable name from the original step_params before substitution
+            # Check if this looks like it was a variable (starts with dict marker '{')
+            if response.startswith('{') or response.startswith('['):
+                # This is a stringified dict/list from variable substitution
+                # Try to find the original variable name by checking which variable matches
+                for var_name, var_value in variables.items():
+                    if isinstance(var_value, dict) and str(var_value).startswith(response[:50]):
+                        response = var_value
+                        break
+            # Try direct variable lookup
+            elif response in variables:
+                response = variables[response]
+        
+        # Create validator and validate
+        validator = ResponseValidator()
+        result = validator.validate_response(response, expectations)
+        
+        if result.passed:
+            print(f"      ✓ Response validation passed")
+            return True
+        else:
+            print(f"      ✗ Response validation failed: {result.message}")
+            if result.details:
+                failures = result.details.get('failures', [])
+                for failure in failures:
+                    print(f"        - {failure}")
+            raise AssertionError(result.message)
+    
+    def _handle_jsonrpc_action(self, action: str, step_params: dict,
+                               variables: dict) -> bool:
+        """Handle JSON-RPC WebSocket actions."""
+        import asyncio
+        
+        # Get or create JSON-RPC service from variables
+        jsonrpc_service = variables.get('_jsonrpc_service')
+        
+        # Extract parameters dict
+        params = step_params.get('parameters', {})
+        
+        action_lower = action.lower()
+        
+        try:
+            if 'connect' in action_lower:
+                # Extract connection parameters
+                server_url = params.get('server_url', '')
+                device_id = params.get('device_id', '')
+                protocol = params.get('protocol', 'firmware-protocol')
+                session_id = params.get('session_id', None)
+                
+                if not server_url:
+                    raise ValueError("JSONRPC connect requires 'server_url'")
+                if not device_id:
+                    raise ValueError("JSONRPC connect requires 'device_id'")
+                
+                # Optional parameters
+                verify_ssl = params.get('verify_ssl', True)
+                extra_headers = params.get('headers', {})
+                
+                # Create service
+                jsonrpc_service = JSONRPCWebSocketService(
+                    server_url=server_url,
+                    device_id=device_id,
+                    session_id=session_id,
+                    protocol=protocol,
+                    verify_ssl=verify_ssl,
+                    extra_headers=extra_headers
+                )
+                
+                # Connect
+                loop = asyncio.get_event_loop()
+                success = loop.run_until_complete(jsonrpc_service.connect())
+                
+                if success:
+                    # Store service in variables
+                    variables['_jsonrpc_service'] = jsonrpc_service
+                    return True
+                else:
+                    raise ConnectionError("Failed to connect to JSON-RPC server")
+            
+            # All other actions require existing connection
+            if not jsonrpc_service:
+                raise ConnectionError(
+                    "Not connected. Use 'JSONRPC connect' first")
+            
+            loop = asyncio.get_event_loop()
+            
+            if 'disconnect' in action_lower:
+                loop.run_until_complete(jsonrpc_service.disconnect())
+                variables.pop('_jsonrpc_service', None)
+                return True
+            
+            elif 'start device updates' in action_lower:
+                success = loop.run_until_complete(
+                    jsonrpc_service.start_device_updates()
+                )
+                return success
+            
+            elif 'stop device updates' in action_lower:
+                success = loop.run_until_complete(
+                    jsonrpc_service.stop_device_updates()
+                )
+                return success
+            
+            elif 'get about' in action_lower:
+                result = loop.run_until_complete(jsonrpc_service.get_about())
+                store_as = params.get('store_as', '')
+                if store_as and result:
+                    variables[store_as] = result
+                    print(f"      Stored response as: {store_as}")
+                return result is not None
+            
+            elif 'reset device' in action_lower:
+                success = loop.run_until_complete(jsonrpc_service.reset_device())
+                return success
+            
+            elif 'get network settings' in action_lower:
+                result = loop.run_until_complete(
+                    jsonrpc_service.get_network_settings()
+                )
+                store_as = params.get('store_as', '')
+                if store_as and result:
+                    variables[store_as] = result
+                    print(f"      Stored response as: {store_as}")
+                return result is not None
+            
+            elif 'set network settings' in action_lower:
+                success = loop.run_until_complete(
+                    jsonrpc_service.set_network_settings(
+                        device_name=params.get('device_name'),
+                        device_ip=params.get('device_ip'),
+                        subnet_mask=params.get('subnet_mask'),
+                        gateway=params.get('gateway'),
+                        dhcp_enabled=params.get('dhcp_enabled'),
+                        dns_server1=params.get('dns_server1'),
+                        dns_server2=params.get('dns_server2'),
+                        web_port=params.get('web_port')
+                    )
+                )
+                return success
+            
+            elif 'get time settings' in action_lower:
+                result = loop.run_until_complete(
+                    jsonrpc_service.get_time_settings()
+                )
+                store_as = params.get('store_as', '')
+                if store_as and result:
+                    variables[store_as] = result
+                    print(f"      Stored response as: {store_as}")
+                return result is not None
+            
+            elif 'set time settings' in action_lower:
+                success = loop.run_until_complete(
+                    jsonrpc_service.set_time_settings(
+                        timezone_name=params.get('timezone_name', ''),
+                        timezone_notes=params.get('timezone_notes'),
+                        utc_offset_minutes=params.get('utc_offset_minutes'),
+                        current_time=params.get('current_time')
+                    )
+                )
+                return success
+            
+            elif 'get status update frequency' in action_lower:
+                result = loop.run_until_complete(
+                    jsonrpc_service.get_status_update_frequency()
+                )
+                store_as = params.get('store_as', '')
+                if store_as and result:
+                    variables[store_as] = result
+                    print(f"      Stored response as: {store_as}")
+                return result is not None
+            
+            elif 'set status update frequency' in action_lower:
+                frequency = params.get('frequency', 0)
+                success = loop.run_until_complete(
+                    jsonrpc_service.set_status_update_frequency(frequency)
+                )
+                return success
+            
+            elif 'enable web connect' in action_lower:
+                success = loop.run_until_complete(
+                    jsonrpc_service.enable_web_connect(
+                        ssh_server=params.get('ssh_server', ''),
+                        tunnel_port=params.get('tunnel_port', 0)
+                    )
+                )
+                return success
+            
+            elif 'disable web connect' in action_lower:
+                success = loop.run_until_complete(
+                    jsonrpc_service.disable_web_connect(
+                        ssh_server=params.get('ssh_server', ''),
+                        tunnel_port=params.get('tunnel_port', 0)
+                    )
+                )
+                return success
+            
+            elif 'set cloud server url' in action_lower:
+                success = loop.run_until_complete(
+                    jsonrpc_service.set_cloud_server_url(
+                        url=params.get('url', ''),
+                        port=params.get('port', 0)
+                    )
+                )
+                return success
+            
+            elif 'disable cloud' in action_lower:
+                success = loop.run_until_complete(jsonrpc_service.disable_cloud())
+                return success
+            
+            elif 'update firmware' in action_lower:
+                firmware_url = params.get('firmware_url', '')
+                success = loop.run_until_complete(
+                    jsonrpc_service.update_firmware(firmware_url)
+                )
+                return success
+            
+            elif 'find device by serial' in action_lower:
+                serial_num = params.get('serial_num', '')
+                result = loop.run_until_complete(
+                    jsonrpc_service.find_device_by_serial(serial_num)
+                )
+                store_as = params.get('store_as', '')
+                if store_as and result:
+                    variables[store_as] = result
+                    print(f"      Stored response as: {store_as}")
+                return result is not None
+            
+            else:
+                print(f"      ❌ Unknown JSONRPC action: {action}")
+                raise ValueError(f"Unknown JSONRPC action: {action}")
+                
+        except Exception as e:
+            print(f"      ❌ JSONRPC action failed: {e}")
+            # Re-raise to prevent "Unknown action" fallthrough
+            raise
+    
+    def _handle_aws_action(self, action: str, step_params: dict,
+                          variables: dict) -> bool:
+        """Handle AWS S3 actions."""
+        from ..services.aws_service import AWSService
+        
+        # Get or create AWS service from variables
+        aws_service = variables.get('_aws_service')
+        if not aws_service:
+            aws_service = AWSService(logger=print)
+            variables['_aws_service'] = aws_service
+        
+        # Extract parameters
+        params = step_params.get('parameters', {})
+        action_lower = action.lower()
+        
+        try:
+            if 'list firmware' in action_lower or 'list files' in action_lower:
+                # List and download firmware files
+                bucket_name = params.get('bucket_name', '')
+                if not bucket_name:
+                    raise ValueError("AWS list firmware requires 'bucket_name'")
+                
+                urls = aws_service.list_firmware_files(
+                    bucket_name=bucket_name,
+                    folder_prefix=params.get('folder_prefix'),
+                    filename_pattern=params.get('filename_pattern'),
+                    version_pattern=params.get('version_pattern'),
+                    file_extension=params.get('file_extension'),
+                    specific_version=params.get('specific_version'),
+                    cloudfront_url=params.get('cloudfront_url'),
+                    cloudfront_filename_only=params.get(
+                        'cloudfront_filename_only', False),
+                    download_dir=params.get('download_dir'),
+                    protocol=params.get('protocol', 'https'),
+                    access_key_id=params.get('access_key_id'),
+                    secret_access_key=params.get('secret_access_key'),
+                    region=params.get('region')
+                )
+                
+                # Store URLs in variable if requested
+                store_as = params.get('store_as', '')
+                if store_as and urls:
+                    variables[store_as] = urls
+                    print(f"      Stored {len(urls)} URLs as: {store_as}")
+                
+                return len(urls) > 0
+            
+            elif 'get latest firmware' in action_lower:
+                # Get latest firmware file
+                bucket_name = params.get('bucket_name', '')
+                if not bucket_name:
+                    raise ValueError("AWS get latest firmware requires "
+                                   "'bucket_name'")
+                
+                result = aws_service.get_latest_firmware(
+                    bucket_name=bucket_name,
+                    folder_prefix=params.get('folder_prefix'),
+                    filename_pattern=params.get('filename_pattern'),
+                    version_pattern=params.get('version_pattern'),
+                    file_extension=params.get('file_extension', '.bin'),
+                    download_dir=params.get('download_dir'),
+                    get_second_to_last=params.get('get_second_to_last', False),
+                    access_key_id=params.get('access_key_id'),
+                    secret_access_key=params.get('secret_access_key'),
+                    region=params.get('region')
+                )
+                
+                # Store individual values if requested
+                if params.get('store_filename_as') and result['filename']:
+                    variables[params['store_filename_as']] = result['filename']
+                    print(f"      Stored filename as: "
+                          f"{params['store_filename_as']}")
+                    # Also store basename for easy file path construction
+                    if 'basename' in result:
+                        variables[f"{params['store_filename_as']}_basename"] = result['basename']
+                
+                if params.get('store_version_as') and result['version']:
+                    variables[params['store_version_as']] = result['version']
+                    print(f"      Stored version as: "
+                          f"{params['store_version_as']}")
+                
+                if params.get('store_url_as') and result['url']:
+                    variables[params['store_url_as']] = result['url']
+                    print(f"      Stored URL as: {params['store_url_as']}")
+                
+                return result['filename'] is not None
+            
+            elif 'upload' in action_lower:
+                # Upload file to S3
+                bucket_name = params.get('bucket_name', '')
+                local_file = params.get('local_file_path', '')
+                
+                if not bucket_name or not local_file:
+                    raise ValueError("AWS upload requires 'bucket_name' and "
+                                   "'local_file_path'")
+                
+                url = aws_service.upload_file(
+                    bucket_name=bucket_name,
+                    local_file_path=local_file,
+                    s3_key=params.get('s3_key'),
+                    make_public=params.get('make_public', True),
+                    access_key_id=params.get('access_key_id'),
+                    secret_access_key=params.get('secret_access_key'),
+                    region=params.get('region')
+                )
+                
+                # Store URL if requested
+                store_as = params.get('store_as', '')
+                if store_as and url:
+                    variables[store_as] = url
+                    print(f"      Stored URL as: {store_as}")
+                
+                return True
+            
+            elif 'delete folder' in action_lower:
+                # Delete folder from S3
+                bucket_name = params.get('bucket_name', '')
+                folder_prefix = params.get('folder_prefix', '')
+                
+                if not bucket_name or not folder_prefix:
+                    raise ValueError("AWS delete folder requires 'bucket_name' "
+                                   "and 'folder_prefix'")
+                
+                aws_service.delete_folder(
+                    bucket_name=bucket_name,
+                    folder_prefix=folder_prefix,
+                    access_key_id=params.get('access_key_id'),
+                    secret_access_key=params.get('secret_access_key'),
+                    region=params.get('region')
+                )
+                
+                return True
+            
+            else:
+                print(f"      ❌ Unknown AWS action: {action}")
+                raise ValueError(f"Unknown AWS action: {action}")
+                
+        except Exception as e:
+            print(f"      ❌ AWS action failed: {e}")
+            raise
+    
+    def _execute_step(self, service, step, variables: dict, soft_assert_manager: SoftAssertionManager = None, step_number: int = 0) -> bool:
         """Execute a single step using the appropriate service"""
         try:
+            # Check if this is a conditional step
+            if hasattr(step, 'condition') and step.condition:
+                return self._execute_conditional_step(
+                    service, step, variables, soft_assert_manager, step_number)
+            
             # Use GlobalConfigManager's variable substitution if available
             if hasattr(self.config, 'substitute_recursive'):
                 # For GlobalConfigManager, set test variables in runtime scope
@@ -685,7 +1393,8 @@ class TestRunner:
             action = step_params.get('action', '').lower()
             
             # Check for custom actions first
-            if self._execute_custom_action(action, step_params, variables):
+            if self._execute_custom_action(action, step_params, variables,
+                                          soft_assert_manager):
                 return True
             
             # Execute browser actions
@@ -743,8 +1452,30 @@ class TestRunner:
                   'text' in action):
                 text = (step_params.get('text', '') or
                         step_params.get('parameters', {}).get('text', ''))
+                params = step_params.get('parameters', {})
+                soft_assert = (step_params.get('soft_assert', False) or
+                             params.get('soft_assert', False))
                 print(f"      Verifying text: '{text}'")
-                service.verify_text(text)
+                service.verify_text(
+                    text, soft_assert=soft_assert,
+                    soft_assert_manager=soft_assert_manager,
+                    step_number=step_number
+                )
+                return True
+            
+            elif (hasattr(service, 'verify_element') and 'verify' in action and
+                  'element' in action):
+                params = step_params.get('parameters', {})
+                selector = (step_params.get('selector', '') or
+                           params.get('selector', ''))
+                soft_assert = (step_params.get('soft_assert', False) or
+                             params.get('soft_assert', False))
+                print(f"      Verifying element: '{selector}'")
+                service.verify_element(
+                    selector, soft_assert=soft_assert,
+                    soft_assert_manager=soft_assert_manager,
+                    step_number=step_number
+                )
                 return True
                 
             elif hasattr(service, 'refresh_browser') and 'refresh' in action:
@@ -806,8 +1537,11 @@ class TestRunner:
                 return True
                 
             elif hasattr(service, 'upload_file') and 'upload' in action:
-                selector = step_params.get('selector', '')
-                file_path = step_params.get('file_path', '')
+                # Check both top-level and parameters dict
+                selector = (step_params.get('selector', '') or
+                           step_params.get('parameters', {}).get('selector', ''))
+                file_path = (step_params.get('file_path', '') or
+                            step_params.get('parameters', {}).get('file_path', ''))
                 service.upload_file(selector, file_path)
                 return True
                 
@@ -865,6 +1599,22 @@ class TestRunner:
                     variables['last_json'] = response.json()
                 else:
                     variables['last_json'] = None
+                
+                # Store response in custom variable if specified
+                store_as = (step_params.get('store_response') or 
+                           params_dict.get('store_response'))
+                if store_as:
+                    response_dict = {
+                        'status': response.status_code,
+                        'headers': dict(response.headers),
+                        'body': response.text,
+                        'data': response.json() if content_type.startswith('application/json') else response.text,
+                        'response_time': response.elapsed.total_seconds() * 1000  # in milliseconds
+                    }
+                    variables[store_as] = response_dict
+                    if hasattr(self.config, 'set_variable'):
+                        self.config.set_variable(store_as, response_dict, 'runtime_data')
+                    print(f"      Stored response as: {store_as}")
                 
                 return True
                 

@@ -1,0 +1,32 @@
+name: "Araknis Device API Test - Using Device Config"
+description: "Test Araknis device using device configuration file"
+tags: ["api", "araknis", "device-config"]
+
+# Device configuration - specify which device config to load
+device_config: "araknis_206"  # Loads config/devices/araknis_206.yaml
+
+# Test-level variables
+variables:
+  device_ip: "192.168.100.206"
+  api_base_url: "http://${device_ip}/api/v1"
+
+steps: 
+  # Test 1: Get system status
+  - action: "api get" 
+    url: "${api_base_url}/system/firmware-info"
+    device_id: "araknis_206"
+    
+  - action: "validate status"
+    status: 200
+    device_id: "araknis_206"
+  # Test 2: POST test (optional)
+  - action: "api get"
+    url: "${api_base_url}/system/basic-info"
+    device_id: "araknis_206"
+  - action: "validate status"
+    status: 200
+    device_id: "araknis_206"
+    json_data:
+      message: "Test from Easy BDD with device config"
+      timestamp: "2024-01-01T12:00:00Z"
+

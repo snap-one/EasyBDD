@@ -1,0 +1,39 @@
+# Core Switch 01 - Individual Device Config  
+# Inherits from cisco_switches group
+
+inherit_from: "device_groups/cisco_switches.yaml"
+device_id: "core_switch_01"  # References device_inventory key
+
+# Device-specific information
+name: "Core Switch 01 - Data Center"
+location: "Data Center - Rack A1"
+tags: ["core", "critical", "datacenter"]
+
+# Override port-specific settings
+ports:
+  critical_ports: [1, 2, 3, 4]     # Uplinks and critical servers
+  server_ports: [5, 6, 7, 8, 9, 10, 11, 12]
+  user_ports: [13, 14, 15, 16, 17, 18, 19, 20]
+  test_safe_ports: [45, 46]        # Safe to disable for testing
+
+# Core-specific VLANs
+vlans:
+  server_vlan: 10
+  user_vlan: 20
+  guest_vlan: 30
+  dmz_vlan: 40
+  test_vlans: [500, 501, 502]
+
+# Spanning tree root priority
+spanning_tree:
+  priority: 4096  # Root bridge priority
+  
+# Environment-specific settings
+environments:
+  production:
+    backup_config: true
+    change_window_required: true
+    readonly_ports: [1, 2, 3, 4]  # Uplinks read-only
+  development:
+    test_ports: [1, 2, 3, 4, 45, 46, 47, 48]
+    backup_config: false

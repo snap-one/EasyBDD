@@ -16,6 +16,9 @@ class TestStep:
     action: str
     parameters: Dict[str, Any]
     shared_step: Optional[str] = None
+    condition: Optional[str] = None  # Conditional expression
+    then_steps: Optional[List['TestStep']] = None  # Steps if condition true
+    else_steps: Optional[List['TestStep']] = None  # Steps if condition false
     
     def __post_init__(self):
         # Ensure parameters is a dictionary
@@ -199,12 +202,30 @@ class YAMLParser:
             if 'shared_step' in step_data:
                 shared_steps = self._expand_shared_step(step_data)
                 steps.extend(shared_steps)
+            # Check if this is a conditional step
+            elif 'condition' in step_data or 'if' in step_data:
+                condition = step_data.get('condition') or step_data.get('if')
+                then_data = step_data.get('then', [])
+                else_data = step_data.get('else', [])
+                
+                then_steps = self._parse_steps(then_data) if then_data else None
+                else_steps = self._parse_steps(else_data) if else_data else None
+                
+                steps.append(TestStep(
+                    action='conditional',
+                    parameters={'expression': condition},
+                    condition=condition,
+                    then_steps=then_steps,
+                    else_steps=else_steps
+                ))
             else:
                 if 'action' not in step_data:
                     raise ValueError(f"Step {i} must have an 'action' field")
                 
                 action = step_data['action']
-                parameters = {k: v for k, v in step_data.items() if k != 'action'}
+                parameters = {k: v for k, v in step_data.items() 
+                             if k not in ['action', 'condition', 'if', 
+                                         'then', 'else']}
                 
                 steps.append(TestStep(action=action, parameters=parameters))
         

@@ -1,0 +1,78 @@
+# Hikvision Camera Group - Shared Configuration
+group_name: "hikvision_cameras"
+group_type: "ip_camera"
+description: "Shared configuration for all Hikvision cameras in deployment"
+
+# Common authentication for all cameras in this group
+authentication:
+  username: "admin"
+  password: "Snapav704!"
+  type: "digest_auth"
+
+# Shared API endpoints
+api:
+  endpoints:
+    info: "/ISAPI/System/deviceInfo"
+    status: "/ISAPI/System/status"
+    streams: "/ISAPI/Streaming/channels"
+    ptz: "/ISAPI/PTZCtrl/channels/1/presets"
+    recording: "/ISAPI/ContentMgmt/record"
+  content_type: "application/xml"
+
+# Common network settings
+network:
+  rtsp_port: 554
+  web_port: 80
+  protocol: "http"
+
+# Shared vendor-specific settings
+vendor_specific:
+  supports_analytics: true
+  max_resolution: "4K"
+  ptz_presets: 10
+  night_vision: true
+  firmware_family: "DS-2CD"
+
+# Common protocols
+protocols:
+  rtsp:
+    main_stream: "/Streaming/Channels/101/"
+    sub_stream: "/Streaming/Channels/102/"
+    authentication_required: true
+
+# Shared test parameters
+test_parameters:
+  expected_codec: "H.264"
+  test_resolution: "1920x1080"
+  connection_timeout: 10
+  stream_timeout: 30
+
+# Device inventory - individual device specifics
+device_inventory:
+  conference_room_01:
+    ip_address: "192.168.1.101"
+    mac_address: "00:11:22:33:44:55"
+    serial_number: "DS7I20220101AAWRQ"
+    location: "Conference Room 1"
+    tags: ["conference_room", "main_building"]
+    
+  conference_room_02:
+    ip_address: "192.168.1.102"
+    mac_address: "00:11:22:33:44:56"
+    serial_number: "DS7I20220102AAWRQ"
+    location: "Conference Room 2"
+    tags: ["conference_room", "main_building"]
+    
+  lobby_entrance:
+    ip_address: "192.168.1.103"
+    mac_address: "00:11:22:33:44:57"
+    serial_number: "DS7I20220103AAWRQ"
+    location: "Main Lobby Entrance"
+    tags: ["entrance", "security_critical"]
+    
+  parking_garage:
+    ip_address: "192.168.1.104"
+    mac_address: "00:11:22:33:44:58"
+    serial_number: "DS7I20220104AAWRQ"
+    location: "Parking Garage Level 1"
+    tags: ["parking", "outdoor"]

@@ -1,0 +1,258 @@
+name: "Web Performance Test Suite"
+description: "Core Web Vitals and performance testing"
+web_app: "web_app_config"
+tags: ["performance", "core_web_vitals", "speed", "optimization"]
+
+variables:
+  # Performance thresholds
+  thresholds:
+    lcp_good: 2500      # Largest Contentful Paint (ms)
+    fid_good: 100       # First Input Delay (ms)
+    cls_good: 0.1       # Cumulative Layout Shift
+    ttfb_good: 800      # Time to First Byte (ms)
+    fcp_good: 1800      # First Contentful Paint (ms)
+    
+  # Test scenarios
+  test_conditions:
+    fast_3g:
+      download: 1600      # Kbps
+      upload: 750
+      latency: 150
+    slow_3g:
+      download: 500
+      upload: 500
+      latency: 400
+    wifi:
+      download: 30000
+      upload: 15000
+      latency: 2
+
+test_scenarios:
+  # Core Web Vitals Testing
+  core_web_vitals:
+    name: "Core Web Vitals Measurement"
+    description: "Measure LCP, FID, and CLS across key pages"
+    network_iteration:
+      source: "test_conditions"
+      steps:
+        - action: set_network_conditions
+          download_speed: "${network_download}"
+          upload_speed: "${network_upload}"
+          latency: "${network_latency}"
+          
+        - action: navigate_to
+          url: "${base_url}"
+          clear_cache: true
+          
+        - action: measure_largest_contentful_paint
+        - action: verify_lcp_under
+          threshold: "${thresholds.lcp_good}"
+          description: "LCP should be under 2.5s on ${network_name}"
+          
+        - action: measure_first_input_delay
+        - action: simulate_user_interaction
+          element: ".main-nav a:first-child"
+        - action: verify_fid_under
+          threshold: "${thresholds.fid_good}"
+          description: "FID should be under 100ms on ${network_name}"
+          
+        - action: measure_cumulative_layout_shift
+        - action: verify_cls_under
+          threshold: "${thresholds.cls_good}"
+          description: "CLS should be under 0.1 on ${network_name}"
+          
+  # Page Load Performance
+  page_load_performance:
+    name: "Page Load Speed Analysis"
+    description: "Comprehensive page load performance testing"
+    steps:
+      # Test home page
+      - action: navigate_to
+        url: "${base_url}"
+        clear_cache: true
+        
+      - action: measure_page_load_complete
+      - action: verify_load_time_under
+        threshold: 3000
+        description: "Home page should load under 3 seconds"
+        
+      - action: measure_time_to_first_byte
+      - action: verify_ttfb_under
+        threshold: "${thresholds.ttfb_good}"
+        description: "TTFB should be under 800ms"
+        
+      - action: measure_first_contentful_paint
+      - action: verify_fcp_under
+        threshold: "${thresholds.fcp_good}"
+        description: "FCP should be under 1.8 seconds"
+        
+      # Test product catalog page (data-heavy)
+      - action: navigate_to
+        url: "${base_url}/products"
+        clear_cache: true
+        
+      - action: measure_page_load_complete
+      - action: verify_load_time_under
+        threshold: 4000
+        description: "Products page should load under 4 seconds"
+        
+      # Measure resource loading
+      - action: measure_resource_timing
+        resource_types: ["image", "script", "stylesheet"]
+        
+      - action: verify_image_optimization
+        description: "Images should be optimized and properly sized"
+        
+  # JavaScript Performance
+  javascript_performance:
+    name: "JavaScript Performance"
+    description: "Test JavaScript execution performance"
+    steps:
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      # Test search performance
+      - action: start_performance_measurement
+      - action: fill_field
+        element: "input[name='search']"
+        value: "test search query"
+        typing_speed: "human"  # Simulate real typing
+        
+      - action: measure_input_responsiveness
+      - action: verify_input_lag_under
+        threshold: 50
+        description: "Input should be responsive (<50ms lag)"
+        
+      # Test filtering performance
+      - action: start_performance_measurement
+      - action: select_option
+        element: "select[name='category']"
+        value: "Electronics"
+        
+      - action: measure_filter_response_time
+      - action: verify_filter_time_under
+        threshold: 500
+        description: "Filtering should complete under 500ms"
+        
+      # Test infinite scroll performance
+      - action: scroll_to_bottom
+      - action: measure_scroll_performance
+      - action: verify_scroll_fps_above
+        threshold: 30
+        description: "Scrolling should maintain >30 FPS"
+        
+  # Memory Usage Testing
+  memory_usage:
+    name: "Memory Usage Analysis"
+    description: "Test for memory leaks and efficient memory usage"
+    steps:
+      - action: navigate_to
+        url: "${base_url}"
+        
+      - action: measure_initial_memory_usage
+      - action: store_variable
+        name: "initial_memory"
+        value: "${memory_usage}"
+        
+      # Simulate heavy usage
+      - action: repeat_actions
+        count: 50
+        actions:
+          - action: navigate_to
+            url: "${base_url}/products"
+          - action: click_element
+            element: ".product-card:nth-child(1)"
+          - action: press_key
+            key: "Escape"
+          - action: navigate_to
+            url: "${base_url}/cart"
+            
+      - action: measure_final_memory_usage
+      - action: calculate_memory_increase
+        initial: "${initial_memory}"
+        final: "${memory_usage}"
+        
+      - action: verify_memory_increase_under
+        threshold: 50  # MB
+        description: "Memory usage should not increase by more than 50MB"
+        
+  # Resource Optimization
+  resource_optimization:
+    name: "Resource Optimization"
+    description: "Test resource loading and optimization"
+    steps:
+      - action: navigate_to
+        url: "${base_url}"
+        
+      # Test image optimization
+      - action: audit_images
+        checks:
+          - "modern_formats"  # WebP, AVIF
+          - "appropriate_sizing"
+          - "lazy_loading"
+          - "compression"
+          
+      # Test CSS optimization
+      - action: audit_css
+        checks:
+          - "minification"
+          - "critical_css_inline"
+          - "unused_css"
+          
+      # Test JavaScript optimization
+      - action: audit_javascript
+        checks:
+          - "minification"
+          - "code_splitting"
+          - "tree_shaking"
+          
+      # Test caching
+      - action: verify_cache_headers
+        resources: ["css", "js", "images"]
+        min_cache_time: 86400  # 1 day in seconds
+        
+      # Test compression
+      - action: verify_compression
+        algorithms: ["gzip", "brotli"]
+        min_compression_ratio: 0.7
+        
+  # Mobile Performance
+  mobile_performance:
+    name: "Mobile Performance"
+    description: "Test performance on mobile devices"
+    setup:
+      - action: set_viewport_size
+        width: 375
+        height: 667
+      - action: set_network_conditions
+        type: "slow_3g"
+      - action: simulate_cpu_throttling
+        factor: 4  # 4x slower than desktop
+        
+    steps:
+      - action: navigate_to
+        url: "${base_url}"
+        clear_cache: true
+        
+      - action: measure_mobile_performance_score
+      - action: verify_mobile_score_above
+        threshold: 75
+        description: "Mobile performance score should be above 75"
+        
+      - action: measure_touch_response_time
+      - action: tap_element
+        element: ".main-nav-toggle"
+      - action: verify_touch_response_under
+        threshold: 100
+        description: "Touch response should be under 100ms"
+        
+reporting:
+  performance_budget_tracking: true
+  core_web_vitals_report: true
+  lighthouse_audit: true
+  resource_timing_analysis: true
+  performance_trends: true
+
+cleanup:
+  - action: reset_network_conditions
+  - action: close_browser

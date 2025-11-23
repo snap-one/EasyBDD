@@ -1,0 +1,32 @@
+name: "Web UI Functionality Demo"
+description: "Demonstrates multiple web UI testing capabilities"
+tags: ["demo", "functional", "smoke"]
+
+variables:
+  search_term: "easy_bdd_test"
+  
+steps:
+  # Test navigation
+  - action: open_browser
+    url: "https://www.google.com"
+    
+  # Test form interaction
+  - action: fill_form_field
+    field: "q"
+    value: "${search_term}"
+    
+  # Test clicking
+  - action: click_element
+    selector: "input[name='btnK']"
+    
+  # Take screenshot of results
+  - action: take_screenshot
+    name: "google_search_results"
+    
+  # Test navigation to another site
+  - action: open_browser
+    url: "https://httpbin.org/html"
+    
+  # Take final screenshot
+  - action: take_screenshot
+    name: "httpbin_html_page"

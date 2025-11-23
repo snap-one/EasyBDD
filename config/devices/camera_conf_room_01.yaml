@@ -1,0 +1,28 @@
+# Conference Room 1 Camera - Individual Device Config
+# Inherits from hikvision_cameras group
+
+inherit_from: "device_groups/hikvision_cameras.yaml"
+device_id: "conference_room_01"  # References device_inventory key
+
+# Device-specific overrides (everything else inherited)
+name: "Conference Room 1 - Hikvision Camera"
+location: "Conference Room 1 - Main Building"
+tags: ["conference_room", "main_building", "critical"]
+
+# Override specific settings if needed
+vendor_specific:
+  ptz_presets: 5  # This camera only has 5 presets
+  
+# Additional device-specific test parameters
+test_data:
+  expected_view: "conference_table"
+  motion_detection_zones: ["entry", "presentation_area"]
+  
+# Environment-specific overrides
+environments:
+  production:
+    recording_enabled: true
+    motion_detection: true
+    alert_email: "security@company.com"
+  development:
+    recording_enabled: false

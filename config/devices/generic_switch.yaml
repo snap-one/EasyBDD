@@ -1,0 +1,50 @@
+# Generic Network Switch Configuration
+# Example of how to configure a different type of device
+
+device_info:
+  name: "Generic Network Switch"
+  type: "switch"
+  manufacturer: "Generic"
+  model: "GS-24T"
+  firmware_version: "1.0.0"
+  location: "Test Lab"
+
+# Network configuration
+network:
+  ip_address: "192.168.1.100"
+  hostname: "switch-generic"
+  port: 80
+  protocol: "http"
+  base_url: "http://192.168.1.100"
+
+# Authentication configuration
+authentication:
+  type: "basic_auth"
+  username: "admin"
+  password: "admin"
+  success_codes: [200]  # Standard basic auth - expects 200 OK
+  verify_ssl: false
+  timeout: 15
+  headers:
+    Accept: "application/json"
+
+# API endpoints for this device
+api_endpoints:
+  device_info: "/api/system/info"
+  system_status: "/api/system/status"
+  port_status: "/api/ports/status"
+  config: "/api/config"
+
+# Test data specific to this device
+test_data:
+  expected_device_name: "Generic Switch"
+  expected_model: "GS-24T"
+  admin_username: "admin"
+  expected_port_count: 24
+
+# Test settings
+test_settings:
+  connection_timeout: 15
+  read_timeout: 30
+  max_retries: 2
+  retry_delay: 1

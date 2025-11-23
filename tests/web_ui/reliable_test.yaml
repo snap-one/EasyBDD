@@ -1,0 +1,42 @@
+name: "Reliable Web UI Demo"
+description: "Demonstrates web UI testing with reliable test site"
+tags: ["demo", "reliable", "smoke"]
+
+variables:
+  form_data:
+    name: "Test User"
+    email: "test@example.com"
+    message: "This is a test from Easy BDD framework"
+    
+steps:
+  # Test navigation
+  - action: open_browser
+    url: "https://httpbin.org/forms/post"
+    
+  # Take screenshot of form
+  - action: take_screenshot
+    name: "form_page_loaded"
+    
+  # Test form filling
+  - action: fill_form_field
+    field: "custname"
+    value: "${form_data.name}"
+    
+  - action: fill_form_field  
+    field: "custemail"
+    value: "${form_data.email}"
+    
+  - action: fill_form_field
+    field: "comments"
+    value: "${form_data.message}"
+    
+  # Take screenshot after filling
+  - action: take_screenshot
+    name: "form_filled"
+    
+  # Test navigation to HTML page
+  - action: open_browser
+    url: "https://httpbin.org/html"
+    
+  - action: take_screenshot
+    name: "html_page_final"

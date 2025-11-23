@@ -1,0 +1,108 @@
+name: "Security Audit - ${device_name}"
+description: "Comprehensive security assessment for ${device_type} devices"
+device: "${device_config}"
+tags: ["security", "audit", "compliance", "${device_type}"]
+
+variables:
+  audit_timestamp: "${timestamp}"
+  device_name: "${config.name}"
+  device_type: "${config.device_type}"
+  audit_level: "standard"  # standard, strict, compliance
+
+steps:
+  # Authentication Security
+  - action: "test_default_credentials"
+    common_defaults: ["admin/admin", "admin/password", "admin/", "root/root"]
+    
+  - action: "test_weak_passwords"
+    wordlist: "security/weak_passwords.txt"
+    
+  - action: "test_password_policy"
+    requirements:
+      min_length: 8
+      complexity: true
+      expiration: 90
+      
+  # Protocol Security
+  - action: "scan_open_ports"
+    host: "${config.ip_address}"
+    
+  - action: "test_ssl_configuration"
+    url: "${config.network.base_url}"
+    check_certificate: true
+    check_ciphers: true
+    
+  - action: "test_http_security_headers"
+    headers: ["X-Frame-Options", "X-Content-Type-Options", "Strict-Transport-Security"]
+    
+  # Device-Specific Security
+  - action: "conditional_step"
+    condition: "device_type == 'ip_camera'"
+    steps:
+      - action: "test_rtsp_authentication"
+      - action: "check_video_encryption"
+      - action: "test_onvif_security"
+      - action: "check_privacy_masking"
+      
+  - action: "conditional_step"
+    condition: "device_type == 'power_supply'"
+    steps:
+      - action: "test_snmp_security"
+        communities: ["public", "private"]
+      - action: "check_outlet_access_controls"
+      - action: "test_critical_outlet_protection"
+      
+  - action: "conditional_step"
+    condition: "device_type == 'network_switch'"
+    steps:
+      - action: "test_vlan_isolation"
+      - action: "check_management_vlan_security"
+      - action: "test_spanning_tree_protection"
+      - action: "validate_port_security"
+      
+  # Configuration Security
+  - action: "download_configuration"
+    method: "backup"
+    
+  - action: "analyze_configuration"
+    checks:
+      - "unused_services_disabled"
+      - "secure_protocols_enabled"
+      - "logging_configured"
+      - "access_controls_defined"
+      
+  # Vulnerability Assessment
+  - action: "vulnerability_scan"
+    scanner: "nmap"
+    scripts: ["vuln", "auth"]
+    
+  - action: "check_known_vulnerabilities"
+    cve_database: "nvd"
+    firmware_version: "${detected_firmware}"
+    
+  # Compliance Checks
+  - action: "conditional_step"
+    condition: "audit_level == 'compliance'"
+    steps:
+      - action: "pci_dss_compliance_check"
+      - action: "nist_cybersecurity_framework_check"
+      - action: "iso27001_controls_check"
+      
+  # Network Security
+  - action: "test_network_segmentation"
+  - action: "check_firewall_rules"
+  - action: "test_intrusion_detection"
+  
+reporting:
+  - action: "security_score_calculation"
+    framework: "cvss"
+  - action: "generate_security_report"
+    format: ["pdf", "json"]
+    output: "reports/security/${device_name}_security_audit.pdf"
+  - action: "update_compliance_dashboard"
+  - action: "create_remediation_plan"
+    priority: "high_risk_first"
+    
+cleanup:
+  - action: "remove_test_accounts"
+  - action: "clear_scan_artifacts"

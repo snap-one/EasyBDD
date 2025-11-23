@@ -1,0 +1,58 @@
+# Web Application Test Configuration
+app_name: "MyWebApp"
+app_type: "web_application"
+base_url: "https://mywebapp.com"
+
+# Browser configuration
+browser:
+  default: "chrome"
+  headless: false
+  window_size: "1920x1080"
+  timeout: 30
+  implicit_wait: 10
+
+# Authentication configuration
+authentication:
+  login_url: "/login"
+  logout_url: "/logout"
+  default_user:
+    username: "test@example.com"
+    password: "TestPassword123"
+  admin_user:
+    username: "admin@example.com"
+    password: "AdminPassword123"
+
+# Page URLs
+pages:
+  home: "/"
+  login: "/login"
+  dashboard: "/dashboard"
+  profile: "/profile"
+  settings: "/settings"
+  users: "/admin/users"
+  products: "/products"
+  cart: "/cart"
+  checkout: "/checkout"
+
+# Test data
+test_data:
+  valid_email: "test@example.com"
+  invalid_email: "invalid-email"
+  test_product_id: "12345"
+  test_search_term: "laptop"
+  
+# Environment configurations
+environments:
+  development:
+    base_url: "https://dev.mywebapp.com"
+    database_reset: true
+    debug_mode: true
+  staging:
+    base_url: "https://staging.mywebapp.com"
+    database_reset: false
+    debug_mode: false
+  production:
+    base_url: "https://mywebapp.com"
+    database_reset: false
+    debug_mode: false
+    readonly_tests_only: true

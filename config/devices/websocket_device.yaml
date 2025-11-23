@@ -1,0 +1,43 @@
+# WebSocket-style API Device Configuration
+# Example for devices with unconventional success codes
+
+device_info:
+  name: "Custom Protocol Device"
+  type: "custom"
+  manufacturer: "CustomTech"
+  model: "PROTO-X1"
+  location: "Development Lab"
+
+network:
+  ip_address: "192.168.100.200"
+  hostname: "proto-device"
+  port: 3000
+  protocol: "http"
+  base_url: "http://192.168.100.200:3000"
+
+# Authentication - Custom protocol with flexible response codes
+authentication:
+  type: "bearer_token"
+  auth_endpoint: "/connect"
+  auth_method: "POST"
+  username: "dev"
+  password: "proto123"
+  username_field: "login"
+  password_field: "secret"
+  token_field: "authToken"
+  token_expires_field: "duration"
+  default_expiry: 1800
+  # Very flexible - accepts many different success codes
+  success_codes: [200, 201, 202, 204]  # OK, Created, Accepted, No Content
+  verify_ssl: false
+  timeout: 20
+  headers:
+    Content-Type: "application/json"
+    Accept: "application/json"
+    X-Protocol-Version: "1.0"
+
+api_endpoints:
+  connect: "/connect"
+  data: "/api/data"
+  stream: "/api/stream"
+  disconnect: "/disconnect"

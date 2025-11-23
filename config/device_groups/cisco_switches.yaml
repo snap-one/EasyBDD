@@ -1,0 +1,78 @@
+# Cisco Switch Group - Shared Configuration
+group_name: "cisco_switches"
+group_type: "network_switch"
+description: "Shared configuration for all Cisco Catalyst switches"
+
+# Common authentication
+authentication:
+  username: "admin"
+  password: "cisco123"
+  enable_password: "enable123"
+  type: "ssh"
+
+# Shared network settings
+network:
+  ssh_port: 22
+  telnet_port: 23
+  web_port: 443
+  protocol: "https"
+  snmp_port: 161
+
+# Common vendor settings
+vendor_specific:
+  vendor: "cisco"
+  ios_family: "catalyst"
+  management_protocol: "ssh"
+
+# Shared SNMP configuration
+snmp:
+  community: "network123"
+  version: "2c"
+  oids:
+    port_status: "1.3.6.1.2.1.2.2.1.8"
+    port_admin: "1.3.6.1.2.1.2.2.1.7"
+    vlan_ports: "1.3.6.1.2.1.17.7.1.4.3.1.2"
+
+# Common CLI commands
+cli_commands:
+  show_version: "show version"
+  show_interfaces: "show interfaces status"
+  show_vlans: "show vlan brief"
+  show_spanning_tree: "show spanning-tree"
+
+# Common VLAN configuration
+vlans:
+  default_vlan: 1
+  management_vlan: 100
+  
+# Device inventory with specific details
+device_inventory:
+  core_switch_01:
+    ip_address: "192.168.1.10"
+    mac_address: "aa:bb:cc:dd:ee:01"
+    serial_number: "FCW2130G0AB"
+    model: "WS-C2960X-48FPS-L"
+    location: "Data Center - Rack A1"
+    port_count: 48
+    uplink_ports: [47, 48]
+    tags: ["core", "critical"]
+    
+  access_switch_floor2:
+    ip_address: "192.168.1.20"
+    mac_address: "aa:bb:cc:dd:ee:02"
+    serial_number: "FCW2130G0AC"
+    model: "WS-C2960X-24PS-L"
+    location: "Floor 2 - IDF"
+    port_count: 24
+    uplink_ports: [23, 24]
+    tags: ["access", "floor2"]
+    
+  access_switch_floor3:
+    ip_address: "192.168.1.21"
+    mac_address: "aa:bb:cc:dd:ee:03"
+    serial_number: "FCW2130G0AD"
+    model: "WS-C2960X-24PS-L"
+    location: "Floor 3 - IDF"
+    port_count: 24
+    uplink_ports: [23, 24]
+    tags: ["access", "floor3"]

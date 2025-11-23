@@ -1,0 +1,423 @@
+name: "Web UI Testing Examples"
+description: "Comprehensive examples demonstrating framework capabilities"
+web_app: "web_app_config"
+tags: ["examples", "documentation", "tutorial"]
+
+# Example variables and test data
+variables:
+  # Sample user credentials
+  example_user:
+    username: "demo@example.com"
+    password: "DemoPassword123!"
+    
+  # Sample product data
+  sample_products:
+    - { name: "Laptop Pro", price: "$1,299", category: "Electronics" }
+    - { name: "Running Shoes", price: "$89.99", category: "Sports" }
+    - { name: "Coffee Mug", price: "$12.50", category: "Home" }
+    
+  # Test configuration
+  test_timeouts:
+    short: 5000
+    medium: 10000
+    long: 30000
+
+test_scenarios:
+  # Example 1: Basic Navigation and Verification
+  basic_navigation:
+    name: "Basic Navigation Example"
+    description: "Demonstrates basic page navigation and element verification"
+    steps:
+      # Navigate to home page
+      - action: navigate_to
+        url: "${base_url}"
+        description: "Go to application home page"
+        
+      # Verify page loaded correctly
+      - action: verify_page_title
+        expected: "Welcome - MyWebApp"
+        description: "Check page title is correct"
+        
+      # Verify key elements are present
+      - action: verify_element_visible
+        element: ".main-navigation"
+        description: "Main navigation should be visible"
+        
+      - action: verify_element_visible
+        element: ".hero-section"
+        description: "Hero section should be visible"
+        
+      # Take screenshot for documentation
+      - action: take_screenshot
+        filename: "home_page_loaded.png"
+        description: "Capture home page state"
+        
+  # Example 2: Form Interaction
+  form_interaction_example:
+    name: "Form Interaction Example"
+    description: "Shows how to interact with forms and validate responses"
+    steps:
+      # Navigate to contact form
+      - action: navigate_to
+        url: "${base_url}/contact"
+        
+      # Fill out contact form
+      - action: fill_field
+        element: "input[name='name']"
+        value: "Test User"
+        description: "Enter full name"
+        
+      - action: fill_field
+        element: "input[name='email']"
+        value: "test.user@example.com"
+        description: "Enter email address"
+        
+      - action: select_option
+        element: "select[name='subject']"
+        value: "General Inquiry"
+        description: "Select inquiry type"
+        
+      - action: fill_field
+        element: "textarea[name='message']"
+        value: "This is a test message from the automated test suite."
+        description: "Enter message content"
+        
+      # Submit form
+      - action: click_element
+        element: "button[type='submit']"
+        description: "Submit contact form"
+        
+      # Verify success response
+      - action: wait_for_element
+        element: ".success-message"
+        timeout: "${test_timeouts.medium}"
+        description: "Wait for success message"
+        
+      - action: verify_text_present
+        text: "Thank you for your message"
+        description: "Confirm form submission success"
+        
+  # Example 3: Search and Filtering
+  search_and_filter_example:
+    name: "Search and Filtering Example"
+    description: "Demonstrates search functionality and result filtering"
+    steps:
+      # Go to products page
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      # Test search functionality
+      - action: fill_field
+        element: "input[name='search']"
+        value: "laptop"
+        description: "Enter search term"
+        
+      - action: click_element
+        element: ".search-button"
+        description: "Execute search"
+        
+      # Wait for results to load
+      - action: wait_for_element
+        element: ".product-grid .product-card"
+        timeout: "${test_timeouts.medium}"
+        description: "Wait for search results"
+        
+      # Verify search results
+      - action: verify_text_present
+        text: "laptop"
+        element: ".product-card"
+        description: "Search results should contain laptops"
+        
+      # Apply category filter
+      - action: click_element
+        element: "input[name='category'][value='Electronics']"
+        description: "Filter by Electronics category"
+        
+      # Verify filter applied
+      - action: wait_for_element
+        element: ".filter-applied.electronics"
+        timeout: "${test_timeouts.short}"
+        description: "Wait for filter to be applied"
+        
+  # Example 4: Multi-Step Workflow
+  shopping_cart_workflow:
+    name: "Shopping Cart Workflow Example"
+    description: "End-to-end shopping cart interaction"
+    steps:
+      # Start with empty cart
+      - action: navigate_to
+        url: "${base_url}/cart"
+        
+      - action: verify_text_present
+        text: "Your cart is empty"
+        description: "Verify cart starts empty"
+        
+      # Browse products
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      # Add first product to cart
+      - action: click_element
+        element: ".product-card:first-child .add-to-cart"
+        description: "Add first product to cart"
+        
+      # Verify item added notification
+      - action: wait_for_element
+        element: ".notification.item-added"
+        timeout: "${test_timeouts.short}"
+        description: "Wait for add-to-cart confirmation"
+        
+      # Check cart badge updated
+      - action: verify_element_visible
+        element: ".cart-badge"
+        description: "Cart badge should show item count"
+        
+      # Go to cart
+      - action: click_element
+        element: ".cart-link"
+        description: "Navigate to cart page"
+        
+      # Verify item in cart
+      - action: verify_element_visible
+        element: ".cart-item"
+        description: "Cart should contain the added item"
+        
+      # Update quantity
+      - action: fill_field
+        element: ".cart-item input[name='quantity']"
+        value: "2"
+        description: "Change item quantity to 2"
+        
+      - action: click_element
+        element: ".update-quantity"
+        description: "Update cart quantities"
+        
+      # Verify total updated
+      - action: wait_for_element
+        element: ".cart-total.updated"
+        timeout: "${test_timeouts.short}"
+        description: "Wait for cart total to update"
+        
+  # Example 5: Error Handling
+  error_handling_example:
+    name: "Error Handling Example"
+    description: "Shows how to test error scenarios and validation"
+    steps:
+      # Test form validation
+      - action: navigate_to
+        url: "${base_url}/register"
+        
+      # Submit empty form to trigger validation
+      - action: click_element
+        element: "button[type='submit']"
+        description: "Submit empty registration form"
+        
+      # Verify validation errors appear
+      - action: verify_element_visible
+        element: ".field-error"
+        description: "Validation errors should be displayed"
+        
+      - action: verify_text_present
+        text: "This field is required"
+        description: "Required field error message should appear"
+        
+      # Test invalid email format
+      - action: fill_field
+        element: "input[name='email']"
+        value: "invalid-email-format"
+        description: "Enter invalid email"
+        
+      - action: click_element
+        element: "button[type='submit']"
+        description: "Submit with invalid email"
+        
+      # Verify email validation error
+      - action: verify_text_present
+        text: "Please enter a valid email address"
+        description: "Email validation error should appear"
+        
+      # Test password mismatch
+      - action: fill_field
+        element: "input[name='email']"
+        value: "test@example.com"
+        
+      - action: fill_field
+        element: "input[name='password']"
+        value: "password123"
+        
+      - action: fill_field
+        element: "input[name='confirm_password']"
+        value: "different_password"
+        description: "Enter mismatched password confirmation"
+        
+      - action: click_element
+        element: "button[type='submit']"
+        
+      # Verify password mismatch error
+      - action: verify_text_present
+        text: "Passwords do not match"
+        description: "Password mismatch error should appear"
+        
+  # Example 6: Dynamic Content
+  dynamic_content_example:
+    name: "Dynamic Content Example"
+    description: "Handling AJAX-loaded content and dynamic updates"
+    steps:
+      # Navigate to page with dynamic content
+      - action: navigate_to
+        url: "${base_url}/dashboard"
+        
+      # Wait for initial content to load
+      - action: wait_for_element
+        element: ".dashboard-widgets"
+        timeout: "${test_timeouts.medium}"
+        description: "Wait for dashboard widgets to load"
+        
+      # Trigger AJAX content load
+      - action: click_element
+        element: ".load-more-data"
+        description: "Click to load more data"
+        
+      # Wait for loading indicator
+      - action: wait_for_element
+        element: ".loading-spinner"
+        timeout: "${test_timeouts.short}"
+        description: "Loading indicator should appear"
+        
+      # Wait for content to load
+      - action: wait_for_element_gone
+        element: ".loading-spinner"
+        timeout: "${test_timeouts.long}"
+        description: "Wait for loading to complete"
+        
+      # Verify new content loaded
+      - action: verify_element_visible
+        element: ".new-content"
+        description: "New content should be visible"
+        
+  # Example 7: Modal Interactions
+  modal_interaction_example:
+    name: "Modal Interaction Example"
+    description: "Working with modal dialogs and overlays"
+    steps:
+      - action: navigate_to
+        url: "${base_url}/products"
+        
+      # Open product details modal
+      - action: click_element
+        element: ".product-card:first-child .view-details"
+        description: "Open product details modal"
+        
+      # Wait for modal to appear
+      - action: wait_for_element
+        element: ".modal.product-details"
+        timeout: "${test_timeouts.short}"
+        description: "Wait for modal to open"
+        
+      # Verify modal content
+      - action: verify_element_visible
+        element: ".modal .product-title"
+        description: "Product title should be visible in modal"
+        
+      - action: verify_element_visible
+        element: ".modal .product-description"
+        description: "Product description should be visible"
+        
+      # Test modal close button
+      - action: click_element
+        element: ".modal .close-button"
+        description: "Close modal using close button"
+        
+      # Verify modal closed
+      - action: wait_for_element_gone
+        element: ".modal.product-details"
+        timeout: "${test_timeouts.short}"
+        description: "Modal should be closed"
+        
+      # Test modal escape key
+      - action: click_element
+        element: ".product-card:nth-child(2) .view-details"
+        description: "Open another product modal"
+        
+      - action: wait_for_element
+        element: ".modal.product-details"
+        timeout: "${test_timeouts.short}"
+        
+      - action: press_key
+        key: "Escape"
+        description: "Close modal using Escape key"
+        
+      - action: wait_for_element_gone
+        element: ".modal.product-details"
+        timeout: "${test_timeouts.short}"
+        description: "Modal should close with Escape key"
+        
+  # Example 8: File Upload
+  file_upload_example:
+    name: "File Upload Example"
+    description: "Testing file upload functionality"
+    steps:
+      - action: navigate_to
+        url: "${base_url}/profile"
+        
+      # Test valid image upload
+      - action: upload_file
+        element: "input[type='file'][name='avatar']"
+        file_path: "tests/data/test_avatar.jpg"
+        description: "Upload profile avatar image"
+        
+      # Verify upload success
+      - action: wait_for_element
+        element: ".upload-success"
+        timeout: "${test_timeouts.medium}"
+        description: "Wait for upload completion"
+        
+      - action: verify_text_present
+        text: "Avatar updated successfully"
+        description: "Success message should appear"
+        
+      # Verify image preview
+      - action: verify_element_visible
+        element: ".avatar-preview img"
+        description: "Avatar preview should be visible"
+        
+  # Example 9: Multi-Browser Testing Pattern
+  cross_browser_example:
+    name: "Cross-Browser Testing Example"
+    description: "Demonstrates browser-specific testing patterns"
+    browser_iteration:
+      browsers: ["chrome", "firefox", "webkit"]
+      steps:
+        - action: navigate_to
+          url: "${base_url}"
+          description: "Test home page on ${browser_name}"
+          
+        - action: verify_element_visible
+          element: ".main-content"
+          description: "Main content should render on ${browser_name}"
+          
+        - action: take_screenshot
+          filename: "homepage_${browser_name}.png"
+          description: "Capture ${browser_name} rendering"
+          
+        # Browser-specific actions
+        - action: conditional_step
+          condition: "${browser_name} == 'firefox'"
+          steps:
+            - action: wait
+              seconds: 2
+              description: "Firefox needs extra time"
+              
+        - action: conditional_step
+          condition: "${browser_name} == 'webkit'"
+          steps:
+            - action: verify_element_visible
+              element: ".webkit-specific-feature"
+              description: "WebKit-specific feature check"
+
+# Cleanup actions
+cleanup:
+  - action: clear_browser_data
+    description: "Clear cookies and local storage"
+  - action: close_browser
+    description: "Close browser instance"

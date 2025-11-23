@@ -88,6 +88,7 @@ class ConfigManager:
         self.config_path = config_path or Path("config/framework.yaml")
         self._config = self._create_default_config()
         self._environments: Dict[str, Dict[str, Any]] = {}
+        self._raw_config: Dict[str, Any] = {}  # Store raw config data
         
         # Load configuration if file exists
         if self.config_path.exists():
@@ -115,6 +116,9 @@ class ConfigManager:
         
         with open(path, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f) or {}
+        
+        # Store raw config data for custom settings
+        self._raw_config = data.get('config', {})
         
         # Load main configuration
         config_data = data.get('config', {})

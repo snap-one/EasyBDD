@@ -1,0 +1,47 @@
+name: "System Configuration API Tests"
+description: "Tests for /system/* endpoints"
+device: araknis_206
+tags: ["api", "system", "post"]
+
+variables:
+  module_base: "${api_base_url}/system"
+
+test_cases:
+  - name: "Network Configuration"
+    steps:
+      - action: api post
+        url: "${module_base}/network-config"
+        data:
+          interface: "eth0"
+          dhcp_enabled: true
+      - action: validate status
+        status: 200
+      - action: validate json
+        field: "status"
+        expected: "success"
+        
+  - name: "User Management"
+    steps:
+      - action: api post
+        url: "${module_base}/users"
+        data:
+          username: "apitest"
+          role: "operator"
+      - action: validate status
+        status: 201
+      - action: validate json
+        field: "data.username"
+        expected: "apitest"
+        
+  - name: "System Backup"
+    steps:
+      - action: api post
+        url: "${module_base}/backup"
+        data:
+          type: "configuration"
+          include_logs: false
+      - action: validate status
+        status: 202
+      - action: validate json
+        field: "job.status"
+        expected: "queued"

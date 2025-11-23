@@ -1,0 +1,64 @@
+name: "Device Onboarding Test - ${device_name}"
+description: "Comprehensive onboarding test for new ${device_type} devices"
+device: "${device_config}"
+tags: ["onboarding", "${device_type}", "baseline"]
+
+variables:
+  device_name: "${config.name}"
+  device_type: "${config.device_type}"
+  device_ip: "${config.ip_address}"
+  base_url: "${config.network.base_url}"
+
+setup:
+  - action: "log_test_start"
+    message: "Starting onboarding for ${device_name} (${device_ip})"
+
+steps:
+  # Phase 1: Basic Connectivity
+  - action: "ping_device"
+    host: "${device_ip}"
+    timeout: 10
+    
+  - action: "validate_ping_success"
+    
+  # Phase 2: Protocol Availability  
+  - action: "port_scan"
+    host: "${device_ip}"
+    ports: "${config.network}"
+    
+  # Phase 3: Authentication Test
+  - action: "test_authentication"
+    method: "${config.authentication.type}"
+    username: "${config.authentication.username}"
+    password: "${config.authentication.password}"
+    
+  # Phase 4: Device Information Gathering
+  - action: "get_device_info"
+    method: "auto_detect"  # API, SNMP, or Web scraping
+    
+  - action: "validate_device_info"
+    required_fields: ["model", "firmware", "serial"]
+    
+  # Phase 5: Capability Detection
+  - action: "detect_capabilities"
+    
+  - action: "validate_expected_capabilities"
+    expected: "${config.capabilities}"
+    
+  # Phase 6: Basic Functionality
+  - action: "run_capability_tests"
+    capabilities: "${detected_capabilities}"
+    
+  # Phase 7: Performance Baseline
+  - action: "performance_baseline"
+    tests: ["response_time", "throughput", "concurrent_connections"]
+    
+cleanup:
+  - action: "logout_all_sessions"
+  - action: "log_test_completion"
+    
+reporting:
+  - action: "generate_device_profile"
+    output: "reports/device_profiles/${device_name}_profile.json"
+  - action: "update_device_inventory"
+    status: "onboarded"

@@ -1,0 +1,44 @@
+# Rack A1 PDU - Individual Device Config
+# Inherits from apc_pdus group
+
+inherit_from: "device_groups/apc_pdus.yaml" 
+device_id: "rack_a1_pdu"  # References device_inventory key
+
+# Device-specific information
+name: "Data Center Rack A1 PDU"
+location: "Data Center - Rack A1"
+tags: ["critical", "datacenter", "rack_a1"]
+
+# Rack-specific outlet assignments
+outlet_assignments:
+  1: "Core Switch 01 - Primary PSU"
+  2: "Core Switch 01 - Secondary PSU" 
+  3: "Firewall - Primary PSU"
+  4: "Server 01 - Primary PSU"
+  5: "Server 01 - Secondary PSU"
+  6: "Server 02 - Primary PSU"
+  7: "UPS Management Card"
+  8: "Network Storage"
+  9: "Camera PoE Injector"
+  10: "Wireless Controller"
+  11: "Management Laptop"
+  12: "Test Equipment"
+  13: "Spare - Available"
+  14: "Spare - Available"
+  15: "Spare - Available" 
+  16: "Spare - Available"
+
+# Safety restrictions
+safety_config:
+  never_cycle: [1, 2, 3, 4, 5, 6]  # Critical infrastructure
+  require_approval: [7, 8, 9, 10]  # Important but not critical
+  free_to_test: [11, 12, 13, 14, 15, 16]  # Safe for testing
+
+# Environment-specific settings
+environments:
+  production:
+    critical_outlets: [1, 2, 3, 4, 5, 6, 7, 8]
+    maintenance_window_required: true
+  development:
+    critical_outlets: []  # No restrictions in dev
+    test_outlets: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]

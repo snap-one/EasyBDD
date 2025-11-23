@@ -1,0 +1,8 @@
+device_group,device_id,device_name,ip_address,mac_address,serial_number,location,device_specific_param1,device_specific_param2
+hikvision_cameras,conference_room_01,Conference Room 1 Camera,192.168.1.101,00:11:22:33:44:55,DS7I20220101AAWRQ,Conference Room 1,5,conference_table
+hikvision_cameras,conference_room_02,Conference Room 2 Camera,192.168.1.102,00:11:22:33:44:56,DS7I20220102AAWRQ,Conference Room 2,8,presentation_area
+hikvision_cameras,lobby_entrance,Lobby Entrance Camera,192.168.1.103,00:11:22:33:44:57,DS7I20220103AAWRQ,Main Lobby,10,entrance_door
+hikvision_cameras,parking_garage,Parking Garage Camera,192.168.1.104,00:11:22:33:44:58,DS7I20220104AAWRQ,Parking Level 1,0,vehicle_detection
+cisco_switches,core_switch_01,Core Switch 01,192.168.1.10,aa:bb:cc:dd:ee:01,FCW2130G0AB,Data Center Rack A1,48,core
+cisco_switches,access_switch_floor2,Floor 2 Access Switch,192.168.1.20,aa:bb:cc:dd:ee:02,FCW2130G0AC,Floor 2 IDF,24,access
+cisco_switches,access_switch_floor3,Floor 3 Access Switch,192.168.1.21,aa:bb:cc:dd:ee:03,FCW2130G0AD,Floor 3 IDF,24,access

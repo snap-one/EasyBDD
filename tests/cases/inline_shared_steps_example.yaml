@@ -1,0 +1,45 @@
+name: "Inline Shared Steps Example"
+description: "Define and reuse steps within the same test file"
+tags: ["jsonrpc", "example"]
+
+variables:
+  server_url: "wss://firmware.testing.ovrc.com:10444"
+  device_id: "14:3F:C3:91:09:F7"
+
+# Define shared steps in this file
+shared_steps:
+  - name: "Quick Device Check"
+    parameters: ["check_name"]
+    steps:
+      - action: "JSONRPC get about"
+        store_as: "device_data"
+      - action: "Assert"
+        expression: "device_data is not None"
+        message: "${check_name} - Device should respond"
+
+setup:
+  - action: "JSONRPC connect"
+    server_url: "${server_url}"
+    device_id: "${device_id}"
+  - action: "JSONRPC start device updates"
+
+steps:
+  # Use the shared step multiple times
+  - shared_step: "Quick Device Check"
+    check_name: "First Check"
+  
+  # Do something else
+  - action: "JSONRPC get network settings"
+    store_as: "net_config"
+  
+  # Use the shared step again
+  - shared_step: "Quick Device Check"
+    check_name: "Second Check"
+  
+  # More work
+  - action: "JSONRPC get time settings"
+    store_as: "time_config"
+  
+  # Use it one more time
+  - shared_step: "Quick Device Check"
+    check_name: "Final Check"

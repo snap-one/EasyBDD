@@ -1,0 +1,36 @@
+# Industrial IoT Sensor Configuration  
+# Example for industrial devices with custom API patterns
+
+device_info:
+  name: "Industrial Temperature Sensor"
+  type: "sensor"
+  manufacturer: "IndustrialTech"
+  model: "TEMP-500"
+  location: "Factory Floor"
+
+network:
+  ip_address: "10.0.1.100"
+  hostname: "temp-sensor-01"
+  port: 9090
+  protocol: "http"
+  base_url: "http://10.0.1.100:9090"
+
+# Authentication - Industrial device with API key
+authentication:
+  type: "api_key"
+  api_key: "INDUSTRIAL_API_KEY_HERE"
+  header_name: "X-Device-Key"
+  # Industrial devices often use 202 Accepted for async operations
+  success_codes: [200, 202]  # OK or Accepted
+  verify_ssl: false
+  timeout: 30  # Industrial networks can be slow
+  headers:
+    Content-Type: "application/json"
+    Accept: "application/json"
+    X-Client: "EasyBDD"
+
+api_endpoints:
+  readings: "/sensors/temperature/current"
+  history: "/sensors/temperature/history"
+  config: "/device/config"
+  calibrate: "/sensors/calibrate"

@@ -1,0 +1,149 @@
+name: "Login Functionality Test Suite"
+description: "Comprehensive testing of login functionality"
+web_app: "web_app_config"
+tags: ["login", "authentication", "critical"]
+
+variables:
+  valid_username: "test@example.com"
+  valid_password: "TestPassword123"
+  invalid_username: "invalid@example.com"
+  invalid_password: "wrongpassword"
+
+setup:
+  - action: open_browser
+    url: "${base_url}/login"
+    browser: "chrome"
+  - action: maximize_window
+
+test_scenarios:
+  # Scenario 1: Successful Login
+  successful_login:
+    name: "Valid User Login"
+    description: "Test successful login with valid credentials"
+    steps:
+      - action: page_action
+        page: "login_page"
+        action: "login"
+        username: "${valid_username}"
+        password: "${valid_password}"
+        
+      - action: verify_url_contains
+        expected: "/dashboard"
+        
+      - action: page_action
+        page: "dashboard_page"
+        action: "verify_logged_in"
+        
+      - action: verify_element_text_contains
+        element: "h1.welcome"
+        expected: "Welcome"
+        
+  # Scenario 2: Invalid Credentials
+  invalid_credentials:
+    name: "Invalid Login Credentials"
+    description: "Test login failure with invalid credentials"
+    steps:
+      - action: page_action
+        page: "login_page"
+        action: "login"
+        username: "${invalid_username}"
+        password: "${invalid_password}"
+        
+      - action: verify_element_visible
+        element: ".error-message"
+        
+      - action: verify_element_text_contains
+        element: ".error-message"
+        expected: "Invalid credentials"
+        
+      - action: verify_url_contains
+        expected: "/login"
+        
+  # Scenario 3: Empty Fields
+  empty_fields:
+    name: "Empty Login Fields"
+    description: "Test validation with empty username/password"
+    steps:
+      - action: click_element
+        element: "button[type='submit']"
+        
+      - action: verify_element_visible
+        element: "input[name='username']:invalid"
+        
+      - action: verify_element_visible
+        element: "input[name='password']:invalid"
+        
+  # Scenario 4: Remember Me Functionality
+  remember_me:
+    name: "Remember Me Checkbox"
+    description: "Test remember me functionality"
+    steps:
+      - action: page_action
+        page: "login_page"
+        action: "login_with_remember"
+        username: "${valid_username}"
+        password: "${valid_password}"
+        
+      - action: verify_url_contains
+        expected: "/dashboard"
+        
+      # Close browser and reopen to test persistence
+      - action: close_browser
+      - action: wait
+        seconds: 2
+      - action: open_browser
+        url: "${base_url}"
+        
+      # Should be automatically logged in
+      - action: verify_url_contains
+        expected: "/dashboard"
+        timeout: 5
+        
+  # Scenario 5: Forgot Password
+  forgot_password:
+    name: "Forgot Password Link"
+    description: "Test forgot password functionality"
+    steps:
+      - action: click_element
+        element: "a[href='/forgot-password']"
+        
+      - action: wait_for_navigation
+      - action: verify_url_contains
+        expected: "/forgot-password"
+        
+      - action: verify_element_visible
+        element: "input[name='email']"
+        
+  # Scenario 6: Logout Functionality
+  logout_functionality:
+    name: "User Logout"
+    description: "Test logout functionality"
+    setup:
+      # Login first
+      - action: page_action
+        page: "login_page"
+        action: "login"
+        username: "${valid_username}"
+        password: "${valid_password}"
+    steps:
+      - action: page_action
+        page: "dashboard_page"
+        action: "logout"
+        
+      - action: verify_url_contains
+        expected: "/login"
+        
+      # Try to access protected page
+      - action: navigate_to
+        url: "${base_url}/dashboard"
+        
+      - action: verify_url_contains
+        expected: "/login"
+        description: "Should redirect to login when accessing protected page"
+
+cleanup:
+  - action: page_action
+    page: "dashboard_page"
+    action: "logout"
+    ignore_errors: true
+  - action: close_browser

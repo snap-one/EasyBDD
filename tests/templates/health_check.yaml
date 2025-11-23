@@ -1,0 +1,71 @@
+name: "Health Check - ${device_name}"
+description: "Universal health check for any device type"
+device: "${device_config}"
+tags: ["health_check", "monitoring", "${device_type}"]
+
+variables:
+  check_timestamp: "${timestamp}"
+  device_name: "${config.name}"
+  device_type: "${config.device_type}"
+
+steps:
+  # Universal checks for all device types
+  - action: "ping_device"
+    host: "${config.ip_address}"
+    
+  - action: "check_port_connectivity"
+    ports: "${config.network}"
+    
+  - action: "authenticate"
+    method: "${config.authentication.type}"
+    
+  # Device-type specific health checks
+  - action: "conditional_step"
+    condition: "device_type == 'ip_camera'"
+    steps:
+      - action: "check_rtsp_stream"
+        url: "rtsp://${config.ip_address}:${config.protocols.rtsp.port}${config.protocols.rtsp.path}"
+      - action: "validate_video_feed"
+      - action: "check_storage_space"
+        
+  - action: "conditional_step"
+    condition: "device_type == 'power_supply'"
+    steps:
+      - action: "check_outlet_status"
+        outlets: "all"
+      - action: "validate_power_readings"
+        thresholds: "${config.monitoring}"
+      - action: "check_temperature"
+        
+  - action: "conditional_step"
+    condition: "device_type == 'network_switch'"
+    steps:
+      - action: "check_port_status"
+        ports: "all"
+      - action: "validate_spanning_tree"
+      - action: "check_vlan_configuration"
+      - action: "validate_uplink_status"
+        
+  # Universal system checks
+  - action: "check_system_resources"
+    metrics: ["cpu", "memory", "storage"]
+    
+  - action: "check_log_errors"
+    timeframe: "last_24_hours"
+    
+  - action: "validate_firmware_version"
+    minimum_version: "${config.vendor_specific.firmware_min_version}"
+    
+  - action: "test_response_time"
+    endpoints: "${config.api.endpoints}"
+    threshold: "5_seconds"
+    
+reporting:
+  - action: "health_score_calculation"
+  - action: "update_device_status"
+    timestamp: "${check_timestamp}"
+  - action: "alert_on_failures"
+    severity: "critical"
+    
+cleanup:
+  - action: "logout_sessions"

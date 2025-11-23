@@ -1,0 +1,55 @@
+name: "Async Time Tracking Example"
+description: "Demonstrates automatic time tracking with parallel execution"
+tags: ["example", "time-tracking", "async", "performance"]
+
+variables:
+  product: "Easy BDD Framework"
+  product_category: "Performance"
+  time_savings: 2.0  # 2 minutes saved per iteration
+  base_url: "https://jsonplaceholder.typicode.com"
+
+# Run 10 iterations in parallel (max 5 concurrent)
+# Total time savings: 2 minutes × 10 iterations = 20 minutes
+# Actual execution time: ~4 minutes (due to parallelization)
+async_execution: true
+max_workers: 5
+
+data:
+  - post_id: 1
+  - post_id: 2
+  - post_id: 3
+  - post_id: 4
+  - post_id: 5
+  - post_id: 6
+  - post_id: 7
+  - post_id: 8
+  - post_id: 9
+  - post_id: 10
+
+steps:
+  # Fetch post
+  - action: "Make API request"
+    url: "${base_url}/posts/${post_id}"
+    method: "GET"
+    store_as: "post"
+  
+  # Verify post retrieved
+  - action: "Assert"
+    expression: "post['status'] == 200"
+    message: "Should successfully fetch post"
+  
+  # Verify post ID
+  - action: "Assert"
+    expression: "post['data']['id'] == post_id"
+    message: "Post ID should match"
+  
+  # Fetch comments for post
+  - action: "Make API request"
+    url: "${base_url}/posts/${post_id}/comments"
+    method: "GET"
+    store_as: "comments"
+  
+  # Verify comments exist
+  - action: "Assert"
+    expression: "comments['status'] == 200 and len(comments.get('data', [])) > 0"
+    message: "Post should have comments"

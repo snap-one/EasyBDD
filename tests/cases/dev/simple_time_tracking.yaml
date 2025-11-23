@@ -1,0 +1,24 @@
+name: "Simple Time Tracking Demo"
+description: "Demonstrates automatic time tracking without assertions"
+tags: ["demo", "time-tracking"]
+
+variables:
+  # Datalake metrics
+  product: "Easy BDD Framework"
+  product_category: "Demo"
+  time_savings: 5.0  # This test saves 5 minutes
+  base_url: "https://jsonplaceholder.typicode.com"
+
+steps:
+  # Make some API requests
+  - action: "Make API request"
+    url: "${base_url}/posts/1"
+    method: "GET"
+  
+  - action: "Make API request"
+    url: "${base_url}/users/1"
+    method: "GET"
+  
+  - action: "Make API request"
+    url: "${base_url}/comments?postId=1"
+    method: "GET"

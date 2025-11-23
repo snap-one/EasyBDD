@@ -1,0 +1,61 @@
+name: "Custom Assertions Example"
+description: "Demonstrates custom assertion expressions with various operators"
+tags: ["assertions", "example"]
+
+variables:
+  api_endpoint: "https://jsonplaceholder.typicode.com"
+  min_users: 5
+  max_response_time: 3000
+
+steps:
+  # Make an API request
+  - action: API request
+    method: GET
+    url: "${api_endpoint}/users"
+    store_response: "users_response"
+  
+  # Assert status code
+  - action: Assert
+    expression: "users_response['status'] == 200"
+    message: "Expected successful API response"
+  
+  # Assert data length
+  - action: Assert
+    expression: "len(users_response['data']) > min_users"
+    message: "Expected at least ${min_users} users"
+  
+  # Assert specific user data
+  - action: Assert
+    expression: "users_response['data'][0]['id'] == 1"
+    message: "First user should have ID 1"
+  
+  # Assert nested property exists
+  - action: Assert
+    expression: "'email' in users_response['data'][0]"
+    message: "User object should contain email field"
+  
+  # Get a specific post
+  - action: API request
+    method: GET
+    url: "${api_endpoint}/posts/1"
+    store_response: "post_response"
+  
+  # Assert post title length
+  - action: Assert
+    expression: "len(post_response['data']['title']) > 0"
+    message: "Post title should not be empty"
+  
+  # Assert userId matches
+  - action: Assert
+    expression: "post_response['data']['userId'] == 1"
+    message: "Post should belong to user 1"
+  
+  # Complex boolean expression
+  - action: Assert
+    expression: "post_response['status'] == 200 and 'title' in post_response['data'] and 'body' in post_response['data']"
+    message: "Post response should be valid and complete"
+  
+  # Mathematical comparison
+  - action: Assert
+    expression: "post_response['data']['id'] >= 1 and post_response['data']['id'] <= 100"
+    message: "Post ID should be in valid range"

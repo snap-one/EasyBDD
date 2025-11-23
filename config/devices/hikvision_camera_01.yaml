@@ -1,0 +1,53 @@
+# Luma IP Camera - lab
+name: "Luma DS-2CD2185FWD-I - lab"
+device_type: "ip_camera"  # Inherits from device_types/ip_camera.yaml
+location: "lab"
+ip_address: "192.168.1.101"
+tags: ["camera", "lab", "luma"]
+
+# Override default template values
+network:
+  device_ip: "192.168.1.101"
+  base_url: "http://192.168.1.101"
+  rtsp_port: 554
+  web_port: 80
+
+authentication:
+  username: "admin"
+  password: "Snapav704!"
+  type: "digest_auth"
+
+# Hikvision-specific API endpoints  
+api:
+  endpoints:
+    info: "/ISAPI/System/deviceInfo"
+    status: "/ISAPI/System/status"
+    streams: "/ISAPI/Streaming/channels"
+    ptz: "/ISAPI/PTZCtrl/channels/1/presets"
+    recording: "/ISAPI/ContentMgmt/record"
+  content_type: "application/xml"  # Hikvision uses XML
+
+# Hikvision-specific settings
+vendor_specific:
+  supports_analytics: true
+  max_resolution: "4K"
+  ptz_presets: 10
+  night_vision: true
+  
+protocols:
+  rtsp:
+    main_stream: "/Streaming/Channels/101/"
+    sub_stream: "/Streaming/Channels/102/"
+    
+# Camera-specific test data
+test_data:
+  test_presets: [1, 2, 3]
+  test_resolution: "1920x1080"
+  expected_codec: "H.264"
+
+environments:
+  development:
+    recording_enabled: false
+  production:
+    recording_enabled: true
+    motion_detection: true

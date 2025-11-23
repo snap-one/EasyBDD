@@ -1,0 +1,81 @@
+# Araknis Device Configuration - 192.168.100.206
+# This file contains device-specific settings for easy reuse across tests
+
+device_info:
+  name: "Araknis Router 206"
+  type: "router"
+  manufacturer: "Araknis"
+  model: "AN-310-RT-4L2W"
+  firmware_version: "unknown"
+  location: "Test Lab"
+
+# Network configuration
+network:
+  ip_address: "192.168.100.206"
+  hostname: "araknis-206"
+  port: 443
+  protocol: "http"
+  base_url: "http://192.168.100.206"
+
+# Authentication configuration
+authentication:
+  type: "bearer_token"
+  auth_endpoint: "/api/v1/auth/login"
+  auth_method: "POST"
+  username: "araknis"
+  password: "SnapAV704"
+  username_field: "username"  # Field name in the JSON request
+  password_field: "password"  # Field name in the JSON request
+  token_field: "sid"  # Araknis uses 'sid' instead of 'access_token'
+  token_expires_field: "expires_in"
+  default_expiry: 3600
+  success_codes: [200, 201]  # Accept both OK and Created for this device
+  verify_ssl: false
+  timeout: 10
+  headers:
+    Content-Type: "application/json"
+    Accept: "application/json"
+
+# API endpoints for this device
+api_endpoints:
+  auth: "/api/v1/auth/login"
+  device_info: "/api/v1/device/info"
+  system_status: "/api/v1/system/status"
+  network_status: "/api/v1/network/status"
+  config: "/api/v1/config"
+  reboot: "/api/v1/system/reboot"
+  factory_reset: "/api/v1/system/factory-reset"
+
+# Test data specific to this device
+test_data:
+  expected_device_name: "Araknis Router"
+  expected_model: "AN-310"
+  admin_username: "admin"
+  guest_username: "guest"
+  test_config_values:
+    wifi_enabled: true
+    guest_network: false
+    firewall_enabled: true
+
+# Test timeouts and retries
+test_settings:
+  connection_timeout: 30
+  read_timeout: 60
+  max_retries: 3
+  retry_delay: 2
+  
+# Environment-specific overrides
+environments:
+  development:
+    # Use different credentials for dev environment if needed
+    # username: "dev_user"
+    # password: "dev_password"
+    
+  staging:
+    # Staging might use different IP
+    # ip_address: "192.168.100.207"
+    
+  production:
+    # Production settings
+    verify_ssl: true
+    timeout: 30

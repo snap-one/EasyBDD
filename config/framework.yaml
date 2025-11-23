@@ -17,20 +17,124 @@ config:
       - "--allow-running-insecure-content"
       - "--disable-web-security"
       - "--disable-features=VizDisplayCompositor"
+    
+    # Video recording configuration
+    video_recording:
+      enabled: true
+      mode: "on-failure"  # Options: "on-failure", "always", "never"
+      dir: "reports/videos"
+      size:
+        width: 1280
+        height: 720
+      retention_days: 7  # Auto-delete videos older than this
   
   api:
     timeout: 30
     verify_ssl: true
     max_retries: 3
     retry_delay: 1.0
+    
+    # Base URLs for different environments
+    base_urls:
+      development: "https://dev-api.example.com"
+      staging: "https://staging-api.example.com"  
+      production: "https://api.example.com"
+    
+    # Authentication configurations for different devices/endpoints
+    auth_configs:
+      # Default - no authentication
+      default:
+        type: "none"
+      
+      # Device with bearer token authentication
+      device_1001:
+        type: "bearer_token"
+        endpoint: "https://dev-api.example.com/auth/login"
+        credentials:
+          username: "${API_USERNAME}"
+          password: "${API_PASSWORD}"
+        username_field: "email"
+        password_field: "password"
+        token_field: "access_token"
+        default_expiry: 3600
+        headers:
+          Content-Type: "application/json"
+        additional_fields:
+          client_id: "mobile_app"
+      
+      # Different device with different auth endpoint  
+      device_1002:
+        type: "bearer_token"
+        endpoint: "https://staging-api.example.com/v2/authenticate"
+        credentials:
+          username: "${STAGING_USER}"
+          password: "${STAGING_PASS}"
+        username_field: "user"
+        password_field: "pass"
+        token_field: "token"
+        timeout: 45
+        
+      # API Gateway with API key
+      api_gateway:
+        type: "api_key"
+        api_key: "${API_GATEWAY_KEY}"
+        header_name: "X-API-Key"
+        
+      # Legacy system with basic auth
+      legacy_system:
+        type: "basic_auth"
+        credentials:
+          username: "${LEGACY_USER}"
+          password: "${LEGACY_PASS}"
+          
+      # OAuth2 service
+      oauth_service:
+        type: "oauth2"
+        token_endpoint: "https://auth.example.com/oauth/token"
+        client_id: "${OAUTH_CLIENT_ID}"
+        client_secret: "${OAUTH_CLIENT_SECRET}"
+        scope: "read write"
+        
+      # Araknis device authentication - updated from device config file
+      araknis_206:
+        type: "bearer_token"
+        auth_endpoint: "/api/v1/auth/login"
+        base_url: "http://192.168.100.206"
+        username: "araknis"
+        password: "SnapAV704"
+        username_field: "username"
+        password_field: "password"
+        token_field: "sid"  # Araknis uses 'sid' instead of 'access_token'
+        default_expiry: 3600
+        headers:
+          Content-Type: "application/json"
+        timeout: 10
+        verify_ssl: false  # Disable SSL verification for self-signed certificates
   
   reporting:
     output_dir: "reports"
     screenshots: true
     html_report: true
   
+  # Datalake logging configuration
+  datalake:
+    enabled: false  # Set to false to disable all datalake logging
+    post_on_failure_only: false  # Set to true to only log failed tests
+  
   parallel:
     workers: 2
+
+# Environment variables (can also be set in shell)
+environment:
+  API_USERNAME: "test_user@example.com"
+  API_PASSWORD: "secure_password_123"
+  STAGING_USER: "staging_user"
+  STAGING_PASS: "staging_pass"
+  API_GATEWAY_KEY: "gw_12345abcdef"
+  LEGACY_USER: "admin"
+  LEGACY_PASS: "legacy123"
+  OAUTH_CLIENT_ID: "client_abc123"
+  OAUTH_CLIENT_SECRET: "secret_xyz789"
 
 environments:
   default: {}

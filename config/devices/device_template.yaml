@@ -1,0 +1,105 @@
+# Device Configuration Template
+# Copy this file and customize for each new device
+
+device_info:
+  name: "Device Name"
+  type: "router|switch|access_point|camera|other"
+  manufacturer: "Manufacturer Name"
+  model: "Model Number"
+  firmware_version: "Firmware Version"
+  location: "Physical Location"
+
+# Network configuration
+network:
+  ip_address: "192.168.1.100"
+  hostname: "device-hostname"
+  port: 443
+  protocol: "https"
+  base_url: "https://192.168.1.100"
+
+# Authentication configuration
+authentication:
+  type: "bearer_token|api_key|basic_auth|oauth2|none"
+  auth_endpoint: "/api/auth/login"
+  auth_method: "POST"
+  username: "admin"
+  password: "password"
+  username_field: "username"  # Field name in auth request
+  password_field: "password"  # Field name in auth request
+  token_field: "access_token"  # Field name in auth response
+  token_expires_field: "expires_in"
+  default_expiry: 3600
+  
+  # Success codes - customize based on device behavior
+  # Examples:
+  # - Standard REST APIs: [200]
+  # - Some IoT devices: [200, 201] 
+  # - Legacy devices: [200, 202]
+  # - Custom APIs: [200, 201, 202, 204]
+  # - Any 2xx code: remove this field (default)
+  success_codes: [200, 201, 202]  # Remove for default (any 2xx)
+  
+  verify_ssl: false  # Many IoT devices use self-signed certs
+  timeout: 10
+  headers:
+    Content-Type: "application/json"
+    Accept: "application/json"
+    User-Agent: "EasyBDD-Framework"
+
+# Device type specific examples:
+# 
+# Example 1: Araknis Network Equipment (returns 201 Created)
+# success_codes: [200, 201]
+# token_field: "sid"
+#
+# Example 2: Generic Smart Home Device (standard 200 OK)
+# success_codes: [200]
+#
+# Example 3: Industrial IoT (accepts both OK and Accepted)
+# success_codes: [200, 202]
+#
+# Example 4: Custom WebSocket-style API (very flexible)
+# success_codes: [200, 201, 202, 204]
+# token_field: "sessionToken"
+#
+# Example 5: Any 2xx success code (most flexible - default)
+# success_codes: []  # or remove this line entirely
+  default_expiry: 3600
+  verify_ssl: true
+  timeout: 30
+  headers:
+    Content-Type: "application/json"
+    Accept: "application/json"
+
+# API endpoints for this device
+api_endpoints:
+  auth: "/api/auth/login"
+  device_info: "/api/device/info"
+  system_status: "/api/system/status"
+  config: "/api/config"
+  reboot: "/api/system/reboot"
+
+# Test data specific to this device
+test_data:
+  expected_device_name: "Expected Device Name"
+  expected_model: "Expected Model"
+  admin_username: "admin"
+  test_values:
+    setting1: "value1"
+    setting2: true
+
+# Test settings
+test_settings:
+  connection_timeout: 30
+  read_timeout: 60
+  max_retries: 3
+  retry_delay: 1
+
+# Environment-specific overrides
+environments:
+  development:
+    # Dev-specific settings
+  staging:
+    # Staging-specific settings
+  production:
+    # Production-specific settings

@@ -1,0 +1,65 @@
+# APC Rack PDU - Server Rack 1
+name: "APC AP8641 - Server Rack 1"
+device_type: "power_supply"
+location: "Data Center - Rack 1"
+ip_address: "192.168.1.201"
+tags: ["pdu", "apc", "server_rack", "critical"]
+
+network:
+  device_ip: "192.168.1.201"
+  base_url: "https://192.168.1.201"
+  snmp_port: 161
+  web_port: 443
+
+authentication:
+  username: "apc"
+  password: "apc"
+  type: "basic_auth"
+
+# APC-specific API endpoints
+api:
+  endpoints:
+    outlets: "/rest/mbfunccode/mb_func_code_1"
+    status: "/rest/mbfunccode/mb_func_code_3"
+    power_info: "/rest/mbfunccode/mb_func_code_4"
+    control: "/rest/mbfunccode/mb_func_code_5"
+    
+outlets:
+  count: 16
+  numbering: "1-based"
+  control_delay: 3
+  critical_outlets: [1, 2, 3, 4]  # Server outlets
+  test_outlets: [13, 14, 15, 16]   # Safe to cycle
+
+monitoring:
+  voltage_range: [208, 240]  # 220V nominal
+  current_threshold: 20
+  power_threshold: 4000
+  temperature_threshold: 35
+
+snmp:
+  community: "private"
+  version: "2c"
+  oids:
+    outlet_status: "1.3.6.1.4.1.318.1.1.12.3.5.1.1.4"
+    outlet_name: "1.3.6.1.4.1.318.1.1.12.3.5.1.1.2"
+    total_power: "1.3.6.1.4.1.318.1.1.12.1.16.0"
+    
+vendor_specific:
+  model: "AP8641"
+  firmware_min_version: "6.7.4"
+  supports_metering: true
+  supports_switching: true
+
+test_data:
+  safe_test_outlets: [13, 14, 15, 16]
+  expected_model: "AP8641"
+  max_load_percentage: 80
+
+environments:
+  maintenance:
+    critical_outlets: []
+    test_outlets: [1, 2, 3, 4, 13, 14, 15, 16]
+  production:
+    readonly_mode: true
+    critical_outlets: [1, 2, 3, 4, 5, 6, 7, 8]

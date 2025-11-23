@@ -1,0 +1,11 @@
+endpoint,method,payload,expected_status,expected_response_field,expected_value,test_name
+/system/network-config,POST,"{\"interface\":\"eth0\",\"dhcp_enabled\":true}",200,status,success,Network Config Test
+/system/users,POST,"{\"username\":\"test\",\"role\":\"admin\"}",201,data.username,test,User Creation Test
+/system/backup,POST,"{\"type\":\"full\",\"compress\":true}",202,job.id,null,Backup Job Test
+/system/reboot,POST,"{}",200,message,Reboot initiated,Reboot Test
+/system/factory-reset,POST,"{\"confirm\":true}",200,status,success,Factory Reset Test
+/network/vlan,POST,"{\"vlan_id\":100,\"name\":\"guest\"}",201,data.vlan_id,100,VLAN Creation Test
+/network/routes,POST,"{\"destination\":\"192.168.1.0/24\",\"gateway\":\"192.168.1.1\"}",200,status,success,Route Creation Test
+/security/certificates,POST,"{\"type\":\"self-signed\",\"common_name\":\"device.local\"}",201,certificate.id,null,Certificate Test
+/security/firewall-rules,POST,"{\"action\":\"allow\",\"port\":443,\"protocol\":\"tcp\"}",200,rule.id,null,Firewall Rule Test
+/monitoring/alerts,POST,"{\"type\":\"email\",\"threshold\":90,\"metric\":\"cpu\"}",201,alert.id,null,Alert Creation Test

@@ -1,0 +1,120 @@
+# IP-Controlled Power Supply Template
+device_type: "power_supply"
+description: "Template for network-controlled power supplies (PDUs, UPS, etc.)"
+
+capabilities:
+  - web_ui
+  - api_rest
+  - snmp
+  - telnet
+  - outlet_control
+  - power_monitoring
+
+default_config:
+  network:
+    base_url: "http://${device_ip}"
+    snmp_port: 161
+    telnet_port: 23
+    web_port: 80
+    
+  authentication:
+    type: "basic_auth"
+    username: "admin"
+    password: "admin"
+    auth_endpoint: "/login"
+    success_codes: [200, 302]
+    
+  api:
+    endpoints:
+      outlets: "/api/outlets"
+      status: "/api/status"
+      power_info: "/api/power"
+      control: "/api/control"
+      logs: "/api/logs"
+    content_type: "application/json"
+    
+  web_ui:
+    login_url: "/login"
+    outlet_control: "/outlets"
+    power_monitor: "/power"
+    selectors:
+      username_field: "#username"
+      password_field: "#password"
+      login_button: ".login-btn"
+      outlet_button: ".outlet-{outlet_id}"
+      
+  outlets:
+    count: 8
+    numbering: "1-based"  # or "0-based"
+    control_delay: 2  # seconds between operations
+    
+  monitoring:
+    voltage_range: [110, 125]  # acceptable voltage range
+    current_threshold: 15      # max amps
+    power_threshold: 1800      # max watts
+
+test_templates:
+  basic_connectivity:
+    - action: "ping_device"
+    - action: "snmp_get"
+      oid: "1.3.6.1.2.1.1.1.0"  # sysDescr
+    - action: "api_get"
+      url: "${api_endpoints_status}"
+      
+  outlet_control:
+    - action: "api_get"
+      url: "${api_endpoints_outlets}"
+    - action: "outlet_on"
+      outlet: 1
+    - action: "wait"
+      seconds: 2
+    - action: "validate_outlet_state"
+      outlet: 1
+      state: "on"
+    - action: "outlet_off"
+      outlet: 1
+      
+  power_monitoring:
+    - action: "api_get"
+      url: "${api_endpoints_power_info}"
+    - action: "validate_json"
+      field: "voltage"
+      condition: "in_range"
+      min: "${voltage_range[0]}"
+      max: "${voltage_range[1]}"
+    - action: "validate_json"
+      field: "current"
+      condition: "less_than"
+      value: "${current_threshold}"
+      
+  sequential_outlet_test:
+    - action: "loop"
+      variable: "outlet_id"
+      range: "1-${outlets_count}"
+      steps:
+        - action: "outlet_on"
+          outlet: "${outlet_id}"
+        - action: "wait"
+          seconds: "${control_delay}"
+        - action: "validate_outlet_state"
+          outlet: "${outlet_id}"
+          state: "on"
+        - action: "outlet_off"
+          outlet: "${outlet_id}"
+
+validation_patterns:
+  outlet_status:
+    required_fields: ["id", "name", "state", "current", "voltage"]
+  system_status:
+    required_fields: ["model", "firmware", "temperature", "uptime"]
+  power_reading:
+    required_fields: ["voltage", "current", "power", "energy"]
+
+environments:
+  test_lab:
+    outlets_count: 8
+    control_delay: 1
+  production:
+    outlets_count: 16
+    control_delay: 5
+    safety_checks: true

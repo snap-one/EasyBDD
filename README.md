@@ -44,6 +44,10 @@ python -m easy_bdd run tests/cases/hello_world.yaml --headed
 - **[Setup Guide](./docs/setup.md)** - Complete installation and configuration
 - **[Syntax Reference](./docs/syntax.md)** - YAML syntax and structure  
 - **[Actions Reference](./docs/actions.md)** - All available test actions
+- **[Soft Assertions](./docs/soft-assertions.md)** - Continue tests on assertion failures
+- **[Custom Assertions & Validators](docs/assertions.md)** - Expression evaluation and validation
+- **[Automatic Time Tracking](./docs/automatic-time-tracking.md)** - Calculate time savings automatically
+- **[Datalake Logger](./docs/datalake-logger.md)** - Advanced logging, error hints, metrics
 - **[Data-Driven Testing](./docs/data-driven.md)** - Multiple data sets and async execution
 - **[Advanced Features](./docs/advanced.md)** - Setup/cleanup, async execution, performance
 - **[Examples Gallery](./docs/examples.md)** - Real-world test examples
@@ -54,6 +58,10 @@ python -m easy_bdd run tests/cases/hello_world.yaml --headed
 - **Multi-Protocol Support** - Browser, API, WebSocket, Mobile, AWS
 - **Data-Driven Testing** - Run same test with multiple data sets
 - **Async Execution** - 3x faster with concurrent test execution
+- **Automatic Time Tracking** - Calculate and post time savings to datalake automatically
+- **Soft Assertions** - Continue test execution on assertion failures, collect all issues
+- **Custom Assertions** - Powerful expression evaluation, JSON schema validation, HTTP response validation
+- **Datalake Integration** - Comprehensive logging with error hints and Teams notifications
 - **Setup/Cleanup** - Proper test phase organization
 - **Variable Substitution** - Use `${variable}` syntax throughout
 - **Rich Reporting** - Screenshots, logs, and detailed results

@@ -1,0 +1,40 @@
+name: "Simple Device Info Retrieval"
+description: "Call dxGetAbout multiple times using shared step"
+tags: [dxGetAbout"]
+
+variables:
+  server_url: "wss://firmware.testing.ovrc.com:10444"
+  device_id: "14:3F:C3:91:09:F7"
+
+setup:
+  - action: "JSONRPC connect"
+    server_url: "${server_url}"
+    device_id: "${device_id}"
+    protocol: "firmware-protocol"
+  
+  - action: "JSONRPC start device updates"
+
+steps:
+  # First call to dxGetAbout
+  - shared_step: "dxGetAbout"
+    store_as: "info1"
+  
+  # Do other work here...
+  - action: "JSONRPC get network settings"
+    store_as: "network"
+  
+  # Second call to dxGetAbout
+  - shared_step: "dxGetAbout"
+    store_as: "info2"
+  
+  # More work...
+  - action: "JSONRPC get time settings"
+    store_as: "time"
+  
+  # Third call to dxGetAbout
+  - shared_step: "dxGetAbout"
+    store_as: "info3"
+
+cleanup:
+  - action: "JSONRPC stop device updates"
+  - action: "JSONRPC disconnect"

@@ -130,6 +130,14 @@ class BrowserService:
             ) / "screenshots"
         self.screenshots_dir.mkdir(parents=True, exist_ok=True)
         
+        # Video recording directory
+        video_dir = self._get_browser_config('video_recording.dir', 'reports/videos')
+        self.videos_dir = Path(video_dir)
+        self.videos_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Track current video path for cleanup
+        self.current_video_path: Optional[Path] = None
+        
         # MCP Bridge
         self.mcp_bridge = PlaywrightMCPBridge()
         
@@ -246,11 +254,33 @@ class BrowserService:
                 "width": self._get_browser_config('window_size', [1920, 1080])[0],
                 "height": self._get_browser_config('window_size', [1920, 1080])[1]
             },
-            'record_video_dir': str(self.screenshots_dir / "videos") if self._get_config_value(self.config, 'reporting.video', False) else None,
-            'record_har_path': str(self.screenshots_dir / "network.har") if self.mcp_bridge.mcp_mode else None,
             'ignore_https_errors': self._get_browser_config('ignore_https_errors', True),
             'accept_downloads': True
         }
+        
+        # Configure video recording
+        video_enabled_raw = self._get_browser_config('video_recording.enabled', True)
+        # Handle string "true"/"false" and boolean
+        if isinstance(video_enabled_raw, str):
+            video_enabled = video_enabled_raw.lower() == 'true'
+        else:
+            video_enabled = bool(video_enabled_raw) if video_enabled_raw is not None else True
+        
+        video_mode = self._get_browser_config('video_recording.mode', 'on-failure')
+        
+        if video_enabled and video_mode in ['always', 'on-failure']:
+            video_width = self._get_browser_config('video_recording.size.width', 1280)
+            video_height = self._get_browser_config('video_recording.size.height', 720)
+            
+            context_options['record_video_dir'] = str(self.videos_dir)
+            context_options['record_video_size'] = {
+                'width': video_width,
+                'height': video_height
+            }
+        
+        # Add HAR recording for MCP mode
+        if self.mcp_bridge.mcp_mode:
+            context_options['record_har_path'] = str(self.screenshots_dir / "network.har")
         
         self.playwright_context = self.playwright_browser.new_context(**context_options)
         
@@ -437,6 +467,29 @@ class BrowserService:
             
             if selector:
                 print(f"      Processing selector: {selector}")
+                
+                # Handle iframe selector syntax: 'iframe >> #selector'
+                if '>>' in selector:
+                    parts = selector.split('>>')
+                    iframe_sel = parts[0].strip()
+                    element_sel = parts[1].strip()
+                    print(f"      Clicking in iframe: {iframe_sel} >> {element_sel}")
+                    
+                    # Get the frame
+                    frames = self.playwright_page.frames
+                    target_frame = None
+                    
+                    for frame in frames:
+                        if frame != self.playwright_page.main_frame:
+                            target_frame = frame
+                            break
+                    
+                    if target_frame:
+                        target_frame.click(element_sel, timeout=5000, **click_options)
+                        print(f"      ✓ Clicked element in iframe")
+                        return
+                    else:
+                        raise RuntimeError("Could not find iframe")
                 
                 # Handle Chrome Recorder aria/ format
                 if selector.startswith('aria/'):
@@ -788,18 +841,22 @@ class BrowserService:
         else:
             return {}
     
-    def verify_text(self, text: str, timeout: int = 10000) -> None:
+    def verify_text(self, text: str, timeout: int = 10000,
+                    soft_assert: bool = False,
+                    soft_assert_manager=None,
+                    step_number: int = 0) -> None:
         """Verify text appears on the page using Playwright's native expect API"""
         if self.playwright_page:
             try:
                 from playwright.sync_api import expect
-                # Use Playwright's standard expect pattern - matches the original recording
+                # Use Playwright's standard expect pattern
                 expect(self.playwright_page.locator("html")).to_contain_text(
                     text, timeout=timeout
                 )
                 print(f"      ✓ Verified text '{text}' appears on page")
             except Exception as e:
                 # Enhanced debugging when verification fails
+                page_text = ""
                 try:
                     print(f"      Text verification failed for: '{text}'")
                     
@@ -822,6 +879,18 @@ class BrowserService:
                     
                 except Exception:
                     pass
+                
+                # Handle soft assertion
+                if soft_assert and soft_assert_manager:
+                    error_msg = f"Text '{text}' not found on page"
+                    soft_assert_manager.add_failure(
+                        step_number=step_number,
+                        action="Verify text",
+                        message=error_msg,
+                        expected=text,
+                        actual=page_text[:100] if page_text else "Empty page"
+                    )
+                    return  # Don't raise, continue test execution
                     
                 raise AssertionError(f"Text '{text}' not found on page: {e}")
         elif self.selenium_driver:
@@ -841,6 +910,63 @@ class BrowserService:
         
         # Record action for MCP
         self.mcp_bridge.record_action('verify_text', text=text)
+    
+    def verify_element(self, selector: str, timeout: int = 10000,
+                       soft_assert: bool = False,
+                       soft_assert_manager=None,
+                       step_number: int = 0) -> None:
+        """Verify element exists and is visible on the page"""
+        if self.playwright_page:
+            try:
+                from playwright.sync_api import expect
+                locator = self.playwright_page.locator(selector)
+                expect(locator).to_be_visible(timeout=timeout)
+                print(f"      ✓ Verified element '{selector}' is visible")
+            except Exception as e:
+                error_msg = f"Element '{selector}' not found or not visible"
+                
+                # Handle soft assertion
+                if soft_assert and soft_assert_manager:
+                    soft_assert_manager.add_failure(
+                        step_number=step_number,
+                        action="Verify element",
+                        message=error_msg,
+                        expected=f"Element '{selector}' visible",
+                        actual="Element not found or not visible"
+                    )
+                    return  # Don't raise, continue test execution
+                
+                raise AssertionError(f"{error_msg}: {e}")
+        elif self.selenium_driver:
+            try:
+                from selenium.webdriver.support import expected_conditions as EC
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.common.by import By
+                
+                WebDriverWait(self.selenium_driver, timeout // 1000).until(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                print(f"      ✓ Verified element '{selector}' is visible")
+            except Exception as e:
+                error_msg = f"Element '{selector}' not found or not visible"
+                
+                # Handle soft assertion
+                if soft_assert and soft_assert_manager:
+                    soft_assert_manager.add_failure(
+                        step_number=step_number,
+                        action="Verify element",
+                        message=error_msg,
+                        expected=f"Element '{selector}' visible",
+                        actual="Element not found or not visible"
+                    )
+                    return
+                
+                raise AssertionError(f"{error_msg}: {e}")
+        else:
+            raise RuntimeError("No browser session active")
+        
+        # Record action for MCP
+        self.mcp_bridge.record_action('verify_element', selector=selector)
     
     def refresh_browser(self) -> None:
         """Refresh the current page"""
@@ -1186,13 +1312,96 @@ class BrowserService:
             raise RuntimeError(f"Drag and drop failed: {e}")
     
     def upload_file(self, selector: str, file_path: str, **kwargs) -> None:
-        """Playwright file upload equivalent"""
+        """Playwright file upload equivalent with iframe support"""
         if not self.playwright_page:
             raise RuntimeError("Playwright session not active")
             
         try:
-            self.playwright_page.set_input_files(selector, file_path, **kwargs)
-            print(f"      ✓ Uploaded file '{file_path}' to '{selector}'")
+            # Check if selector contains iframe context with >>
+            if '>>' in selector:
+                # Split iframe selector from element selector
+                parts = selector.split('>>', 1)  # Split only on first >>
+                iframe_sel = parts[0].strip()
+                element_sel = parts[1].strip() if len(parts) > 1 else ''
+                
+                if element_sel:
+                    # Get the actual frame element
+                    frames = self.playwright_page.frames
+                    target_frame = None
+                    
+                    # Find the iframe by selector or just use first iframe
+                    if iframe_sel == 'iframe':
+                        # Use first non-main frame
+                        for frame in frames:
+                            if frame != self.playwright_page.main_frame:
+                                target_frame = frame
+                                break
+                    else:
+                        # Try to match by iframe selector
+                        for frame in frames:
+                            if frame != self.playwright_page.main_frame:
+                                target_frame = frame
+                                break
+                    
+                    if target_frame:
+                        # Hidden file inputs need special handling
+                        import os
+                        from pathlib import Path
+                        
+                        # Resolve the file path
+                        path_obj = Path(file_path)
+                        if not path_obj.is_absolute():
+                            # Check if it exists relative to current dir
+                            if path_obj.exists():
+                                abs_path = str(path_obj.absolute())
+                            else:
+                                # Try relative to workspace root
+                                abs_path = os.path.abspath(file_path)
+                        else:
+                            abs_path = file_path
+                        
+                        # Verify file exists
+                        if not os.path.exists(abs_path):
+                            raise FileNotFoundError(
+                                f"File not found: {abs_path}")
+                        
+                        # For hidden file inputs, use file chooser API
+                        # Set up file chooser listener before triggering
+                        print(
+                            f"      Setting up file chooser for: "
+                            f"{element_sel}")
+                        
+                        # Start waiting for file chooser event
+                        with self.playwright_page.expect_file_chooser() as fc:
+                            # Trigger the file input (even if hidden)
+                            target_frame.evaluate(f'''
+                                const input = document.querySelector(
+                                    "{element_sel}");
+                                if (input) {{
+                                    // Make visible for Playwright
+                                    input.style.display = 'block';
+                                    input.style.visibility = 'visible';
+                                    input.style.opacity = '1';
+                                    input.removeAttribute('disabled');
+                                    // Trigger click to open file chooser
+                                    input.click();
+                                }}
+                            ''')
+                        
+                        # Set the files when file chooser appears
+                        file_chooser = fc.value
+                        file_chooser.set_files(abs_path)
+                        print("      ✓ Uploaded file via file chooser")
+                    else:
+                        raise RuntimeError("Could not find iframe")
+                else:
+                    msg = "Invalid iframe selector. Use: 'iframe >> #selector'"
+                    raise ValueError(msg)
+            else:
+                # Regular file upload
+                self.playwright_page.set_input_files(
+                    selector, file_path, **kwargs)
+                print(f"      ✓ Uploaded file to '{selector}'")
         except Exception as e:
             raise RuntimeError(f"File upload failed: {e}")
     
@@ -1256,12 +1465,61 @@ class BrowserService:
         except Exception as e:
             raise RuntimeError(f"Failed to clear cookies: {e}")
 
+    def get_video_path(self) -> Optional[Path]:
+        """
+        Get the path to the recorded video if available.
+        The video is only available after the page is closed.
+        """
+        # Video is saved when context is closed, check if we have a saved path
+        if self.current_video_path and self.current_video_path.exists():
+            return self.current_video_path
+        
+        # Try to get video from page if still open
+        if self.playwright_page:
+            try:
+                video = self.playwright_page.video
+                if video:
+                    video_path = Path(video.path())
+                    self.current_video_path = video_path
+                    return video_path
+            except Exception as e:
+                print(f"      Debug: Could not get video path: {e}")
+        
+        # Check videos directory for recently created files
+        if self.videos_dir.exists():
+            video_files = sorted(
+                self.videos_dir.glob("*.webm"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+            if video_files:
+                self.current_video_path = video_files[0]
+                return video_files[0]
+        
+        return None
+    
+    def cleanup_video(self, video_path: Optional[Path] = None) -> bool:
+        """Delete video file (for passing tests)"""
+        if video_path is None:
+            video_path = self.current_video_path
+        
+        if video_path and video_path.exists():
+            try:
+                video_path.unlink()
+                return True
+            except Exception as e:
+                print(f"      Warning: Could not delete video: {e}")
+                return False
+        return False
+    
     def close_browser(self) -> None:
         """Close the browser and clean up resources"""
+        # Close page first to finalize video
         if self.playwright_page:
             self.playwright_page.close()
             self.playwright_page = None
         
+        # Close context to save video
         if self.playwright_context:
             self.playwright_context.close()
             self.playwright_context = None
