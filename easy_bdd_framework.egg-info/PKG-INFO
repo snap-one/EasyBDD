@@ -27,6 +27,7 @@ Requires-Dist: pyyaml>=6.0
 Requires-Dist: jinja2>=3.0.0
 Requires-Dist: jsonschema>=4.0.0
 Requires-Dist: websocket-client>=1.0.0
+Requires-Dist: websockets>=11.0.0
 Requires-Dist: boto3>=1.20.0
 Requires-Dist: paramiko>=2.8.0
 Requires-Dist: pyserial>=3.5
@@ -34,62 +35,160 @@ Requires-Dist: openpyxl>=3.0.0
 Requires-Dist: pandas>=1.3.0
 Requires-Dist: allure-pytest>=2.9.0
 Requires-Dist: pydantic>=1.8.0
+Requires-Dist: loguru>=0.7.0
+Requires-Dist: python-dotenv>=1.0.0
+Provides-Extra: ai
+Requires-Dist: openai>=1.0.0; extra == "ai"
 Provides-Extra: dev
-Requires-Dist: black>=22.0.0; extra == "dev"
-Requires-Dist: flake8>=4.0.0; extra == "dev"
-Requires-Dist: mypy>=0.910; extra == "dev"
-Requires-Dist: pre-commit>=2.15.0; extra == "dev"
+Requires-Dist: black>=23.12.0; extra == "dev"
+Requires-Dist: flake8>=7.0.0; extra == "dev"
+Requires-Dist: mypy>=1.8.0; extra == "dev"
+Requires-Dist: pre-commit>=3.6.0; extra == "dev"
+Requires-Dist: isort>=5.13.0; extra == "dev"
+Requires-Dist: bandit>=1.7.6; extra == "dev"
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+Requires-Dist: detect-secrets>=1.4.0; extra == "dev"
 
 # Easy BDD Testing Framework
 
-A user-friendly BDD testing framework that supports multiple protocols and testing scenarios without requiring programming knowledge. This framework was designed to replace pipe-delimited syntax with simple, intuitive YAML-based test definitions.
+A powerful, user-friendly YAML-based BDD testing framework that supports multiple protocols including browser automation, REST APIs, WebSocket, AWS S3, Serial, and Android. No programming knowledge required.
 
-## ✨ Key Features
+## ✨ What's New
 
-- **📝 Simple YAML Syntax** - Write tests in plain English using YAML
-- **🎥 UI Recorder Integration** - Convert Playwright, Selenium, Cypress recordings to YAML
-- **🌐 Multi-Protocol Support** - Browser, REST API, WebSocket, Android, AWS, Serial
-- **🔄 Automatic Gherkin Generation** - Converts YAML to proper BDD scenarios
-- **📊 Rich Reporting** - HTML reports with screenshots and detailed logs
-- **🔧 Global Variables** - Reuse data across tests with `${variable}` syntax
-- **⚡ Parallel Execution** - Run tests concurrently for faster feedback
-- **🎯 Tag-Based Filtering** - Run specific test subsets using tags
-- **🔗 No TestRail Dependency** - File-based test management
+- 🎯 **Code Quality Tools** - Pre-commit hooks, Makefile commands, contributor guide
+- ⚡ **Performance Boost** - 30-100% faster AWS S3 operations with connection pooling
+- 🚀 **Optimized Regex** - 20% faster version extraction with pattern caching
+- 🔒 **Security Enhancements** - Safe eval, password masking, test validation
+- ✅ **Test Validation** - Validate tests before running with `validate` command
+- 🔐 **Environment Variables** - Secure credential management with `.env` support
+- ✨ **Dot Notation Actions** - New `service.action` syntax (e.g., `browser.click`, `aws.get_latest`)
+- ✅ **Conditional Steps** - If/then/else logic for dynamic test flows
+- ✅ **AWS S3 Integration** - Firmware management, version extraction, CloudFront URLs
+- ✅ **Iframe Support** - File uploads and clicks inside iframes (`iframe >> selector` syntax)
+- ✅ **File Chooser API** - Handle hidden file inputs automatically
+- ✅ **Soft Assertions** - Continue tests on failures, collect all issues
+- ✅ **Custom Assertions** - Powerful expression evaluation with Python
+- ✅ **Automatic Time Tracking** - Calculate time savings automatically
+- ✅ **Datalake Integration** - Advanced logging, metrics, Teams notifications
+- ✅ **Playwright Recorder Support** - Convert Chrome Recorder output to tests
 
 ## 🚀 Quick Start
 
-### 1. Installation
-```bash
-# Clone or set up your framework
-cd your-framework-directory
+### First-Time Setup
 
-# Install dependencies (virtual environment recommended)
+1. **Clone and Install**
+```bash
+git clone <repository-url>
+cd Automation-Framework
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -e .
+playwright install chromium  # Or: firefox, webkit
 ```
 
-### 2. Create Your First Test
-Create `tests/cases/my_first_test.yaml`:
+2. **Configure AWS (Optional)**
+```bash
+# If using AWS features, configure AWS CLI
+aws configure
+# Or set environment variables:
+export AWS_ACCESS_KEY_ID="your-key"
+export AWS_SECRET_ACCESS_KEY="your-secret"
+export AWS_DEFAULT_REGION="us-east-1"
+```
 
+3. **Verify Installation**
+```bash
+python -m easy_bdd --help
+```
+
+### Your First Test
+
+Create `tests/cases/hello_world.yaml`:
 ```yaml
-name: "User Login Test"
-description: "Test user login functionality"
-tags: ["browser", "login"]
+name: Hello World Test
+description: My first Easy BDD test
+tags: [demo]
 
 variables:
-  username: "testuser@example.com"
-  password: "SecurePass123"
-  base_url: "https://app.example.com"
+  website: "https://example.com"
 
 steps:
-  - action: "Open browser"
-    url: "${base_url}/login"
-    
-  - action: "Fill form field"
-    field: "email"
-    value: "${username}"
-    
-  - action: "Fill form field"
-    field: "password"
+  - action: browser.open
+    url: ${website}
+  
+  - action: browser.screenshot
+    name: "homepage"
+  
+  - action: test.assert
+    expression: "'Example Domain' in page_content"
+    message: "Should show Example Domain"
+```
+
+Run it:
+```bash
+# Run with visible browser
+python -m easy_bdd run tests/cases/hello_world.yaml --headed
+
+# Run all tests
+python -m easy_bdd run tests/cases/
+
+# Run with specific tags
+python -m easy_bdd run --tags demo
+```
+
+## 📚 Documentation
+
+Comprehensive guides available in the `/docs` folder:
+
+- **[Getting Started Guide](docs/setup.md)** - Installation and configuration
+- **[Contributing Guide](CONTRIBUTING.md)** - How to contribute, code standards 🎯
+- **[Code Quality Tools](WEEK3_QUALITY.md)** - Pre-commit hooks, Makefile, development setup
+- **[Performance Optimizations](WEEK2_PERFORMANCE.md)** - AWS S3 pooling, regex caching ⚡
+- **[Security Implementation](SECURITY_IMPLEMENTATION.md)** - Security features and best practices 🔒
+- **[Recommendations](RECOMMENDATIONS.md)** - Security, performance, and feature recommendations
+- **[Dot Notation Actions](docs/dot-notation-actions.md)** - New unified action syntax ✨
+- **[YAML Syntax Reference](docs/syntax.md)** - Test file structure
+- **[Action Reference](docs/actions.md)** - All available actions
+- **[Examples](docs/examples.md)** - Real-world test examples
+- **[Conditional Steps](docs/conditional-steps.md)** - If/then/else logic
+- **[AWS S3 Integration](docs/aws-s3-integration.md)** - Firmware management
+- **[Chrome Recorder Conversion](docs/CHROME_RECORDER_CONVERSION.md)** - Import Chrome recordings
+- **[Browser Configuration](docs/BROWSER_CONFIG.md)** - Browser settings
+- **[Troubleshooting](docs/troubleshooting.md)** - Common issues
+
+### 🎯 Key Features
+
+**Core Framework:**
+- ✅ **No Programming Required** - Write tests in simple YAML
+- ✅ **Multi-Protocol Support** - Browser (Playwright), REST API, WebSocket, AWS S3, Serial, Android
+- ✅ **Conditional Logic** - If/then/else steps for dynamic test flows
+- ✅ **Variable Substitution** - Use `${variable}` syntax throughout tests
+- ✅ **Setup/Cleanup Phases** - Proper test phase organization
+
+**Browser Automation:**
+- ✅ **Playwright Integration** - Chrome, Firefox, Safari, Edge support
+- ✅ **Iframe Support** - File uploads and clicks inside iframes (`iframe >> selector`)
+- ✅ **File Chooser API** - Handle hidden file inputs automatically
+- ✅ **Role-Based Selectors** - Click by role (button, link, etc.) and name
+- ✅ **Chrome Recorder** - Convert Playwright recordings to YAML
+
+**Testing Capabilities:**
+- ✅ **Soft Assertions** - Continue on failures, collect all issues
+- ✅ **Custom Assertions** - Python expression evaluation, JSON schema validation
+- ✅ **Data-Driven Testing** - Run same test with multiple data sets
+- ✅ **Async Execution** - 3x faster with concurrent test execution
+
+**AWS Integration:**
+- ✅ **S3 Operations** - List, download, upload firmware files
+- ✅ **Version Management** - Auto-extract firmware versions, intelligent sorting
+- ✅ **CloudFront URLs** - Generate CDN URLs from S3 paths
+
+**Reporting & Logging:**
+- ✅ **Automatic Time Tracking** - Calculate time savings automatically
+- ✅ **Datalake Integration** - Advanced logging with error hints
+- ✅ **Rich Reporting** - HTML reports, screenshots, video recordings
+- ✅ **Teams Notifications** - Auto-post results to Microsoft Teams
     value: "${password}"
     
   - action: "Click button"
@@ -101,6 +200,9 @@ steps:
 
 ### 3. Run Your Tests
 ```bash
+# Validate tests first (recommended)
+python -m easy_bdd validate tests/cases/
+
 # Run all tests
 python -m easy_bdd run
 
@@ -177,39 +279,154 @@ steps:
     value: "${username}"
 ```
 
-## 🎯 Available Actions
+### 🔒 Security Best Practices
 
-### 🌐 Browser Actions
+**Use Environment Variables for Sensitive Data:**
 ```yaml
-# Open browser and navigate
-- action: "Open browser"
-  url: "https://example.com"
-  browser: "chrome"  # chrome, firefox, safari, edge
+# .env file (never commit this!)
+DEVICE_PASSWORD=secret123
+API_KEY=sk_live_abc123xyz
 
-# Click elements
-- action: "Click element"
-  selector: "#submit-btn"
+# test.yaml - reference environment variables
+variables:
+  password: "${DEVICE_PASSWORD}"
+  api_key: "${API_KEY}"
+```
+
+**Validate Tests Before Running:**
+```bash
+# Check for security issues and syntax errors
+python -m easy_bdd validate tests/cases/
+
+# Strict mode (warnings = errors)
+python -m easy_bdd validate tests/cases/ --strict
+```
+
+**What Gets Validated:**
+- ✅ Hardcoded passwords or tokens in test files
+- ✅ Proper YAML syntax and structure
+- ✅ Correct action format (dot notation)
+- ✅ Valid conditional step syntax
+
+See [SECURITY_IMPLEMENTATION.md](SECURITY_IMPLEMENTATION.md) for complete security documentation.
+
+## 🎯 Common Use Cases & Examples
+
+### Browser Testing with Login
+
+```yaml
+name: Login Test
+variables:
+  base_url: "https://example.com"
+  username: "testuser"
+  password: "TestPass123"
+
+steps:
+  - action: Open browser
+    url: "${base_url}/login"
   
-- action: "Click button"
-  button: "Submit"
+  - action: Fill form field
+    field: "#username"
+    value: "${username}"
+  
+  - action: Fill form field
+    field: "#password"
+    value: "${password}"
+  
+  - action: Click element
+    role: button
+    name: "Log In"
+  
+  - action: Wait
+    timeout: 2000
+  
+  - action: Take screenshot
+    name: "after-login"
+  
+  - action: Assert
+    expression: "'Dashboard' in page_content"
+```
 
-# Fill form fields
-- action: "Fill form field"
-  field: "username"
-  value: "testuser"
+### File Upload in Iframe
 
-# Verify content
-- action: "Verify page contains"
-  text: "Success message"
+```yaml
+- action: Upload file
+  selector: 'iframe >> #file-input'
+  file_path: 'path/to/file.bin'
 
-# Take screenshots
-- action: "Take screenshot"
-  name: "login_page"
+- action: Click element
+  selector: 'iframe >> #upload-button'
+```
 
-# Wait for elements
-- action: "Wait for element"
-  selector: ".loading-spinner"
-  timeout: 30
+### Conditional Firmware Upgrade
+
+```yaml
+variables:
+  current_version: "2.1.0.0"
+  target_version: "2.2.0.0"
+
+steps:
+  - condition: "current_version < target_version"
+    then:
+      - action: Upload file
+        selector: 'iframe >> #firmware'
+        file_path: 'Firmware/${firmware_file}'
+      
+      - action: Click element
+        selector: 'iframe >> #upgrade-button'
+    else:
+      - action: Take screenshot
+        name: "already-updated"
+```
+
+### AWS S3 Firmware Management
+
+```yaml
+setup:
+  # Get list of all firmware files
+  - action: "AWS list firmware files"
+    bucket_name: "my-bucket"
+    folder_prefix: "firmware/"
+    file_extension: ".bin"
+    download_dir: "Firmware"
+    store_as: "firmware_list"
+  
+  # Get latest firmware
+  - action: "AWS get latest firmware"
+    bucket_name: "my-bucket"
+    folder_prefix: "firmware/"
+    file_extension: ".bin"
+    download_dir: "Firmware"
+    store_filename_as: "latest_fw"
+    store_version_as: "latest_version"
+
+steps:
+  # Use downloaded firmware
+  - action: Upload file
+    selector: "#firmware-input"
+    file_path: "Firmware/${latest_fw_basename}"
+```
+
+### API Testing with Assertions
+
+```yaml
+- action: Send API request
+  method: GET
+  url: "https://api.example.com/users/123"
+  headers:
+    Authorization: "Bearer ${api_token}"
+
+- action: Assert
+  expression: "last_status == 200"
+  message: "API should return 200"
+
+- action: Assert
+  expression: "last_json['id'] == 123"
+  message: "Should return correct user ID"
+
+- action: Assert
+  expression: "'email' in last_json"
+  message: "Response should contain email field"
 ```
 
 ### 🔌 API Actions
@@ -424,15 +641,184 @@ To migrate from your original framework:
 - **IDE Integration**: Enhanced VS Code extension
 - **CI/CD Integration**: Jenkins, GitHub Actions templates
 
+## 🐛 Common Issues & Debugging
+
+### Browser Issues
+
+**Issue: Browser doesn't open**
+```bash
+# Install browser again
+playwright install chromium
+
+# Run with --headed to see what's happening
+python -m easy_bdd run tests/cases/my_test.yaml --headed
+```
+
+**Issue: Element not found**
+```yaml
+# Add wait before clicking
+- action: Wait
+  timeout: 2000
+
+# Use role-based selectors (more reliable)
+- action: Click element
+  role: button
+  name: "Submit"
+
+# Check selector in browser DevTools
+```
+
+**Issue: File upload fails**
+```yaml
+# For hidden inputs in iframes, use iframe syntax
+- action: Upload file
+  selector: 'iframe >> #file-input'
+  file_path: 'full/path/to/file.bin'
+
+# Framework automatically handles hidden inputs with file chooser API
+```
+
+### AWS Issues
+
+**Issue: AWS credentials not found**
+```bash
+# Configure AWS CLI
+aws configure
+
+# Or set environment variables
+export AWS_ACCESS_KEY_ID="your-key"
+export AWS_SECRET_ACCESS_KEY="your-secret"
+export AWS_DEFAULT_REGION="us-east-1"
+
+# Framework uses this priority: explicit params > env vars > AWS CLI config
+```
+
+**Issue: Firmware file not found**
+```yaml
+# The framework stores basename automatically
+setup:
+  - action: "AWS get latest firmware"
+    store_filename_as: "firmware_key"
+    # This creates: firmware_key_basename
+
+steps:
+  # Use the basename for local file path
+  - action: Upload file
+    file_path: "Firmware/${firmware_key_basename}"
+```
+
+### Test Execution Issues
+
+**Issue: Test hangs or times out**
+```yaml
+# Increase timeout
+- action: Wait for element
+  selector: "#slow-element"
+  timeout: 30000  # 30 seconds
+
+# Add explicit waits
+- action: Wait
+  timeout: 5000
+```
+
+**Issue: Variables not substituting**
+```yaml
+# Correct syntax with curly braces
+url: "${base_url}/api"  # ✅ Correct
+
+# Wrong syntax
+url: "$base_url/api"    # ❌ Won't work
+```
+
+**Issue: Assertion fails unexpectedly**
+```yaml
+# Use soft assertions to see all failures
+- action: Assert
+  expression: "status_code == 200"
+  soft_assert: true
+
+# Check variable values
+- action: Assert
+  expression: "my_variable is not None"
+  message: "Debug: checking variable"
+```
+
+### Conditional Steps Issues
+
+**Issue: Condition not evaluating**
+```yaml
+# Ensure variables are defined before condition
+setup:
+  - action: "AWS get latest firmware"
+    store_version_as: "firmware_version"
+
+steps:
+  # Now firmware_version is available
+  - condition: "firmware_version >= '2.0.0.0'"
+    then:
+      - action: Take screenshot
+```
+
+**Issue: Syntax error in condition**
+```yaml
+# Use Python expressions
+- condition: "version >= '2.0.0.0'"        # ✅ String comparison
+- condition: "count > 5"                    # ✅ Numeric
+- condition: "'text' in page_content"      # ✅ String contains
+- condition: "item is not None"            # ✅ Existence check
+- condition: "status == 'ready' and count > 0"  # ✅ Multiple conditions
+```
+
+### Getting Help
+
+1. **Check Documentation**: See `/docs` folder for detailed guides
+2. **Enable Debug Output**: Run with `-v` or `--verbose`
+3. **Check Reports**: Review HTML reports in `/reports` folder
+4. **View Screenshots**: Check screenshots for visual debugging
+5. **Check Logs**: Console output shows detailed step execution
+
+**Useful Commands:**
+```bash
+# Run with visible browser
+python -m easy_bdd run test.yaml --headed
+
+# Generate features without running
+python -m easy_bdd generate tests/cases/
+
+# View framework version
+python -m easy_bdd --version
+
+# Get help
+python -m easy_bdd --help
+```
+
 ## 🏆 Why Choose Easy BDD Framework?
 
-✅ **User-Friendly**: No programming knowledge required  
-✅ **Flexible**: Supports all your existing test scenarios  
-✅ **Maintainable**: Standard YAML format  
+✅ **User-Friendly**: No programming knowledge required - just write YAML  
+✅ **Powerful**: Conditional logic, AWS integration, iframe support, soft assertions  
+✅ **Flexible**: Supports all protocols - browser, API, WebSocket, AWS, Serial, Android  
+✅ **Maintainable**: Standard YAML format everyone can read  
 ✅ **Independent**: No external dependencies like TestRail  
 ✅ **Extensible**: Easy to add new protocols and actions  
-✅ **Modern**: Built with current best practices  
+✅ **Modern**: Built with Playwright, boto3, and current best practices  
+✅ **Fast**: Async execution for 3x faster test runs  
+
+## 📚 Project Structure
+
+See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for complete directory layout.
+
+```
+Automation-Framework/
+├── easy_bdd/          # Framework source code
+├── tests/cases/       # Your YAML test files  
+├── config/            # Configuration files
+├── docs/              # Complete documentation
+├── reports/           # Test results and screenshots
+└── Firmware/          # Downloaded firmware files
+```
 
 ---
 
 **Ready to get started?** Create your first YAML test file and experience the difference! 🎉
+
+For detailed guides, see the `/docs` folder. For examples, check `/tests/cases/` directory.

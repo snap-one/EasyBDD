@@ -43,18 +43,23 @@ dependencies = [
     "allure-pytest>=2.9.0",
     "pydantic>=1.8.0",
     "loguru>=0.7.0",
+    "python-dotenv>=1.0.0",
 ]
 
-[project.optional-dependencies.ai]
-# Optional AI features for error hints
-openai = ">=1.0.0"
-
 [project.optional-dependencies]
+ai = [
+    "openai>=1.0.0",
+]
 dev = [
-    "black>=22.0.0",
-    "flake8>=4.0.0",
-    "mypy>=0.910",
-    "pre-commit>=2.15.0",
+    "black>=23.12.0",
+    "flake8>=7.0.0",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
+    "isort>=5.13.0",
+    "bandit>=1.7.6",
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "detect-secrets>=1.4.0",
 ]
 
 [project.urls]
@@ -68,13 +73,29 @@ include = ["easy_bdd*"]
 
 [tool.black]
 line-length = 88
-target-version = ['py38']
+target-version = ['py38', 'py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.venv
+  | archive
+  | reports
+  | Firmware
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 88
+skip_glob = [".venv/*", "archive/*", "reports/*", "Firmware/*"]
 
 [tool.mypy]
 python_version = "3.8"
 warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

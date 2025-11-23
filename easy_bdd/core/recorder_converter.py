@@ -644,9 +644,8 @@ class RecorderConverter:
             
         Returns:
             YAML content as string
-        """
-        from pathlib import Path
-        
+        \"\"\"
+        # Path already imported at top of file
         path_obj = Path(file_path)
         
         with open(file_path, 'r') as f:

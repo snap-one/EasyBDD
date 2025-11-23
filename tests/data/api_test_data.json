@@ -1,0 +1,18 @@
+[
+  {
+    "api_endpoint": "/users",
+    "method": "GET",
+    "expected_status": 200
+  },
+  {
+    "api_endpoint": "/users/1",
+    "method": "GET",
+    "expected_status": 200
+  },
+  {
+    "api_endpoint": "/users",
+    "method": "POST",
+    "payload": {"name": "John", "email": "john@example.com"},
+    "expected_status": 201
+  }
+]

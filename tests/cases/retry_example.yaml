@@ -1,0 +1,37 @@
+name: "Test Retry Logic Example"
+description: "Example test demonstrating retry functionality"
+tags: ["retry", "example"]
+
+variables:
+  api_url: "https://api.example.com"
+  max_retries: 3
+
+steps:
+  # Example 1: Simple retry with default settings
+  - action: "api_get"
+    url: "${api_url}/users"
+    retry:
+      max_attempts: 3
+      delay: 1.0
+  
+  # Example 2: Retry with exponential backoff
+  - action: "api_post"
+    url: "${api_url}/data"
+    body: {"key": "value"}
+    retry:
+      max_attempts: 5
+      delay: 2.0
+      backoff_multiplier: 2.0
+      max_delay: 30.0
+  
+  # Example 3: Retry only on specific exceptions
+  - action: "browser_click"
+    selector: "#submit-button"
+    retry:
+      max_attempts: 3
+      delay: 0.5
+      retry_on_exceptions: ["TimeoutError", "ElementNotFoundError"]
+  
+  # Example 4: No retry (default behavior when retry not specified)
+  - action: "log"
+    message: "This action will not retry on failure"

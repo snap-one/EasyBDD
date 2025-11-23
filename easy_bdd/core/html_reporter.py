@@ -10,20 +10,25 @@ import json
 
 class HTMLReporter:
     """Generate beautiful HTML reports for test execution"""
-    
+
     def __init__(self, output_dir: Path = None):
         self.output_dir = output_dir or Path("reports")
         self.output_dir.mkdir(parents=True, exist_ok=True)
-    
-    def generate_report(self, test_details: List[Dict[str, Any]], 
-                       total_tests: int, passed: int, failed: int, 
-                       execution_time: float,
-                       test_file_name: str = "test") -> Path:
+
+    def generate_report(
+        self,
+        test_details: List[Dict[str, Any]],
+        total_tests: int,
+        passed: int,
+        failed: int,
+        execution_time: float,
+        test_file_name: str = "test",
+    ) -> Path:
         """Generate HTML report from test results"""
-        
+
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         pass_rate = (passed / total_tests * 100) if total_tests > 0 else 0
-        
+
         html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -366,22 +371,22 @@ class HTMLReporter:
         <div class="tests-section">
             <h2>📋 Test Results Details</h2>
 """
-        
+
         # Add test details
         for test in test_details:
-            status = test.get('status', 'UNKNOWN').lower()
-            name = test.get('name', 'Unknown Test')
-            description = test.get('description', '')
-            tags = test.get('tags', [])
-            exec_time = test.get('execution_time', 0)
-            error = test.get('error', '')
-            file_path = test.get('file_path', '')
-            
-            status_class = 'passed' if status == 'passed' else 'failed'
-            status_emoji = '✅' if status == 'passed' else '❌'
-            
-            tags_html = ''.join([f'<span class="tag">{tag}</span>' for tag in tags])
-            
+            status = test.get("status", "UNKNOWN").lower()
+            name = test.get("name", "Unknown Test")
+            description = test.get("description", "")
+            tags = test.get("tags", [])
+            exec_time = test.get("execution_time", 0)
+            error = test.get("error", "")
+            file_path = test.get("file_path", "")
+
+            status_class = "passed" if status == "passed" else "failed"
+            status_emoji = "✅" if status == "passed" else "❌"
+
+            tags_html = "".join([f'<span class="tag">{tag}</span>' for tag in tags])
+
             html_content += f"""
             <div class="test-item {status_class}">
                 <div class="test-header">
@@ -395,9 +400,9 @@ class HTMLReporter:
                     <span>{tags_html}</span>
                 </div>
 """
-            
+
             # Add failure video if available
-            video_path = test.get('video_path')
+            video_path = test.get("video_path")
             if video_path and Path(f"reports/{video_path}").exists():
                 html_content += f"""
                 <div style="margin-top: 15px;">
@@ -415,9 +420,9 @@ class HTMLReporter:
                     </div>
                 </div>
 """
-            
+
             # Add failure screenshot if available
-            failure_screenshot = test.get('failure_screenshot')
+            failure_screenshot = test.get("failure_screenshot")
             if failure_screenshot and Path(f"reports/{failure_screenshot}").exists():
                 html_content += f"""
                 <div style="margin-top: 15px;">
@@ -427,46 +432,50 @@ class HTMLReporter:
                     </div>
                 </div>
 """
-            
+
             # Add soft assertion failures
-            soft_assertions = test.get('soft_assertions')
-            if soft_assertions and soft_assertions.get('count', 0) > 0:
-                failures = soft_assertions.get('failures', [])
+            soft_assertions = test.get("soft_assertions")
+            if soft_assertions and soft_assertions.get("count", 0) > 0:
+                failures = soft_assertions.get("failures", [])
                 html_content += f"""
                 <div class="error-message" style="background: #fff5e6; border-left: 4px solid #f59e0b;">
                     <strong>⚠️ Soft Assertion Failures: {soft_assertions['count']}</strong>
                     <ul style="margin: 10px 0 0 20px; padding: 0;">
 """
                 for failure in failures:
-                    step_num = failure.get('step_number', 'N/A')
-                    action = failure.get('action', 'Unknown')
-                    message = failure.get('message', '')
-                    expected = failure.get('expected')
-                    actual = failure.get('actual')
-                    
+                    step_num = failure.get("step_number", "N/A")
+                    action = failure.get("action", "Unknown")
+                    message = failure.get("message", "")
+                    expected = failure.get("expected")
+                    actual = failure.get("actual")
+
                     html_content += f"""
                         <li style="margin: 5px 0;">
                             <strong>Step {step_num} ({action}):</strong> {message}
 """
                     if expected:
-                        html_content += f"<br>&nbsp;&nbsp;&nbsp;&nbsp;<em>Expected:</em> {expected}"
+                        html_content += (
+                            f"<br>&nbsp;&nbsp;&nbsp;&nbsp;<em>Expected:</em> {expected}"
+                        )
                     if actual:
-                        html_content += f"<br>&nbsp;&nbsp;&nbsp;&nbsp;<em>Actual:</em> {actual}"
+                        html_content += (
+                            f"<br>&nbsp;&nbsp;&nbsp;&nbsp;<em>Actual:</em> {actual}"
+                        )
                     html_content += "</li>"
-                
+
                 html_content += """
                     </ul>
                 </div>
 """
-            
+
             # Add failed step details
-            failed_step = test.get('failed_step')
+            failed_step = test.get("failed_step")
             if failed_step:
-                step_num = failed_step.get('step_number', 'N/A')
-                step_action = failed_step.get('step_action', 'Unknown')
-                step_details = failed_step.get('step_details', '')
-                step_error = failed_step.get('error', '')
-                
+                step_num = failed_step.get("step_number", "N/A")
+                step_action = failed_step.get("step_action", "Unknown")
+                step_details = failed_step.get("step_details", "")
+                step_error = failed_step.get("error", "")
+
                 html_content += f"""
                 <div class="error-message">
                     <strong>❌ Failed at Step {step_num}:</strong> {step_action}<br>
@@ -480,14 +489,15 @@ class HTMLReporter:
                     <strong>Error:</strong> {error}
                 </div>
 """
-            
+
             # Add execution log if available
-            execution_log = test.get('execution_log', '')
+            execution_log = test.get("execution_log", "")
             if execution_log:
                 # Escape HTML in log
                 import html
+
                 escaped_log = html.escape(execution_log)
-                
+
                 html_content += f"""
                 <div class="log-section">
                     <button class="log-toggle" onclick="toggleLog(this)">
@@ -498,11 +508,11 @@ class HTMLReporter:
                     </div>
                 </div>
 """
-            
+
             html_content += """
             </div>
 """
-        
+
         html_content += """
         </div>
         
@@ -537,11 +547,26 @@ class HTMLReporter:
 </body>
 </html>
 """
-        
+
         # Write HTML file with test file name prefix
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        report_path = self.output_dir / f"{test_file_name}_report_{timestamp}.html"
-        with open(report_path, 'w', encoding='utf-8') as f:
+        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_path = self.output_dir / f"{test_file_name}_report_{timestamp_str}.html"
+        with open(report_path, "w", encoding="utf-8") as f:
             f.write(html_content)
-        
+
+        # Also save JSON for metrics engine
+        json_data = {
+            "timestamp": timestamp,
+            "test_file": test_file_name,
+            "total_tests": total_tests,
+            "passed": passed,
+            "failed": failed,
+            "pass_rate": pass_rate,
+            "execution_time": execution_time,
+            "tests": test_details,
+        }
+        json_path = self.output_dir / f"{test_file_name}_results_{timestamp_str}.json"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(json_data, f, indent=2)
+
         return report_path

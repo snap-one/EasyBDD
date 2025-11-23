@@ -10,19 +10,19 @@ variables:
   
 
 setup:
-  - action: "AWS get latest firmware"
+  - action: "aws.get_latest"
     bucket_name: "${bucket_name}"
     folder_prefix: "${folder_prefix}"
     file_extension: ".bin"
     download_dir: "Firmware"
     store_filename_as: "firmware_s3_key"
     store_version_as: "firmware_version"
-  - action: "Assert"
+  - action: "test.assert"
     expression: "firmware_s3_key_basename is not None"
     message: "Should download firmware file"
     
     # Get list of all firmware files from S3
-  - action: "AWS list firmware files"
+  - action: "aws.list_files"
     bucket_name: "${bucket_name}"
     folder_prefix: "${folder_prefix}"
     file_extension: ".bin"
@@ -30,7 +30,7 @@ setup:
     store_as: "firmware_list"
   
   # Get latest firmware
-  - action: "AWS get latest firmware"
+  - action: "aws.get_latest"
     bucket_name: "${bucket_name}"
     folder_prefix: "${folder_prefix}"
     file_extension: ".bin"
@@ -39,7 +39,7 @@ setup:
     store_version_as: "upgrade_version"
   
   # Get second-to-last firmware
-  - action: "AWS get latest firmware"
+  - action: "aws.get_latest"
     bucket_name: "${bucket_name}"
     folder_prefix: "${folder_prefix}"
     file_extension: ".bin"
@@ -49,61 +49,61 @@ setup:
     store_version_as: "downgrade_version"
 
 steps:
-- action: Open browser
+- action: browser.open
   url: http://${device_ip}/cgi-bin/luci
-- action: Click element
+- action: browser.click
   selector: '#user'
   description: 'Click: #user'
-- action: Fill form field
+- action: browser.fill
   field: '#user'
   value: araknis
   description: 'Fill: #user'
-- action: Click element
+- action: browser.click
   selector: '#pass'
   description: 'Click: #pass'
-- action: Fill form field
+- action: browser.fill
   field: '#pass'
   value: SnapAV704
   description: 'Fill: #pass'
-- action: Click element
+- action: browser.click
   role: button
   name: Log In
   description: 'Click button: Log In'
-- action: Click element
+- action: browser.click
   role: link
   name: File Management
   description: 'Click link: File Management'
 
 # Wait for iframe to load
-- action: Wait
+- action: browser.wait
   timeout: 2000
   description: 'Wait for iframe to load'
 
 # Upload firmware file to iframe (now supports iframe >> selector syntax)
-- action: Upload file
+- action: browser.upload
   selector: 'iframe >> #image'
   file_path: 'Firmware/${firmware_s3_key_basename}'
   description: 'Upload firmware file to iframe'
 
-- action: Wait
+- action: browser.wait
   timeout: 2000
   description: 'Wait for file to be selected'
 
 # Click Upload button in iframe
-- action: Click element
+- action: browser.click
   selector: 'iframe >> #UploadButton'
   description: 'Click Upload button in iframe'
 
-- action: Wait
+- action: browser.wait
   timeout: 10000
   description: 'Wait for upload to complete'
 
 # Click Upgrade button in iframe
-- action: Click element
+- action: browser.click
   selector: 'iframe >> input[name="Button"]'
   description: 'Click Upgrade button in iframe'
 
 
-- action: Wait
+- action: browser.wait
   timeout: 10000
   description: 'Wait for firmware upgrade to start'

@@ -11,7 +11,7 @@ variables:
 
 setup:
   # Get list of all firmware files from S3
-  - action: "AWS list firmware files"
+  - action: "aws.list_files"
     bucket_name: "${bucket_name}"
     folder_prefix: "${folder_prefix}"
     file_extension: ".bin"
@@ -19,23 +19,23 @@ setup:
     store_as: "firmware_list"
   
   # Get latest firmware
-  - action: "AWS get latest firmware"
+  - action: "aws.get_latest"
     bucket_name: "${bucket_name}"
     folder_prefix: "${folder_prefix}"
     file_extension: ".bin"
     download_dir: "Firmware"
-    store_filename_as: "upgrade_firmware"
-    store_version_as: "upgrade_version"
+    store_filename_as: "latest_firmware"
+    store_version_as: "latest_version"
   
-  # Get second-to-last firmware
-  - action: "AWS get latest firmware"
+  # Get second-to-last firmware (older version for downgrade testing)
+  - action: "aws.get_latest"
     bucket_name: "${bucket_name}"
     folder_prefix: "${folder_prefix}"
     file_extension: ".bin"
     download_dir: "Firmware"
     get_second_to_last: true
-    store_filename_as: "downgrade_firmware"
-    store_version_as: "downgrade_version"
+    store_filename_as: "older_firmware"
+    store_version_as: "older_version"
 
 steps:
   # Now you have these variables available:
@@ -50,23 +50,28 @@ steps:
   # Write your own test steps here using these variables
   # Example:
   
-  - action: Open browser
-    url: "http://${device_ip}/cgi-bin/luci"
+  steps:
+  # Login to device
+  - action: browser.open
+    url: "http://${device_ip}"
   
-  - action: Fill form field
-    field: '#user'
-    value: araknis
-  - action: Fill form field
-    field: '#pass'
-    value: SnapAV704
-  - action: Click element
+  - action: browser.fill
+    field: "username"
+    value: "${username}"
+  
+  - action: browser.fill
+    field: "password"
+    value: "${password}"
+  
+  - action: browser.click
     role: button
-    name: Log In
+    name: "Login"
   
   # Your upgrade/downgrade steps here using:
   # Firmware/${latest_firmware_basename}
   # Firmware/${older_firmware_basename}
 
 cleanup:
-  - action: Take screenshot
-    name: "test-complete"
+  # Example: Take screenshot after upgrade
+  - action: browser.screenshot
+    name: "after_upgrade"

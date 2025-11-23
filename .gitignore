@@ -65,3 +65,4 @@ record_test.py
 *.log
 Firmware/
 reports/
+archive/
