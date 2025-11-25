@@ -880,6 +880,122 @@
             align-items: center;
         }
 
+        /* Documentation View */
+        .docs-container {
+            display: flex;
+            height: calc(100vh - 80px);
+            overflow: hidden;
+        }
+
+        .docs-sidebar {
+            width: 280px;
+            background: var(--bg-card);
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+            padding: 1.5rem;
+        }
+
+        .docs-section {
+            margin-bottom: 2rem;
+        }
+
+        .docs-section h3 {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+
+        .docs-link {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            width: 100%;
+            padding: 0.75rem;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: var(--text-primary);
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.875rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .docs-link:hover {
+            background: var(--bg-hover);
+            color: var(--primary);
+        }
+
+        .docs-link.active {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--primary);
+            font-weight: 500;
+        }
+
+        .docs-link i {
+            width: 16px;
+            text-align: center;
+        }
+
+        .docs-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-main);
+        }
+
+        .docs-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .docs-breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .docs-breadcrumb i {
+            font-size: 0.75rem;
+            opacity: 0.5;
+        }
+
+        .docs-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .docs-viewer {
+            flex: 1;
+            overflow: hidden;
+            background: white;
+            position: relative;
+        }
+
+        .docs-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-secondary);
+        }
+
+        .docs-placeholder h3 {
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+
         .test-item {
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -2017,7 +2133,7 @@
                     <button class="nav-button" :class="{active: view === 'variables'}" @click="navigateToView('variables'); loadVariables()">
                         <i class="fas fa-code"></i> Variables
                     </button>
-                    <button class="nav-button" :class="{active: view === 'docs'}" @click="openDocs">
+                    <button class="nav-button" :class="{active: view === 'docs'}" @click="navigateToView('docs')">
                         <i class="fas fa-book"></i> Documentation
                     </button>
                 </div>
@@ -2049,6 +2165,7 @@
                     <h2 v-else-if="view === 'results'">Test Results</h2>
                     <h2 v-else-if="view === 'variables'">Variables</h2>
                     <h2 v-else-if="view === 'test-suites'">Test Suites</h2>
+                    <h2 v-else-if="view === 'docs'">Documentation</h2>
                 </div>
                 <div class="toolbar-right">
                     <button v-if="view === 'builder' && !isRecording" class="btn btn-secondary" @click="startRecording">
@@ -2842,6 +2959,125 @@
                     </div>
                 </div>
 
+                <!-- Documentation View -->
+                <div v-if="view === 'docs'" class="docs-container">
+                    <div class="docs-sidebar">
+                        <div class="docs-section">
+                            <h3>Getting Started</h3>
+                            <button class="docs-link" :class="{active: selectedDoc === 'README'}" @click="selectDoc('README')">
+                                <i class="fas fa-home"></i> README
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'setup'}" @click="selectDoc('setup')">
+                                <i class="fas fa-cog"></i> Setup Guide
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'syntax'}" @click="selectDoc('syntax')">
+                                <i class="fas fa-code"></i> Syntax Guide
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'examples'}" @click="selectDoc('examples')">
+                                <i class="fas fa-lightbulb"></i> Examples
+                            </button>
+                        </div>
+                        <div class="docs-section">
+                            <h3>Test Builder</h3>
+                            <button class="docs-link" :class="{active: selectedDoc === 'TEST_BUILDER'}" @click="selectDoc('TEST_BUILDER')">
+                                <i class="fas fa-paint-brush"></i> Test Builder Guide
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'TEST_BUILDER_QUICKREF'}" @click="selectDoc('TEST_BUILDER_QUICKREF')">
+                                <i class="fas fa-bolt"></i> Quick Reference
+                            </button>
+                        </div>
+                        <div class="docs-section">
+                            <h3>Features</h3>
+                            <button class="docs-link" :class="{active: selectedDoc === 'actions'}" @click="selectDoc('actions')">
+                                <i class="fas fa-list"></i> Actions Reference
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'assertions'}" @click="selectDoc('assertions')">
+                                <i class="fas fa-check-circle"></i> Assertions
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'conditional-steps'}" @click="selectDoc('conditional-steps')">
+                                <i class="fas fa-code-branch"></i> Conditional Steps
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'data-driven'}" @click="selectDoc('data-driven')">
+                                <i class="fas fa-database"></i> Data-Driven Testing
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'soft-assertions'}" @click="selectDoc('soft-assertions')">
+                                <i class="fas fa-shield-alt"></i> Soft Assertions
+                            </button>
+                        </div>
+                        <div class="docs-section">
+                            <h3>Integrations</h3>
+                            <button class="docs-link" :class="{active: selectedDoc === 'aws-s3-integration'}" @click="selectDoc('aws-s3-integration')">
+                                <i class="fas fa-cloud"></i> AWS S3
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'jsonrpc-websocket'}" @click="selectDoc('jsonrpc-websocket')">
+                                <i class="fas fa-plug"></i> OvrC WebSocket
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'api-authentication'}" @click="selectDoc('api-authentication')">
+                                <i class="fas fa-key"></i> API Authentication
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'datalake-logger'}" @click="selectDoc('datalake-logger')">
+                                <i class="fas fa-chart-line"></i> Datalake Logger
+                            </button>
+                        </div>
+                        <div class="docs-section">
+                            <h3>Advanced</h3>
+                            <button class="docs-link" :class="{active: selectedDoc === 'advanced'}" @click="selectDoc('advanced')">
+                                <i class="fas fa-rocket"></i> Advanced Features
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'CENTRALIZED_VARIABLES'}" @click="selectDoc('CENTRALIZED_VARIABLES')">
+                                <i class="fas fa-code"></i> Variable Management
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'WORKSPACE_MANAGEMENT'}" @click="selectDoc('WORKSPACE_MANAGEMENT')">
+                                <i class="fas fa-folder"></i> Workspace Management
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'troubleshooting'}" @click="selectDoc('troubleshooting')">
+                                <i class="fas fa-wrench"></i> Troubleshooting
+                            </button>
+                        </div>
+                        <div class="docs-section">
+                            <h3>Tools</h3>
+                            <button class="docs-link" :class="{active: selectedDoc === 'LIVE_RECORDER'}" @click="selectDoc('LIVE_RECORDER')">
+                                <i class="fas fa-video"></i> Live Recorder
+                            </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'PLAYWRIGHT_RECORDING'}" @click="selectDoc('PLAYWRIGHT_RECORDING')">
+                                <i class="fas fa-record-vinyl"></i> Playwright Recording
+                            </button>
+                        </div>
+                    </div>
+                    <div class="docs-content">
+                        <div class="docs-toolbar">
+                            <div class="docs-breadcrumb">
+                                <span>Documentation</span>
+                                <i class="fas fa-chevron-right"></i>
+                                <span>{{ getDocTitle(selectedDoc) }}</span>
+                            </div>
+                            <div class="docs-actions">
+                                <button class="btn btn-sm btn-secondary" @click="openDocInGitHub(selectedDoc)" title="View on GitHub">
+                                    <i class="fab fa-github"></i> View on GitHub
+                                </button>
+                                <button class="btn btn-sm btn-secondary" @click="openDocRaw(selectedDoc)" title="View Raw">
+                                    <i class="fas fa-code"></i> Raw
+                                </button>
+                            </div>
+                        </div>
+                        <div class="docs-viewer">
+                            <div v-if="!selectedDoc" class="docs-placeholder">
+                                <i class="fas fa-book-open" style="font-size: 4rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+                                <h3>Select a document from the sidebar</h3>
+                                <p class="text-muted">Choose a documentation topic to get started</p>
+                            </div>
+                            <iframe
+                                v-else
+                                :src="getDocUrl(selectedDoc)"
+                                frameborder="0"
+                                style="width: 100%; height: 100%; border: none;"
+                                @load="onDocLoad"
+                                sandbox="allow-same-origin allow-scripts allow-popups allow-forms">
+                            </iframe>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Results View -->
                 <div v-if="view === 'results'" class="content-area">
                     <div class="card">
@@ -2854,9 +3090,9 @@
                                         {{ ws }} ({{ workspaceCounts[ws] || 0 }})
                                     </option>
                                 </select>
-                                <button class="btn btn-secondary" @click="loadResults">
-                                    <i class="fas fa-sync"></i> Refresh
-                                </button>
+                            <button class="btn btn-secondary" @click="loadResults">
+                                <i class="fas fa-sync"></i> Refresh
+                            </button>
                             </div>
                         </div>
                         <div class="card-body">
@@ -2878,37 +3114,37 @@
                                     <div class="results-list">
                                         <div v-for="result in getWorkspaceResults(workspace)" :key="result.filename"
                                                  :class="['result-card', 'status-card-' + (result.statusClass || (result.status || 'unknown').toLowerCase())]">
-                                            <div class="result-header">
-                                                <div class="result-title">
+                                    <div class="result-header">
+                                        <div class="result-title">
                                                     <span :class="'status-badge status-' + (result.statusClass || (result.status || 'unknown').toLowerCase())">
                                                         {{ (result.status || 'unknown').toUpperCase() }}
                                                     </span>
-                                                    <strong>{{ result.test_path }}</strong>
-                                                </div>
-                                                <div class="result-actions">
-                                                    <button class="btn btn-icon btn-secondary" @click="viewResult(result.filename)" title="View Details">
-                                                        <i class="fas fa-eye"></i>
-                                                    </button>
+                                            <strong>{{ result.test_path }}</strong>
+                                        </div>
+                                        <div class="result-actions">
+                                            <button class="btn btn-icon btn-secondary" @click="viewResult(result.filename)" title="View Details">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
                                                     <button class="btn btn-icon btn-success" @click="generateReportFromJson(result.filename)" title="Generate HTML Report">
                                                         <i class="fas fa-file-code"></i>
                                                     </button>
-                                                    <button class="btn btn-icon btn-secondary" @click="downloadResult(result.filename)" title="Download">
-                                                        <i class="fas fa-download"></i>
-                                                    </button>
-                                                    <button class="btn btn-icon btn-danger" @click="deleteResult(result.filename)" title="Delete">
-                                                        <i class="fas fa-trash"></i>
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <div class="result-info">
-                                                <div><i class="fas fa-clock"></i> Started: {{ formatDate(result.started) }}</div>
-                                                <div><i class="fas fa-flag-checkered"></i> Finished: {{ formatDate(result.finished) }}</div>
-                                                <div><i class="fas fa-terminal"></i> Output lines: {{ result.output_lines }}</div>
-                                                <div v-if="result.return_code !== undefined"><i class="fas fa-code"></i> Return code: {{ result.return_code }}</div>
-                                            </div>
+                                            <button class="btn btn-icon btn-secondary" @click="downloadResult(result.filename)" title="Download">
+                                                <i class="fas fa-download"></i>
+                                            </button>
+                                            <button class="btn btn-icon btn-danger" @click="deleteResult(result.filename)" title="Delete">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
                                         </div>
                                     </div>
+                                    <div class="result-info">
+                                        <div><i class="fas fa-clock"></i> Started: {{ formatDate(result.started) }}</div>
+                                        <div><i class="fas fa-flag-checkered"></i> Finished: {{ formatDate(result.finished) }}</div>
+                                        <div><i class="fas fa-terminal"></i> Output lines: {{ result.output_lines }}</div>
+                                        <div v-if="result.return_code !== undefined"><i class="fas fa-code"></i> Return code: {{ result.return_code }}</div>
+                                    </div>
                                 </div>
+                            </div>
+                        </div>
 
                                 <!-- Pagination -->
                                 <div v-if="resultsTotalPages > 1 || resultsTotal > resultsPerPage" class="pagination" style="display: flex; justify-content: center; align-items: center; gap: 0.5rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border);">
@@ -2921,7 +3157,7 @@
                                     <button class="btn btn-secondary" @click="goToResultsPage(resultsPage + 1)" :disabled="resultsPage >= resultsTotalPages">
                                         Next <i class="fas fa-chevron-right"></i>
                                     </button>
-                                </div>
+                    </div>
                                 <div v-else-if="resultsTotal > 0" style="text-align: center; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--text-secondary);">
                                     Showing all {{ resultsTotal }} result(s)
                                 </div>
@@ -3190,15 +3426,15 @@
                                 </div>
                                 <div v-for="(param, paramName) in getRequiredParams()" :key="paramName" class="form-group">
                                     <label class="form-label form-label-required">
-                                        {{ param.label }}
-                                    </label>
+                                {{ param.label }}
+                            </label>
 
                                     <!-- Text Input with Autocomplete Suggestions -->
                                     <div v-if="param.type === 'text' || param.type === 'file'">
                                         <input
-                                           v-model="currentStep.parameters[paramName]"
-                                           type="text"
-                                           class="form-control"
+                                   v-model="currentStep.parameters[paramName]"
+                                   type="text"
+                                   class="form-control"
                                            :placeholder="param.placeholder"
                                            :list="'suggestions-' + paramName"
                                            autocomplete="off">
@@ -3207,29 +3443,29 @@
                                         </datalist>
                                     </div>
 
-                                    <!-- Number Input -->
-                                    <input v-else-if="param.type === 'number'"
-                                           v-model.number="currentStep.parameters[paramName]"
-                                           type="number"
-                                           class="form-control"
-                                           :placeholder="param.placeholder">
+                            <!-- Number Input -->
+                            <input v-else-if="param.type === 'number'"
+                                   v-model.number="currentStep.parameters[paramName]"
+                                   type="number"
+                                   class="form-control"
+                                   :placeholder="param.placeholder">
 
-                                    <!-- Checkbox -->
-                                    <input v-else-if="param.type === 'checkbox'"
-                                           v-model="currentStep.parameters[paramName]"
-                                           type="checkbox">
+                            <!-- Checkbox -->
+                            <input v-else-if="param.type === 'checkbox'"
+                                   v-model="currentStep.parameters[paramName]"
+                                   type="checkbox">
 
-                                    <!-- Select -->
-                                    <select v-else-if="param.type === 'select'"
-                                            v-model="currentStep.parameters[paramName]"
-                                            class="form-control">
-                                        <option value="">-- Select --</option>
+                            <!-- Select -->
+                            <select v-else-if="param.type === 'select'"
+                                    v-model="currentStep.parameters[paramName]"
+                                    class="form-control">
+                                <option value="">-- Select --</option>
                                         <option v-for="option in param.options"
                                                 :key="option.value || option"
                                                 :value="option.value || option">
                                             {{ option.label || option }}
-                                        </option>
-                                    </select>
+                                </option>
+                            </select>
 
                                     <!-- Key-Value Editor (for JSON parameters) -->
                                     <div v-else-if="param.type === 'keyvalue'" class="keyvalue-param-editor">
@@ -3283,13 +3519,13 @@
                                         </div>
                                     </div>
 
-                                    <!-- Textarea -->
-                                    <textarea v-else-if="param.type === 'textarea' || param.type === 'json'"
-                                              v-model="currentStep.parameters[paramName]"
-                                              class="form-control"
-                                              :placeholder="param.placeholder"></textarea>
+                            <!-- Textarea -->
+                            <textarea v-else-if="param.type === 'textarea' || param.type === 'json'"
+                                      v-model="currentStep.parameters[paramName]"
+                                      class="form-control"
+                                      :placeholder="param.placeholder"></textarea>
 
-                                    <div class="form-help">{{ param.help }}</div>
+                            <div class="form-help">{{ param.help }}</div>
                                     <!-- Show suggestions as clickable chips if available -->
                                     <div v-if="param.suggestions && param.suggestions.length > 0 && !currentStep.parameters[paramName]" class="suggestions-hint">
                                         <div class="suggestions-label">
@@ -3309,13 +3545,13 @@
                                         </div>
                                     </div>
                                 </div>
-                            </div>
+                        </div>
 
                             <!-- Optional Parameters Group -->
                             <div v-if="getOptionalParamsCount() > 0" class="parameters-group">
                                 <div class="parameters-group-title">
                                     <i class="fas fa-circle"></i> OPTIONAL PARAMETERS
-                                </div>
+                            </div>
                                 <div v-for="(param, paramName) in getOptionalParams()" :key="paramName" class="form-group form-group-optional">
                                     <label class="form-label">
                                         {{ param.label }}
@@ -3439,7 +3675,7 @@
                                 </div>
                             </div>
                         </div>
-                    </div>
+                        </div>
                     </div>
 
                     <!-- Web Inspector Panel -->
@@ -3612,7 +3848,7 @@
                         <button class="btn btn-icon btn-secondary" @click.stop.prevent="closeResultModal()" type="button" title="Back to Results">
                             <i class="fas fa-arrow-left"></i>
                         </button>
-                        <h3 class="modal-title">Test Result Details</h3>
+                    <h3 class="modal-title">Test Result Details</h3>
                     </div>
                     <button class="btn btn-icon btn-secondary" @click.stop.prevent="closeResultModal()" type="button">
                         <i class="fas fa-times"></i>
@@ -4073,6 +4309,8 @@
                     selectedSuite: null,
                     draggedStepIndex: null,
                     draggedSuiteItemIndex: null,
+                    // Documentation
+                    selectedDoc: 'README',
                     // Variables management
                     environments: [],
                     collections: [],
@@ -5315,7 +5553,7 @@
                             return;
                         }
 
-                        const step = this.currentTest.steps[index];
+                    const step = this.currentTest.steps[index];
                         if (!step || !step.action) {
                             console.error('Invalid step data:', step);
                             alert('Cannot edit step: Step data is invalid');
@@ -5323,8 +5561,8 @@
                         }
 
                         // Deep copy the step to avoid reactivity issues
-                        this.currentStep = JSON.parse(JSON.stringify(step));
-                        this.editingStepIndex = index;
+                    this.currentStep = JSON.parse(JSON.stringify(step));
+                    this.editingStepIndex = index;
 
                         // URL encode the action ID to handle special characters like dots
                         const encodedActionId = encodeURIComponent(step.action);
@@ -5535,12 +5773,12 @@
                         this.pendingActionId = null;
                     } else {
                         // Normal single test flow
-                        if (this.editingStepIndex >= 0) {
+                    if (this.editingStepIndex >= 0) {
                             // Update existing step - use Vue.set or direct assignment with new object
                             this.currentTest.steps.splice(this.editingStepIndex, 1, stepToSave);
-                        } else {
+                    } else {
                             this.currentTest.steps.push(stepToSave);
-                        }
+                    }
                     }
 
                     this.showStepModal = false;
@@ -6231,8 +6469,99 @@ Would you like to enter a selector manually?
                     }
                     return value;
                 },
-                openDocs() {
-                    window.open('https://github.com/mfomin-snapone/Automation-Framework', '_blank');
+                selectDoc(docName) {
+                    this.selectedDoc = docName;
+                },
+                getDocUrl(docName) {
+                    // Use GitHub's markdown renderer via raw.githubusercontent.com with a markdown viewer
+                    const baseUrl = 'https://raw.githubusercontent.com/mfomin-snapone/easy_bdd/main';
+                    const docMap = {
+                        'README': `${baseUrl}/README.md`,
+                        'setup': `${baseUrl}/docs/setup.md`,
+                        'syntax': `${baseUrl}/docs/syntax.md`,
+                        'examples': `${baseUrl}/docs/examples.md`,
+                        'TEST_BUILDER': `${baseUrl}/docs/TEST_BUILDER.md`,
+                        'TEST_BUILDER_QUICKREF': `${baseUrl}/docs/TEST_BUILDER_QUICKREF.md`,
+                        'actions': `${baseUrl}/docs/actions.md`,
+                        'assertions': `${baseUrl}/docs/assertions.md`,
+                        'conditional-steps': `${baseUrl}/docs/conditional-steps.md`,
+                        'data-driven': `${baseUrl}/docs/data-driven.md`,
+                        'soft-assertions': `${baseUrl}/docs/soft-assertions.md`,
+                        'aws-s3-integration': `${baseUrl}/docs/aws-s3-integration.md`,
+                        'jsonrpc-websocket': `${baseUrl}/docs/jsonrpc-websocket.md`,
+                        'api-authentication': `${baseUrl}/docs/api-authentication.md`,
+                        'datalake-logger': `${baseUrl}/docs/datalake-logger.md`,
+                        'advanced': `${baseUrl}/docs/advanced.md`,
+                        'CENTRALIZED_VARIABLES': `${baseUrl}/docs/CENTRALIZED_VARIABLES.md`,
+                        'WORKSPACE_MANAGEMENT': `${baseUrl}/docs/WORKSPACE_MANAGEMENT.md`,
+                        'troubleshooting': `${baseUrl}/docs/troubleshooting.md`,
+                        'LIVE_RECORDER': `${baseUrl}/docs/LIVE_RECORDER.md`,
+                        'PLAYWRIGHT_RECORDING': `${baseUrl}/docs/PLAYWRIGHT_RECORDING.md`
+                    };
+                    const rawUrl = docMap[docName] || `${baseUrl}/README.md`;
+                    // Use a markdown renderer service or GitHub's blob view
+                    // For better rendering, use GitHub's blob view which renders markdown
+                    const blobUrl = rawUrl.replace('raw.githubusercontent.com', 'github.com').replace('/main/', '/blob/main/');
+                    return blobUrl;
+                },
+                getDocTitle(docName) {
+                    const titleMap = {
+                        'README': 'README',
+                        'setup': 'Setup Guide',
+                        'syntax': 'Syntax Guide',
+                        'examples': 'Examples',
+                        'TEST_BUILDER': 'Test Builder Guide',
+                        'TEST_BUILDER_QUICKREF': 'Quick Reference',
+                        'actions': 'Actions Reference',
+                        'assertions': 'Assertions',
+                        'conditional-steps': 'Conditional Steps',
+                        'data-driven': 'Data-Driven Testing',
+                        'soft-assertions': 'Soft Assertions',
+                        'aws-s3-integration': 'AWS S3 Integration',
+                        'jsonrpc-websocket': 'OvrC WebSocket',
+                        'api-authentication': 'API Authentication',
+                        'datalake-logger': 'Datalake Logger',
+                        'advanced': 'Advanced Features',
+                        'CENTRALIZED_VARIABLES': 'Variable Management',
+                        'WORKSPACE_MANAGEMENT': 'Workspace Management',
+                        'troubleshooting': 'Troubleshooting',
+                        'LIVE_RECORDER': 'Live Recorder',
+                        'PLAYWRIGHT_RECORDING': 'Playwright Recording'
+                    };
+                    return titleMap[docName] || docName;
+                },
+                openDocInGitHub(docName) {
+                    window.open(this.getDocUrl(docName), '_blank');
+                },
+                openDocRaw(docName) {
+                    const baseUrl = 'https://raw.githubusercontent.com/mfomin-snapone/easy_bdd/main';
+                    const docMap = {
+                        'README': `${baseUrl}/README.md`,
+                        'setup': `${baseUrl}/docs/setup.md`,
+                        'syntax': `${baseUrl}/docs/syntax.md`,
+                        'examples': `${baseUrl}/docs/examples.md`,
+                        'TEST_BUILDER': `${baseUrl}/docs/TEST_BUILDER.md`,
+                        'TEST_BUILDER_QUICKREF': `${baseUrl}/docs/TEST_BUILDER_QUICKREF.md`,
+                        'actions': `${baseUrl}/docs/actions.md`,
+                        'assertions': `${baseUrl}/docs/assertions.md`,
+                        'conditional-steps': `${baseUrl}/docs/conditional-steps.md`,
+                        'data-driven': `${baseUrl}/docs/data-driven.md`,
+                        'soft-assertions': `${baseUrl}/docs/soft-assertions.md`,
+                        'aws-s3-integration': `${baseUrl}/docs/aws-s3-integration.md`,
+                        'jsonrpc-websocket': `${baseUrl}/docs/jsonrpc-websocket.md`,
+                        'api-authentication': `${baseUrl}/docs/api-authentication.md`,
+                        'datalake-logger': `${baseUrl}/docs/datalake-logger.md`,
+                        'advanced': `${baseUrl}/docs/advanced.md`,
+                        'CENTRALIZED_VARIABLES': `${baseUrl}/docs/CENTRALIZED_VARIABLES.md`,
+                        'WORKSPACE_MANAGEMENT': `${baseUrl}/docs/WORKSPACE_MANAGEMENT.md`,
+                        'troubleshooting': `${baseUrl}/docs/troubleshooting.md`,
+                        'LIVE_RECORDER': `${baseUrl}/docs/LIVE_RECORDER.md`,
+                        'PLAYWRIGHT_RECORDING': `${baseUrl}/docs/PLAYWRIGHT_RECORDING.md`
+                    };
+                    window.open(docMap[docName] || `${baseUrl}/README.md`, '_blank');
+                },
+                onDocLoad() {
+                    // Optional: Handle iframe load events
                 },
                 async loadResults() {
                     try {
@@ -6440,9 +6769,9 @@ Would you like to enter a selector manually?
                 formatDate(dateString) {
                     if (!dateString) return 'N/A';
                     try {
-                        const date = new Date(dateString);
+                    const date = new Date(dateString);
                         if (isNaN(date.getTime())) return dateString;
-                        return date.toLocaleString();
+                    return date.toLocaleString();
                     } catch {
                         return dateString;
                     }
@@ -7421,16 +7750,16 @@ Would you like to enter a selector manually?
                                         output: []
                                     };
                                 } else {
-                                    this.executionProgress.status = message.status;
-                                    this.executionProgress.percentage = 100;
-                                    this.executionProgress.currentStep = this.executionProgress.totalSteps;
-                                    // Mark all remaining steps as completed or failed
+                                this.executionProgress.status = message.status;
+                                this.executionProgress.percentage = 100;
+                                this.executionProgress.currentStep = this.executionProgress.totalSteps;
+                                // Mark all remaining steps as completed or failed
                                     if (this.executionProgress.steps) {
-                                        this.executionProgress.steps.forEach(step => {
-                                            if (step.status === 'pending' || step.status === 'running') {
-                                                step.status = message.status === 'completed' ? 'completed' : 'failed';
-                                            }
-                                        });
+                                this.executionProgress.steps.forEach(step => {
+                                    if (step.status === 'pending' || step.status === 'running') {
+                                        step.status = message.status === 'completed' ? 'completed' : 'failed';
+                                    }
+                                });
                                     }
                                 }
 
