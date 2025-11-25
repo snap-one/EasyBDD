@@ -2,30 +2,30 @@
 Test runner for executing Easy BDD tests
 """
 
-import sys
-import time
-import threading
-import datetime
-from pathlib import Path
-from typing import List, Optional, Dict, Any
-from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from io import StringIO
 import contextlib
+import datetime
+import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from io import StringIO
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from .variable_manager import GlobalConfigManager
-from .parser import YAMLParser, TestDefinition
-from .generator import GherkinGenerator
-from .html_reporter import HTMLReporter
-from .soft_assertions import SoftAssertionManager
-from .assertions import AssertionEngine, JSONSchemaValidator, ResponseValidator
-from .datalake_logger import get_logger, DatalakeLogger
-from .safe_eval import safe_eval
-from .security import mask_sensitive_data
-from .retry import RetryConfig, retry_action
-from .data_loader import DataLoader
 from ..services.browser_service import BrowserService
 from ..services.ovrc_api_service import OvrCApiService
+from .assertions import AssertionEngine, JSONSchemaValidator, ResponseValidator
+from .data_loader import DataLoader
+from .datalake_logger import DatalakeLogger, get_logger
+from .generator import GherkinGenerator
+from .html_reporter import HTMLReporter
+from .parser import TestDefinition, YAMLParser
+from .retry import RetryConfig, retry_action
+from .safe_eval import safe_eval
+from .security import mask_sensitive_data
+from .soft_assertions import SoftAssertionManager
+from .variable_manager import GlobalConfigManager
 
 # from ..actions import action_registry
 
@@ -253,10 +253,12 @@ class TestRunner:
                     # Resolve relative to test file directory
                     test_dir = Path(test.file_path).parent
                     data_file = test_dir / data_file
-                
+
                 try:
                     test.data = DataLoader.load_from_file(data_file)
-                    print(f"    📊 Loaded {len(test.data)} data rows from {data_file.name}")
+                    print(
+                        f"    📊 Loaded {len(test.data)} data rows from {data_file.name}"
+                    )
                 except Exception as e:
                     print(f"      ❌ Failed to load data from {data_file}: {e}")
                     return False
@@ -447,7 +449,9 @@ class TestRunner:
         soft_assert_manager = SoftAssertionManager()
         console_output = StringIO()
         test_passed = False
-        variables = test.variables.copy() if test.variables else {}  # Initialize variables for cleanup
+        variables = (
+            test.variables.copy() if test.variables else {}
+        )  # Initialize variables for cleanup
 
         # Store original stdout to capture console output
         original_stdout = sys.stdout
@@ -477,6 +481,38 @@ class TestRunner:
         sys.stdout = DualWriter(original_stdout, console_output)
 
         try:
+            # Load environment, collection, and suite variables
+            from .variable_loader import load_all_variables
+
+            # Detect workspace name from test path (e.g., tests/cases/OvrC/test.yaml -> OvrC)
+            workspace_name = None
+            if hasattr(test, "file_path") and test.file_path:
+                test_path = Path(test.file_path)
+                # Get parent directory name as workspace (e.g., OvrC, Networking)
+                if len(test_path.parts) >= 2:
+                    workspace_name = test_path.parts[-2]  # Second to last part
+
+            # Load all variables (environment, collection, suite)
+            # Note: suite_id would need to be passed if running from a suite
+            project_root = Path.cwd()
+            loaded_vars = load_all_variables(
+                self.config.variable_manager,
+                workspace_name=workspace_name,
+                suite_id=None,  # Could be passed as a parameter if needed
+                project_root=project_root,
+            )
+
+            if loaded_vars.get("environment"):
+                print(
+                    f"    📦 Loaded {len(loaded_vars['environment'])} environment variable(s)"
+                )
+            if loaded_vars.get("collection"):
+                print(
+                    f"    📦 Loaded {len(loaded_vars['collection'])} collection variable(s) for workspace: {workspace_name}"
+                )
+            if loaded_vars.get("suite"):
+                print(f"    📦 Loaded {len(loaded_vars['suite'])} suite variable(s)")
+
             # Load device configuration if specified
             if test.device_config:
                 print(f"    🔧 Loading device config: {test.device_config}")
@@ -630,11 +666,14 @@ class TestRunner:
         finally:
             # Auto-disconnect OvrC service at end of test (if connected)
             # Access variables from test.variables which is modified during execution
-            test_vars = test.variables if hasattr(test, 'variables') and test.variables else {}
+            test_vars = (
+                test.variables if hasattr(test, "variables") and test.variables else {}
+            )
             ovrc_service = test_vars.get("_ovrc_service")
             if ovrc_service and ovrc_service.server_url and ovrc_service.is_connected():
                 try:
                     import asyncio
+
                     loop = asyncio.get_event_loop()
                     print(f"    🔌 Auto-disconnecting OvrC WebSocket...")
                     loop.run_until_complete(ovrc_service.disconnect())
@@ -644,7 +683,7 @@ class TestRunner:
                 finally:
                     if test.variables:
                         test.variables.pop("_ovrc_service", None)
-            
+
             # Execute cleanup steps regardless of main test result
             if test.cleanup:
                 try:
@@ -949,9 +988,12 @@ class TestRunner:
                 return self._handle_response_assertion(step_params, variables)
 
             # JSON-RPC WebSocket actions (support both formats)
-            if action_lower.startswith("jsonrpc") or action_lower.startswith(
-                "jsonrpc."
-            ) or action_lower.startswith("ovrc") or action_lower.startswith("ovrc."):
+            if (
+                action_lower.startswith("jsonrpc")
+                or action_lower.startswith("jsonrpc.")
+                or action_lower.startswith("ovrc")
+                or action_lower.startswith("ovrc.")
+            ):
                 return self._handle_ovrc_action(action, step_params, variables)
 
             # AWS S3 actions (support both formats)
@@ -985,7 +1027,9 @@ class TestRunner:
             # Don't catch JSON-RPC or OvrC failures - let them propagate
             # to avoid "Unknown action" fallthrough
             action_lower_check = action.lower()
-            if action_lower_check.startswith("jsonrpc") or action_lower_check.startswith("ovrc"):
+            if action_lower_check.startswith(
+                "jsonrpc"
+            ) or action_lower_check.startswith("ovrc"):
                 raise
             print(f"      Warning: Custom action '{action}' failed: {e}")
             return False
@@ -1059,16 +1103,16 @@ class TestRunner:
     def _resolve_url_with_variables(self, url: str, variables: dict) -> str:
         """Resolve URL with variable substitution, handling URL-encoded variables"""
         from urllib.parse import unquote
-        
+
         # If URL contains URL-encoded braces, decode them first
         if "%7b" in url.lower() or "%7d" in url.lower():
             url = unquote(url)
-        
+
         # Ensure all variables are available
         all_vars = variables.copy()
         if hasattr(self.config, "get_all_variables"):
             all_vars.update(self.config.get_all_variables())
-        
+
         # Do multiple passes to resolve nested variables
         if hasattr(self.config, "substitute_variables"):
             max_passes = 5
@@ -1079,7 +1123,7 @@ class TestRunner:
                 url = new_url
         else:
             url = self._replace_variables(url, all_vars)
-        
+
         return url
 
     def _handle_assert_action(self, step_params: dict, variables: dict) -> bool:
@@ -1159,13 +1203,17 @@ class TestRunner:
     def _handle_response_assertion(self, step_params: dict, variables: dict) -> bool:
         """Handle Assert response action for HTTP response validation."""
         # Extract parameters using helper
-        response = self._get_param(step_params, "response", "last_response")  # Default to last_response
+        response = self._get_param(
+            step_params, "response", "last_response"
+        )  # Default to last_response
         expectations = self._get_param(step_params, "expect") or self._get_param(
             step_params, "expectations"
         )
-        
+
         # Backward compatibility: support old "status" or "status_code" parameter
-        status_code = self._get_param(step_params, "status") or self._get_param(step_params, "status_code")
+        status_code = self._get_param(step_params, "status") or self._get_param(
+            step_params, "status_code"
+        )
         if status_code and not expectations:
             # Convert old format to new expectations format
             expectations = {"status_code": status_code}
@@ -1175,8 +1223,10 @@ class TestRunner:
             if "last_response" in variables:
                 response = "last_response"
             else:
-                raise ValueError("Assert response requires 'response' parameter or a previous API call")
-        
+                raise ValueError(
+                    "Assert response requires 'response' parameter or a previous API call"
+                )
+
         if not expectations:
             raise ValueError(
                 "Assert response requires 'expect'/'expectations' parameter or 'status'/'status_code' parameter"
@@ -1199,9 +1249,10 @@ class TestRunner:
             # Try direct variable lookup
             elif response in variables:
                 response = variables[response]
-        
+
         # Convert requests.Response object to dict format if needed
         import requests
+
         if isinstance(response, requests.Response):
             content_type = response.headers.get("content-type", "")
             is_json = content_type.startswith("application/json")
@@ -1229,13 +1280,15 @@ class TestRunner:
                     print(f"        - {failure}")
             raise AssertionError(result.message)
 
-    def _ensure_ovrc_connection(self, variables: dict, params: dict = None) -> OvrCApiService:
+    def _ensure_ovrc_connection(
+        self, variables: dict, params: dict = None
+    ) -> OvrCApiService:
         """Ensure OvrC service is connected, auto-connect if needed."""
         import asyncio
-        
+
         # Get existing service
         ovrc_service = variables.get("_ovrc_service")
-        
+
         # Check if service exists and is connected (for WebSocket)
         if ovrc_service:
             # For HTTP-only services, they're always "connected"
@@ -1244,28 +1297,34 @@ class TestRunner:
             # For WebSocket services, check connection status
             if ovrc_service.server_url and ovrc_service.is_connected():
                 return ovrc_service
-        
+
         # Need to create/connect - get connection parameters from variables or params
         if params is None:
             params = {}
-        
+
         # Try to get connection parameters from variables (set during ovrc.connect)
         # Also check for common variable names
-        server_url = (params.get("server_url") or 
-                     variables.get("ovrc_server_url") or 
-                     variables.get("server_url") or
-                     variables.get("ws_url") or
-                     variables.get("websocket_url"))
-        device_id = (params.get("device_id") or 
-                    variables.get("ovrc_device_id") or 
-                    variables.get("device_id") or
-                    variables.get("mac") or
-                    variables.get("device_mac"))
-        api_base_url = (params.get("api_base_url") or 
-                       variables.get("ovrc_api_base_url") or 
-                       variables.get("api_base_url") or
-                       variables.get("api_url"))
-        
+        server_url = (
+            params.get("server_url")
+            or variables.get("ovrc_server_url")
+            or variables.get("server_url")
+            or variables.get("ws_url")
+            or variables.get("websocket_url")
+        )
+        device_id = (
+            params.get("device_id")
+            or variables.get("ovrc_device_id")
+            or variables.get("device_id")
+            or variables.get("mac")
+            or variables.get("device_mac")
+        )
+        api_base_url = (
+            params.get("api_base_url")
+            or variables.get("ovrc_api_base_url")
+            or variables.get("api_base_url")
+            or variables.get("api_url")
+        )
+
         # If no connection parameters found, raise error
         if not server_url and not api_base_url:
             raise ValueError(
@@ -1273,35 +1332,65 @@ class TestRunner:
                 "1. Call 'ovrc.connect' first with server_url or api_base_url, OR\n"
                 "2. Set variables: ovrc_server_url/ovrc_api_base_url, ovrc_device_id"
             )
-        
+
         # Get other connection parameters from variables
-        protocol = params.get("protocol") or variables.get("ovrc_protocol") or "firmware-protocol"
+        protocol = (
+            params.get("protocol")
+            or variables.get("ovrc_protocol")
+            or "firmware-protocol"
+        )
         session_id = params.get("session_id") or variables.get("ovrc_session_id")
         verify_ssl = params.get("verify_ssl")
         if verify_ssl is None:
             verify_ssl = variables.get("ovrc_verify_ssl", True)
         if isinstance(verify_ssl, str):
             verify_ssl = verify_ssl.lower() in ("true", "1", "yes", "on")
-        
+
         # Get authentication parameters
-        auth_type = params.get("auth_type") or variables.get("ovrc_auth_type") or "bearer"
-        auth_token = params.get("auth_token") or variables.get("ovrc_auth_token") or variables.get("auth_token")
-        auth_username = params.get("auth_username") or variables.get("ovrc_auth_username") or variables.get("username")
-        auth_password = params.get("auth_password") or variables.get("ovrc_auth_password") or variables.get("password")
-        api_key = params.get("api_key") or variables.get("ovrc_api_key") or variables.get("api_key")
-        api_key_header = params.get("api_key_header") or variables.get("ovrc_api_key_header") or "X-API-Key"
-        custom_auth_headers = params.get("custom_auth_headers") or variables.get("ovrc_custom_auth_headers") or {}
-        
+        auth_type = (
+            params.get("auth_type") or variables.get("ovrc_auth_type") or "bearer"
+        )
+        auth_token = (
+            params.get("auth_token")
+            or variables.get("ovrc_auth_token")
+            or variables.get("auth_token")
+        )
+        auth_username = (
+            params.get("auth_username")
+            or variables.get("ovrc_auth_username")
+            or variables.get("username")
+        )
+        auth_password = (
+            params.get("auth_password")
+            or variables.get("ovrc_auth_password")
+            or variables.get("password")
+        )
+        api_key = (
+            params.get("api_key")
+            or variables.get("ovrc_api_key")
+            or variables.get("api_key")
+        )
+        api_key_header = (
+            params.get("api_key_header")
+            or variables.get("ovrc_api_key_header")
+            or "X-API-Key"
+        )
+        custom_auth_headers = (
+            params.get("custom_auth_headers")
+            or variables.get("ovrc_custom_auth_headers")
+            or {}
+        )
+
         # Get verbose logging
         verbose_logging = (
-            variables.get("verbose_logging", False) or
-            variables.get("show_full_response", False) or
-            params.get("verbose_logging", False) or
-            params.get("show_full_response", False)
+            variables.get("verbose_logging", False)
+            or variables.get("show_full_response", False)
+            or params.get("verbose_logging", False)
+            or params.get("show_full_response", False)
         )
         if isinstance(verbose_logging, str):
             verbose_logging = verbose_logging.lower() in ("true", "1", "yes", "on")
-        
+
         # Create service
         ovrc_service = OvrCApiService(
             server_url=server_url if server_url else None,
@@ -1320,7 +1409,7 @@ class TestRunner:
             custom_auth_headers=custom_auth_headers,
             verbose_logging=verbose_logging,
         )
-        
+
         # Connect WebSocket if server_url provided
         if server_url:
             loop = asyncio.get_event_loop()
@@ -1329,10 +1418,10 @@ class TestRunner:
             if not success:
                 raise ConnectionError("Failed to auto-connect to OvrC WebSocket server")
             print(f"      ✅ Auto-connected successfully")
-        
+
         # Store service in variables
         variables["_ovrc_service"] = ovrc_service
-        
+
         # Store connection parameters in variables for future auto-connect
         if server_url:
             variables["ovrc_server_url"] = server_url
@@ -1342,7 +1431,7 @@ class TestRunner:
             variables["ovrc_api_base_url"] = api_base_url
         if protocol:
             variables["ovrc_protocol"] = protocol
-        
+
         return ovrc_service
 
     def _handle_ovrc_action(
@@ -1361,14 +1450,20 @@ class TestRunner:
         try:
             # Handle HTTP API requests (GET, POST, PUT, PATCH, DELETE)
             # Support both "ovrc.http.get", "ovrc.http.request", "ovrc http get", etc.
-            if (action_lower.startswith("ovrc.http.") or 
-                action_lower.startswith("ovrc http") or 
-                action_lower.startswith("ovrc api")):
+            if (
+                action_lower.startswith("ovrc.http.")
+                or action_lower.startswith("ovrc http")
+                or action_lower.startswith("ovrc api")
+            ):
                 # Auto-connect if needed for HTTP requests
-                if not ovrc_service or (ovrc_service.server_url and not ovrc_service.is_connected()):
+                if not ovrc_service or (
+                    ovrc_service.server_url and not ovrc_service.is_connected()
+                ):
                     ovrc_service = self._ensure_ovrc_connection(variables, params)
-                return self._handle_ovrc_http_action(action, step_params, variables, ovrc_service)
-            
+                return self._handle_ovrc_http_action(
+                    action, step_params, variables, ovrc_service
+                )
+
             # Handle WebSocket connection
             if "connect" in action_lower:
                 # Extract connection parameters
@@ -1388,22 +1483,29 @@ class TestRunner:
                 custom_auth_headers = params.get("custom_auth_headers", {})
 
                 if not server_url and not api_base_url:
-                    raise ValueError("OvrC connect requires 'server_url' (WebSocket) or 'api_base_url' (HTTP)")
+                    raise ValueError(
+                        "OvrC connect requires 'server_url' (WebSocket) or 'api_base_url' (HTTP)"
+                    )
 
                 # Optional parameters
                 verify_ssl = params.get("verify_ssl", True)
                 extra_headers = params.get("headers", {})
-                
+
                 # Get verbose logging flag from variables or params
                 verbose_logging = (
-                    variables.get("verbose_logging", False) or
-                    variables.get("show_full_response", False) or
-                    params.get("verbose_logging", False) or
-                    params.get("show_full_response", False)
+                    variables.get("verbose_logging", False)
+                    or variables.get("show_full_response", False)
+                    or params.get("verbose_logging", False)
+                    or params.get("show_full_response", False)
                 )
                 # Convert string "true"/"false" to boolean
                 if isinstance(verbose_logging, str):
-                    verbose_logging = verbose_logging.lower() in ("true", "1", "yes", "on")
+                    verbose_logging = verbose_logging.lower() in (
+                        "true",
+                        "1",
+                        "yes",
+                        "on",
+                    )
 
                 # Create service
                 ovrc_service = OvrCApiService(
@@ -1429,15 +1531,19 @@ class TestRunner:
                     loop = asyncio.get_event_loop()
                     success = loop.run_until_complete(ovrc_service.connect())
                     if not success:
-                        raise ConnectionError("Failed to connect to OvrC WebSocket server")
+                        raise ConnectionError(
+                            "Failed to connect to OvrC WebSocket server"
+                        )
 
                 # Store service in variables
                 variables["_ovrc_service"] = ovrc_service
-                
+
                 # Update verbose logging if service already exists and flag changed
                 if verbose_logging:
-                    print(f"      🔍 Verbose logging enabled - full request/response details will be shown")
-                
+                    print(
+                        f"      🔍 Verbose logging enabled - full request/response details will be shown"
+                    )
+
                 return True
 
             # All other WebSocket actions - auto-connect if needed
@@ -1447,7 +1553,7 @@ class TestRunner:
                 needs_connection = True
             elif ovrc_service.server_url and not ovrc_service.is_connected():
                 needs_connection = True
-            
+
             if needs_connection:
                 ovrc_service = self._ensure_ovrc_connection(variables, params)
                 # Update the variables with the new service
@@ -1460,21 +1566,24 @@ class TestRunner:
                 method = self._get_param(step_params, "method", "")
                 if not method:
                     raise ValueError("OvrC send/call requires 'method' parameter")
-                
+
                 method_params = self._get_param(step_params, "params", {})
                 # Handle different formats: dict, JSON string, or None
                 if isinstance(method_params, str):
                     # Try to parse as JSON
                     method_params = method_params.strip()
-                    if not method_params or method_params == '{}':
+                    if not method_params or method_params == "{}":
                         method_params = {}
                     else:
                         try:
                             import json
+
                             method_params = json.loads(method_params)
                         except json.JSONDecodeError:
                             # If JSON parsing fails, treat as empty
-                            print(f"      ⚠️  Warning: Could not parse params as JSON, using empty dict")
+                            print(
+                                f"      ⚠️  Warning: Could not parse params as JSON, using empty dict"
+                            )
                             method_params = {}
                 elif method_params is None:
                     method_params = {}
@@ -1484,48 +1593,56 @@ class TestRunner:
                         method_params = dict(method_params)
                     except:
                         method_params = {}
-                
+
                 timeout = self._get_param(step_params, "timeout", 10.0)
                 if isinstance(timeout, str):
                     try:
                         timeout = float(timeout)
                     except:
                         timeout = 10.0
-                
+
                 # Update verbose logging if changed
                 verbose_logging = (
-                    variables.get("verbose_logging", False) or
-                    variables.get("show_full_response", False) or
-                    params.get("verbose_logging", False) or
-                    params.get("show_full_response", False)
+                    variables.get("verbose_logging", False)
+                    or variables.get("show_full_response", False)
+                    or params.get("verbose_logging", False)
+                    or params.get("show_full_response", False)
                 )
                 if isinstance(verbose_logging, str):
-                    verbose_logging = verbose_logging.lower() in ("true", "1", "yes", "on")
+                    verbose_logging = verbose_logging.lower() in (
+                        "true",
+                        "1",
+                        "yes",
+                        "on",
+                    )
                 if ovrc_service.verbose_logging != verbose_logging:
                     ovrc_service.verbose_logging = verbose_logging
-                
+
                 print(f"      📤 Sending OvrC command: {method}")
                 if method_params:
                     if ovrc_service.verbose_logging:
                         import json
-                        print(f"         Parameters: {json.dumps(method_params, indent=2)}")
+
+                        print(
+                            f"         Parameters: {json.dumps(method_params, indent=2)}"
+                        )
                     else:
                         print(f"         Parameters: {method_params}")
-                
+
                 response = loop.run_until_complete(
                     ovrc_service.send_request(
                         method=method,
                         params=method_params,
                         wait_for_response=True,
-                        timeout=timeout
+                        timeout=timeout,
                     )
                 )
-                
+
                 if response:
                     if response.error:
                         print(f"      ❌ OvrC command error: {response.error}")
                         raise ValueError(f"OvrC command failed: {response.error}")
-                    
+
                     result = response.result
                     store_as = self._get_param(step_params, "store_as", "")
                     if store_as and result:
@@ -1542,9 +1659,7 @@ class TestRunner:
                 return True
 
             elif "start device updates" in action_lower:
-                success = loop.run_until_complete(
-                    ovrc_service.start_device_updates()
-                )
+                success = loop.run_until_complete(ovrc_service.start_device_updates())
                 return success
 
             elif "stop device updates" in action_lower:
@@ -1685,37 +1800,41 @@ class TestRunner:
     ) -> bool:
         """Handle OvrC HTTP API actions (GET, POST, PUT, PATCH, DELETE)."""
         import asyncio
-        
+
         params = self._get_params(step_params)
         action_lower = action.lower()
-        
+
         # Auto-connect if service doesn't exist or is disconnected
         # The _ensure_ovrc_connection method will handle HTTP-only services automatically
-        if not ovrc_service or (ovrc_service.server_url and not ovrc_service.is_connected()):
+        if not ovrc_service or (
+            ovrc_service.server_url and not ovrc_service.is_connected()
+        ):
             ovrc_service = self._ensure_ovrc_connection(variables, params)
-        
+
         # Update verbose logging if changed
         verbose_logging = (
-            variables.get("verbose_logging", False) or
-            variables.get("show_full_response", False) or
-            params.get("verbose_logging", False) or
-            params.get("show_full_response", False)
+            variables.get("verbose_logging", False)
+            or variables.get("show_full_response", False)
+            or params.get("verbose_logging", False)
+            or params.get("show_full_response", False)
         )
         if isinstance(verbose_logging, str):
             verbose_logging = verbose_logging.lower() in ("true", "1", "yes", "on")
         if ovrc_service and ovrc_service.verbose_logging != verbose_logging:
             ovrc_service.verbose_logging = verbose_logging
-        
+
         loop = asyncio.get_event_loop()
         endpoint = params.get("endpoint", "")
         # Support both "json_data" and "body" for request body
         json_data = params.get("json_data", params.get("body", {}))
         # Support both "params", "query", and "query_params" for query parameters
-        query_params = params.get("query_params", params.get("params", params.get("query", {})))
+        query_params = params.get(
+            "query_params", params.get("params", params.get("query", {}))
+        )
         headers = params.get("headers", {})
         timeout = params.get("timeout", 30.0)
         store_as = params.get("store_as", "")
-        
+
         try:
             # Handle generic "ovrc.http.request" action with method parameter
             if "http.request" in action_lower or "http request" in action_lower:
@@ -1730,46 +1849,78 @@ class TestRunner:
                         params=query_params,
                         json_data=json_data,
                         headers=headers,
-                        timeout=timeout
+                        timeout=timeout,
                     )
                 )
             else:
                 # Extract HTTP method from action (supports "ovrc.http.get", "ovrc http get", etc.)
-                method_part = action_lower.split(".")[-1] if "." in action_lower else action_lower.split()[-1]
+                method_part = (
+                    action_lower.split(".")[-1]
+                    if "." in action_lower
+                    else action_lower.split()[-1]
+                )
                 if "get" in method_part:
                     result = loop.run_until_complete(
-                        ovrc_service.http_get(endpoint, params=query_params, headers=headers, timeout=timeout)
+                        ovrc_service.http_get(
+                            endpoint,
+                            params=query_params,
+                            headers=headers,
+                            timeout=timeout,
+                        )
                     )
                 elif "post" in method_part:
                     result = loop.run_until_complete(
-                        ovrc_service.http_post(endpoint, json_data=json_data, params=query_params, headers=headers, timeout=timeout)
+                        ovrc_service.http_post(
+                            endpoint,
+                            json_data=json_data,
+                            params=query_params,
+                            headers=headers,
+                            timeout=timeout,
+                        )
                     )
                 elif "put" in method_part:
                     result = loop.run_until_complete(
-                        ovrc_service.http_put(endpoint, json_data=json_data, params=query_params, headers=headers, timeout=timeout)
+                        ovrc_service.http_put(
+                            endpoint,
+                            json_data=json_data,
+                            params=query_params,
+                            headers=headers,
+                            timeout=timeout,
+                        )
                     )
                 elif "patch" in method_part:
                     result = loop.run_until_complete(
-                        ovrc_service.http_patch(endpoint, json_data=json_data, params=query_params, headers=headers, timeout=timeout)
+                        ovrc_service.http_patch(
+                            endpoint,
+                            json_data=json_data,
+                            params=query_params,
+                            headers=headers,
+                            timeout=timeout,
+                        )
                     )
                 elif "delete" in method_part:
                     result = loop.run_until_complete(
-                        ovrc_service.http_delete(endpoint, params=query_params, headers=headers, timeout=timeout)
+                        ovrc_service.http_delete(
+                            endpoint,
+                            params=query_params,
+                            headers=headers,
+                            timeout=timeout,
+                        )
                     )
                 else:
                     raise ValueError(f"Unknown HTTP method in action: {action}")
-            
+
             if store_as and result:
                 variables[store_as] = result
                 print(f"      Stored response as: {store_as}")
-            
+
             # Check for error in response
             if result and "error" in result:
                 print(f"      ⚠️  API returned error: {result.get('error')}")
                 return False
-            
+
             return result is not None
-            
+
         except Exception as e:
             print(f"      ❌ OvrC HTTP API action failed: {e}")
             raise
@@ -2011,20 +2162,20 @@ class TestRunner:
     ) -> bool:
         """Execute a single step using the appropriate service"""
         # Check if retry configuration is present
-        if hasattr(step, 'retry_config') and step.retry_config:
+        if hasattr(step, "retry_config") and step.retry_config:
             retry_config = RetryConfig(
-                max_attempts=step.retry_config.get('max_attempts', 3),
-                delay=step.retry_config.get('delay', 1.0),
-                backoff_multiplier=step.retry_config.get('backoff_multiplier', 2.0),
-                max_delay=step.retry_config.get('max_delay', 30.0),
+                max_attempts=step.retry_config.get("max_attempts", 3),
+                delay=step.retry_config.get("delay", 1.0),
+                backoff_multiplier=step.retry_config.get("backoff_multiplier", 2.0),
+                max_delay=step.retry_config.get("max_delay", 30.0),
             )
-            
+
             # Wrap the execution in retry logic
             return retry_action(
                 lambda: self._execute_step_internal(
                     service, step, variables, soft_assert_manager, step_number
                 ),
-                retry_config
+                retry_config,
             )
         else:
             # Execute without retry
@@ -2070,14 +2221,16 @@ class TestRunner:
                     # If no changes, we're done
                     if resolved_vars == previous_vars:
                         break
-                
+
                 # Update the config with the resolved values
                 for key, value in resolved_vars.items():
                     self.config.set_variable(key, value, "runtime_data")
 
                 # Use GlobalConfigManager's substitution with all variables
                 # Pass variables as additional_vars to ensure they're available
-                step_params = self.config.substitute_recursive(step.__dict__.copy(), additional_vars=variables)
+                step_params = self.config.substitute_recursive(
+                    step.__dict__.copy(), additional_vars=variables
+                )
             else:
                 # Fallback to old method with multi-pass substitution
                 resolved_vars = variables.copy()
@@ -2277,10 +2430,12 @@ class TestRunner:
                 else:
                     # Fallback variable substitution
                     import re
+
                     def replace_var(match):
                         var_name = match.group(1)
                         return str(variables.get(var_name, match.group(0)))
-                    message = re.sub(r'\$\{([^}]+)\}', replace_var, message)
+
+                    message = re.sub(r"\$\{([^}]+)\}", replace_var, message)
                 print(f"      📝 {message}")
                 return True
 
@@ -2303,25 +2458,31 @@ class TestRunner:
                 )
                 data = step_params.get("data", {}) or params_dict.get("data", {})
                 params = step_params.get("params", {}) or params_dict.get("params", {})
-                
+
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False) or
-                    variables.get("show_full_response", False) or
-                    variables.get("full_log", False) or
-                    step_params.get("verbose_logging", False) or
-                    step_params.get("show_full_response", False) or
-                    step_params.get("full_log", False) or
-                    params_dict.get("verbose_logging", False) or
-                    params_dict.get("show_full_response", False) or
-                    params_dict.get("full_log", False)
+                    variables.get("verbose_logging", False)
+                    or variables.get("show_full_response", False)
+                    or variables.get("full_log", False)
+                    or step_params.get("verbose_logging", False)
+                    or step_params.get("show_full_response", False)
+                    or step_params.get("full_log", False)
+                    or params_dict.get("verbose_logging", False)
+                    or params_dict.get("show_full_response", False)
+                    or params_dict.get("full_log", False)
                 )
                 if isinstance(verbose_logging, str):
-                    verbose_logging = verbose_logging.lower() in ("true", "1", "yes", "on")
+                    verbose_logging = verbose_logging.lower() in (
+                        "true",
+                        "1",
+                        "yes",
+                        "on",
+                    )
 
                 print(f"      API {method}: {url} (device: {device_id})")
                 if verbose_logging:
                     import json
+
                     if headers:
                         print(f"         Headers: {json.dumps(headers, indent=2)}")
                     if params:
@@ -2333,7 +2494,7 @@ class TestRunner:
                             print(f"           {line}")
                     elif data:
                         print(f"         Request Data: {data}")
-                
+
                 response = service.request(
                     method,
                     url,
@@ -2347,7 +2508,7 @@ class TestRunner:
                 # Store response for validation
                 variables["last_response"] = response
                 variables["last_status"] = response.status_code
-                
+
                 # Parse JSON if content type is JSON
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
@@ -2364,15 +2525,20 @@ class TestRunner:
                 # Print full response if verbose logging enabled
                 if verbose_logging:
                     import json
+
                     print(f"         Status: {response.status_code}")
-                    print(f"         Response Headers: {json.dumps(dict(response.headers), indent=2)}")
+                    print(
+                        f"         Response Headers: {json.dumps(dict(response.headers), indent=2)}"
+                    )
                     if is_json and response_json:
                         print(f"         Response Body:")
                         body_str = json.dumps(response_json, indent=2)
                         for line in body_str.split("\n"):
                             print(f"           {line}")
                     else:
-                        print(f"         Response Body: {response.text[:500]}{'...' if len(response.text) > 500 else ''}")
+                        print(
+                            f"         Response Body: {response.text[:500]}{'...' if len(response.text) > 500 else ''}"
+                        )
                 else:
                     print(f"         Status: {response.status_code}")
 
@@ -2395,14 +2561,17 @@ class TestRunner:
                             store_as, response_dict, "runtime_data"
                         )
                     print(f"      Stored response as: {store_as}")
-                
+
                 # Check if we should fail on error status codes
-                fail_on_error = step_params.get("fail_on_error", True) or params_dict.get("fail_on_error", True)
+                fail_on_error = step_params.get(
+                    "fail_on_error", True
+                ) or params_dict.get("fail_on_error", True)
                 if isinstance(fail_on_error, str):
                     fail_on_error = fail_on_error.lower() in ("true", "1", "yes", "on")
-                
+
                 if fail_on_error and response.status_code >= 400:
                     import json
+
                     error_msg = f"API request failed with status {response.status_code}"
                     if is_json and response_json:
                         error_msg += f": {json.dumps(response_json, indent=2)}"
@@ -2419,10 +2588,10 @@ class TestRunner:
                 device_id = self._get_param(step_params, "device_id", "default")
                 headers = self._get_param(step_params, "headers", {})
                 params = self._get_param(step_params, "params", {})
-                
+
                 # Resolve URL with variable substitution (handles URL-encoded variables)
                 url = self._resolve_url_with_variables(url, variables)
-                
+
                 # Automatically add Authorization header if token is available
                 # Check for token in variables (common names: token, auth_token, auth_token_{device_id}, {store_as}_token)
                 if not headers:
@@ -2431,10 +2600,11 @@ class TestRunner:
                     # If headers is a string, try to parse it as JSON
                     try:
                         import json
+
                         headers = json.loads(headers) if headers.strip() else {}
                     except:
                         headers = {}
-                
+
                 # Check for stored token
                 token = None
                 if device_id and device_id != "default":
@@ -2447,7 +2617,15 @@ class TestRunner:
                     # If token is a dict (stored response), try to extract the actual token value
                     if isinstance(token, dict):
                         # Try common token field names
-                        for field in ["token", "access_token", "accessToken", "auth_token", "authToken", "data", "result"]:
+                        for field in [
+                            "token",
+                            "access_token",
+                            "accessToken",
+                            "auth_token",
+                            "authToken",
+                            "data",
+                            "result",
+                        ]:
                             if field in token:
                                 field_value = token[field]
                                 # If the field value is a string, use it
@@ -2456,7 +2634,11 @@ class TestRunner:
                                     break
                                 # If the field value is a dict, check if it has a token field
                                 elif isinstance(field_value, dict):
-                                    for sub_field in ["token", "access_token", "accessToken"]:
+                                    for sub_field in [
+                                        "token",
+                                        "access_token",
+                                        "accessToken",
+                                    ]:
                                         if sub_field in field_value:
                                             token = field_value[sub_field]
                                             break
@@ -2465,7 +2647,11 @@ class TestRunner:
                         # If still a dict, try getting the first string value if it looks like a token
                         if isinstance(token, dict):
                             for value in token.values():
-                                if isinstance(value, str) and len(value) > 10 and " " not in value:
+                                if (
+                                    isinstance(value, str)
+                                    and len(value) > 10
+                                    and " " not in value
+                                ):
                                     token = value
                                     break
                 if not token:
@@ -2473,7 +2659,13 @@ class TestRunner:
                     for key, value in variables.items():
                         if isinstance(value, dict):
                             # Try common token field names
-                            for field in ["token", "access_token", "accessToken", "auth_token", "authToken"]:
+                            for field in [
+                                "token",
+                                "access_token",
+                                "accessToken",
+                                "auth_token",
+                                "authToken",
+                            ]:
                                 if field in value:
                                     field_value = value[field]
                                     if isinstance(field_value, str):
@@ -2481,7 +2673,7 @@ class TestRunner:
                                         break
                             if token:
                                 break
-                
+
                 # Add Authorization header if token found
                 if token and "Authorization" not in headers:
                     # Ensure token is a string
@@ -2490,26 +2682,36 @@ class TestRunner:
                     headers["Authorization"] = f"Bearer {token}"
                     print(f"      🔑 Using stored token for authentication")
                 elif not token:
-                    print(f"      ⚠️  No token found. Checking variables: {list(variables.keys())}")
+                    print(
+                        f"      ⚠️  No token found. Checking variables: {list(variables.keys())}"
+                    )
                     # Debug: print what's in the "token" variable if it exists
                     if "token" in variables:
-                        print(f"      🔍 'token' variable type: {type(variables['token'])}, value: {str(variables['token'])[:100]}")
-                
+                        print(
+                            f"      🔍 'token' variable type: {type(variables['token'])}, value: {str(variables['token'])[:100]}"
+                        )
+
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False) or
-                    variables.get("show_full_response", False) or
-                    variables.get("full_log", False) or
-                    step_params.get("verbose_logging", False) or
-                    step_params.get("show_full_response", False) or
-                    step_params.get("full_log", False)
+                    variables.get("verbose_logging", False)
+                    or variables.get("show_full_response", False)
+                    or variables.get("full_log", False)
+                    or step_params.get("verbose_logging", False)
+                    or step_params.get("show_full_response", False)
+                    or step_params.get("full_log", False)
                 )
                 if isinstance(verbose_logging, str):
-                    verbose_logging = verbose_logging.lower() in ("true", "1", "yes", "on")
+                    verbose_logging = verbose_logging.lower() in (
+                        "true",
+                        "1",
+                        "yes",
+                        "on",
+                    )
 
                 print(f"      API GET: {url} (device: {device_id})")
                 if verbose_logging:
                     import json
+
                     if headers:
                         print(f"         📋 Request Headers:")
                         headers_str = json.dumps(headers, indent=2)
@@ -2520,47 +2722,73 @@ class TestRunner:
                         params_str = json.dumps(params, indent=2)
                         for line in params_str.split("\n"):
                             print(f"           {line}")
-                
+
                 response = service.get(url, device_id, headers=headers, params=params)
-                
+
                 # Handle 401 errors by attempting to re-authenticate
                 if response.status_code == 401:
                     print(f"      🔄 Received 401, attempting to re-authenticate...")
                     # Check if we have login credentials in variables
                     login_url = None
                     login_body = None
-                    
+
                     # Try to find login endpoint and credentials
                     api_base_url = variables.get("api_base_url", "")
                     # Resolve api_base_url if it contains variables
                     if api_base_url:
-                        api_base_url = self._resolve_url_with_variables(api_base_url, variables)
+                        api_base_url = self._resolve_url_with_variables(
+                            api_base_url, variables
+                        )
                         # Common login endpoints
-                        for endpoint in ["/auth/login", "/login", "/auth/token", "/token"]:
-                            if endpoint in url or api_base_url.endswith(endpoint.replace("/", "")):
-                                login_url = f"{api_base_url}{endpoint}" if not api_base_url.endswith(endpoint) else api_base_url
+                        for endpoint in [
+                            "/auth/login",
+                            "/login",
+                            "/auth/token",
+                            "/token",
+                        ]:
+                            if endpoint in url or api_base_url.endswith(
+                                endpoint.replace("/", "")
+                            ):
+                                login_url = (
+                                    f"{api_base_url}{endpoint}"
+                                    if not api_base_url.endswith(endpoint)
+                                    else api_base_url
+                                )
                                 break
-                    
+
                     # If no explicit login URL found, try common pattern
                     if not login_url and api_base_url:
                         login_url = f"{api_base_url}/auth/login"
-                    
+
                     # Get credentials from variables
                     username = variables.get("username")
                     password = variables.get("password")
-                    
+
                     if login_url and username and password:
                         # Ensure login_url is fully resolved
-                        login_url = self._resolve_url_with_variables(login_url, variables)
+                        login_url = self._resolve_url_with_variables(
+                            login_url, variables
+                        )
                         import json
-                        login_body = json.dumps({"username": username, "password": password})
+
+                        login_body = json.dumps(
+                            {"username": username, "password": password}
+                        )
                         print(f"      🔑 Re-authenticating with stored credentials...")
                         # Make login request
-                        login_response = service.post(login_url, device_id, json=json.loads(login_body))
+                        login_response = service.post(
+                            login_url, device_id, json=json.loads(login_body)
+                        )
                         if login_response.status_code == 200:
                             login_json = login_response.json()
                             # Extract token
-                            token_fields = ["token", "access_token", "accessToken", "auth_token", "authToken"]
+                            token_fields = [
+                                "token",
+                                "access_token",
+                                "accessToken",
+                                "auth_token",
+                                "authToken",
+                            ]
                             for field in token_fields:
                                 if field in login_json:
                                     token = login_json[field]
@@ -2570,15 +2798,19 @@ class TestRunner:
                                     headers["Authorization"] = f"Bearer {token}"
                                     print(f"      ✅ Re-authenticated successfully")
                                     # Retry the original request
-                                    response = service.get(url, device_id, headers=headers, params=params)
+                                    response = service.get(
+                                        url, device_id, headers=headers, params=params
+                                    )
                                     break
                         else:
-                            print(f"      ⚠️  Re-authentication failed: {login_response.status_code}")
+                            print(
+                                f"      ⚠️  Re-authentication failed: {login_response.status_code}"
+                            )
 
                 # Store response for validation
                 variables["last_response"] = response
                 variables["last_status"] = response.status_code
-                
+
                 # Parse JSON response
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
@@ -2591,10 +2823,11 @@ class TestRunner:
                         variables["last_json"] = None
                 else:
                     variables["last_json"] = None
-                
+
                 # Print full response if verbose logging enabled
                 if verbose_logging:
                     import json
+
                     print(f"         📡 Status: {response.status_code}")
                     print(f"         📋 Response Headers:")
                     headers_str = json.dumps(dict(response.headers), indent=2)
@@ -2616,14 +2849,15 @@ class TestRunner:
                             print(f"           (empty)")
                 else:
                     print(f"         📡 Status: {response.status_code}")
-                
+
                 # Check if we should fail on error status codes
                 fail_on_error = step_params.get("fail_on_error", True)
                 if isinstance(fail_on_error, str):
                     fail_on_error = fail_on_error.lower() in ("true", "1", "yes", "on")
-                
+
                 if fail_on_error and response.status_code >= 400:
                     import json
+
                     error_msg = f"API request failed with status {response.status_code}"
                     if is_json and response_json:
                         error_msg += f": {json.dumps(response_json, indent=2)}"
@@ -2641,16 +2875,17 @@ class TestRunner:
                 headers = self._get_param(step_params, "headers", {})
                 json_data = self._get_param(step_params, "json_data", {})
                 data = self._get_param(step_params, "data", {})
-                
+
                 # Resolve URL with variable substitution (handles URL-encoded variables)
                 url = self._resolve_url_with_variables(url, variables)
-                
+
                 # Handle 'body' parameter - it can be a JSON string that needs parsing
                 body_param = self._get_param(step_params, "body", None)
                 if body_param and not json_data and not data:
                     # If body is a string, try to parse it as JSON after variable substitution
                     if isinstance(body_param, str):
                         import json
+
                         try:
                             # Parse the JSON string (variables should already be substituted by substitute_recursive)
                             json_data = json.loads(body_param)
@@ -2660,22 +2895,28 @@ class TestRunner:
                     else:
                         # Body is already a dict/list
                         json_data = body_param
-                
+
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False) or
-                    variables.get("show_full_response", False) or
-                    variables.get("full_log", False) or
-                    step_params.get("verbose_logging", False) or
-                    step_params.get("show_full_response", False) or
-                    step_params.get("full_log", False)
+                    variables.get("verbose_logging", False)
+                    or variables.get("show_full_response", False)
+                    or variables.get("full_log", False)
+                    or step_params.get("verbose_logging", False)
+                    or step_params.get("show_full_response", False)
+                    or step_params.get("full_log", False)
                 )
                 if isinstance(verbose_logging, str):
-                    verbose_logging = verbose_logging.lower() in ("true", "1", "yes", "on")
+                    verbose_logging = verbose_logging.lower() in (
+                        "true",
+                        "1",
+                        "yes",
+                        "on",
+                    )
 
                 print(f"      API POST: {url} (device: {device_id})")
                 if verbose_logging:
                     import json
+
                     if headers:
                         print(f"         📋 Request Headers:")
                         headers_str = json.dumps(headers, indent=2)
@@ -2693,7 +2934,7 @@ class TestRunner:
                                 print(f"           {line}")
                         else:
                             print(f"           {data}")
-                
+
                 response = service.post(
                     url,
                     device_id,
@@ -2705,7 +2946,7 @@ class TestRunner:
                 # Store response for validation
                 variables["last_response"] = response
                 variables["last_status"] = response.status_code
-                
+
                 # Parse JSON response
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
@@ -2718,10 +2959,11 @@ class TestRunner:
                         variables["last_json"] = None
                 else:
                     variables["last_json"] = None
-                
+
                 # Print full response if verbose logging enabled
                 if verbose_logging:
                     import json
+
                     print(f"         📡 Status: {response.status_code}")
                     print(f"         📋 Response Headers:")
                     headers_str = json.dumps(dict(response.headers), indent=2)
@@ -2742,26 +2984,35 @@ class TestRunner:
                             print(f"           (empty)")
                 else:
                     print(f"         📡 Status: {response.status_code}")
-                
+
                 # Handle store_as parameter - extract and store token/response
                 store_as = self._get_param(step_params, "store_as", "")
                 if store_as:
                     import json
+
                     if is_json and response_json:
                         # Store the full JSON response
                         variables[store_as] = response_json
                         # Also try to extract common token fields and store them
                         # Common token field names: token, access_token, accessToken, auth_token, authToken
-                        token_fields = ["token", "access_token", "accessToken", "auth_token", "authToken", "bearer_token", "bearerToken"]
+                        token_fields = [
+                            "token",
+                            "access_token",
+                            "accessToken",
+                            "auth_token",
+                            "authToken",
+                            "bearer_token",
+                            "bearerToken",
+                        ]
                         token_value = None
                         token_field_found = None
-                        
+
                         for field in token_fields:
                             if field in response_json:
                                 token_value = response_json[field]
                                 token_field_found = field
                                 break
-                        
+
                         # If no standard token field found, check if the response itself is a token string
                         if not token_value:
                             # Check if response_json is a simple string token
@@ -2769,11 +3020,14 @@ class TestRunner:
                                 token_value = response_json
                                 token_field_found = "response_body"
                             # Check if response_json is a dict with a single key-value that might be the token
-                            elif isinstance(response_json, dict) and len(response_json) == 1:
+                            elif (
+                                isinstance(response_json, dict)
+                                and len(response_json) == 1
+                            ):
                                 # If it's a single key-value pair, use the value as the token
                                 token_value = list(response_json.values())[0]
                                 token_field_found = list(response_json.keys())[0]
-                        
+
                         if token_value:
                             # Store token in a variable named after store_as
                             variables[f"{store_as}_token"] = token_value
@@ -2784,15 +3038,23 @@ class TestRunner:
                             variables["auth_token"] = token_value
                             # Also store as plain "token" variable for easy access
                             variables["token"] = token_value
-                            print(f"      🔑 Extracted and stored token from field '{token_field_found}': {str(token_value)[:20]}...")
+                            print(
+                                f"      🔑 Extracted and stored token from field '{token_field_found}': {str(token_value)[:20]}..."
+                            )
                         else:
-                            print(f"      ⚠️  No token field found in response. Available fields: {list(response_json.keys()) if isinstance(response_json, dict) else 'N/A'}")
+                            print(
+                                f"      ⚠️  No token field found in response. Available fields: {list(response_json.keys()) if isinstance(response_json, dict) else 'N/A'}"
+                            )
                         print(f"      💾 Stored response as: {store_as}")
                     else:
                         # Store text response
                         variables[store_as] = response.text
                         # If it looks like a token (no spaces, reasonable length), also store as token
-                        if response.text and len(response.text.strip()) < 500 and " " not in response.text.strip():
+                        if (
+                            response.text
+                            and len(response.text.strip()) < 500
+                            and " " not in response.text.strip()
+                        ):
                             token_value = response.text.strip()
                             variables["auth_token"] = token_value
                             variables["token"] = token_value
@@ -2800,14 +3062,15 @@ class TestRunner:
                                 variables[f"auth_token_{device_id}"] = token_value
                             print(f"      🔑 Extracted token from response text")
                         print(f"      💾 Stored response text as: {store_as}")
-                
+
                 # Check if we should fail on error status codes
                 fail_on_error = step_params.get("fail_on_error", True)
                 if isinstance(fail_on_error, str):
                     fail_on_error = fail_on_error.lower() in ("true", "1", "yes", "on")
-                
+
                 if fail_on_error and response.status_code >= 400:
                     import json
+
                     error_msg = f"API request failed with status {response.status_code}"
                     if is_json and response_json:
                         error_msg += f": {json.dumps(response_json, indent=2)}"
@@ -2824,7 +3087,7 @@ class TestRunner:
                 headers = self._get_param(step_params, "headers", {})
                 json_data = self._get_param(step_params, "json_data", {})
                 data = self._get_param(step_params, "data", {})
-                
+
                 # Ensure URL is fully resolved (handle nested variables)
                 if hasattr(self.config, "substitute_variables"):
                     max_passes = 5
@@ -2835,22 +3098,28 @@ class TestRunner:
                         url = new_url
                 else:
                     url = self._replace_variables(url, variables)
-                
+
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False) or
-                    variables.get("show_full_response", False) or
-                    variables.get("full_log", False) or
-                    step_params.get("verbose_logging", False) or
-                    step_params.get("show_full_response", False) or
-                    step_params.get("full_log", False)
+                    variables.get("verbose_logging", False)
+                    or variables.get("show_full_response", False)
+                    or variables.get("full_log", False)
+                    or step_params.get("verbose_logging", False)
+                    or step_params.get("show_full_response", False)
+                    or step_params.get("full_log", False)
                 )
                 if isinstance(verbose_logging, str):
-                    verbose_logging = verbose_logging.lower() in ("true", "1", "yes", "on")
+                    verbose_logging = verbose_logging.lower() in (
+                        "true",
+                        "1",
+                        "yes",
+                        "on",
+                    )
 
                 print(f"      API PUT: {url} (device: {device_id})")
                 if verbose_logging:
                     import json
+
                     if headers:
                         print(f"         📋 Request Headers:")
                         headers_str = json.dumps(headers, indent=2)
@@ -2868,7 +3137,7 @@ class TestRunner:
                                 print(f"           {line}")
                         else:
                             print(f"           {data}")
-                
+
                 response = service.put(
                     url,
                     device_id,
@@ -2876,7 +3145,7 @@ class TestRunner:
                     json=json_data or None,
                     data=data or None,
                 )
-                
+
                 # Handle 401 errors by attempting to re-authenticate
                 if response.status_code == 401:
                     print(f"      🔄 Received 401, attempting to re-authenticate...")
@@ -2884,23 +3153,38 @@ class TestRunner:
                     api_base_url = variables.get("api_base_url", "")
                     # Resolve api_base_url if it contains variables
                     if api_base_url:
-                        api_base_url = self._resolve_url_with_variables(api_base_url, variables)
+                        api_base_url = self._resolve_url_with_variables(
+                            api_base_url, variables
+                        )
                     username = variables.get("username")
                     password = variables.get("password")
-                    
+
                     if api_base_url and username and password:
                         import json
+
                         login_url = f"{api_base_url}/auth/login"
                         # Ensure login_url is fully resolved
-                        login_url = self._resolve_url_with_variables(login_url, variables)
-                        login_body = json.dumps({"username": username, "password": password})
+                        login_url = self._resolve_url_with_variables(
+                            login_url, variables
+                        )
+                        login_body = json.dumps(
+                            {"username": username, "password": password}
+                        )
                         print(f"      🔑 Re-authenticating with stored credentials...")
                         # Make login request
-                        login_response = service.post(login_url, device_id, json=json.loads(login_body))
+                        login_response = service.post(
+                            login_url, device_id, json=json.loads(login_body)
+                        )
                         if login_response.status_code == 200:
                             login_json = login_response.json()
                             # Extract token
-                            token_fields = ["token", "access_token", "accessToken", "auth_token", "authToken"]
+                            token_fields = [
+                                "token",
+                                "access_token",
+                                "accessToken",
+                                "auth_token",
+                                "authToken",
+                            ]
                             for field in token_fields:
                                 if field in login_json:
                                     token = login_json[field]
@@ -2910,13 +3194,19 @@ class TestRunner:
                                     headers["Authorization"] = f"Bearer {token}"
                                     print(f"      ✅ Re-authenticated successfully")
                                     # Retry the original request
-                                    response = service.put(url, device_id, headers=headers, json=json_data or None, data=data or None)
+                                    response = service.put(
+                                        url,
+                                        device_id,
+                                        headers=headers,
+                                        json=json_data or None,
+                                        data=data or None,
+                                    )
                                     break
 
                 # Store response for validation
                 variables["last_response"] = response
                 variables["last_status"] = response.status_code
-                
+
                 # Parse JSON response
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
@@ -2929,10 +3219,11 @@ class TestRunner:
                         variables["last_json"] = None
                 else:
                     variables["last_json"] = None
-                
+
                 # Print full response if verbose logging enabled
                 if verbose_logging:
                     import json
+
                     print(f"         📡 Status: {response.status_code}")
                     print(f"         📋 Response Headers:")
                     headers_str = json.dumps(dict(response.headers), indent=2)
@@ -2954,14 +3245,15 @@ class TestRunner:
                             print(f"           (empty)")
                 else:
                     print(f"         📡 Status: {response.status_code}")
-                
+
                 # Check if we should fail on error status codes
                 fail_on_error = step_params.get("fail_on_error", True)
                 if isinstance(fail_on_error, str):
                     fail_on_error = fail_on_error.lower() in ("true", "1", "yes", "on")
-                
+
                 if fail_on_error and response.status_code >= 400:
                     import json
+
                     error_msg = f"API request failed with status {response.status_code}"
                     if is_json and response_json:
                         error_msg += f": {json.dumps(response_json, indent=2)}"
@@ -2976,20 +3268,21 @@ class TestRunner:
                 url = self._get_param(step_params, "url", "")
                 device_id = self._get_param(step_params, "device_id", "default")
                 headers = self._get_param(step_params, "headers", {})
-                
+
                 # Resolve URL with variable substitution (handles URL-encoded variables)
                 url = self._resolve_url_with_variables(url, variables)
-                
+
                 # Handle headers if it's a string
                 if isinstance(headers, str):
                     try:
                         import json
+
                         headers = json.loads(headers) if headers.strip() else {}
                     except:
                         headers = {}
                 elif not headers:
                     headers = {}
-                
+
                 # Automatically add Authorization header if token is available
                 token = None
                 if device_id and device_id != "default":
@@ -3001,38 +3294,46 @@ class TestRunner:
                 if not token:
                     # Check for token in stored response objects
                     for key, value in variables.items():
-                        if isinstance(value, dict) and ("token" in value or "access_token" in value):
+                        if isinstance(value, dict) and (
+                            "token" in value or "access_token" in value
+                        ):
                             token = value.get("token") or value.get("access_token")
                             break
-                
+
                 # Add Authorization header if token found
                 if token and "Authorization" not in headers:
                     headers["Authorization"] = f"Bearer {token}"
                     print(f"      🔑 Using stored token for authentication")
-                
+
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False) or
-                    variables.get("show_full_response", False) or
-                    variables.get("full_log", False) or
-                    step_params.get("verbose_logging", False) or
-                    step_params.get("show_full_response", False) or
-                    step_params.get("full_log", False)
+                    variables.get("verbose_logging", False)
+                    or variables.get("show_full_response", False)
+                    or variables.get("full_log", False)
+                    or step_params.get("verbose_logging", False)
+                    or step_params.get("show_full_response", False)
+                    or step_params.get("full_log", False)
                 )
                 if isinstance(verbose_logging, str):
-                    verbose_logging = verbose_logging.lower() in ("true", "1", "yes", "on")
+                    verbose_logging = verbose_logging.lower() in (
+                        "true",
+                        "1",
+                        "yes",
+                        "on",
+                    )
 
                 print(f"      API DELETE: {url} (device: {device_id})")
                 if verbose_logging:
                     import json
+
                     if headers:
                         print(f"         📋 Request Headers:")
                         headers_str = json.dumps(headers, indent=2)
                         for line in headers_str.split("\n"):
                             print(f"           {line}")
-                
+
                 response = service.delete(url, device_id, headers=headers)
-                
+
                 # Handle 401 errors by attempting to re-authenticate
                 if response.status_code == 401:
                     print(f"      🔄 Received 401, attempting to re-authenticate...")
@@ -3040,23 +3341,38 @@ class TestRunner:
                     api_base_url = variables.get("api_base_url", "")
                     # Resolve api_base_url if it contains variables
                     if api_base_url:
-                        api_base_url = self._resolve_url_with_variables(api_base_url, variables)
+                        api_base_url = self._resolve_url_with_variables(
+                            api_base_url, variables
+                        )
                     username = variables.get("username")
                     password = variables.get("password")
-                    
+
                     if api_base_url and username and password:
                         import json
+
                         login_url = f"{api_base_url}/auth/login"
                         # Ensure login_url is fully resolved
-                        login_url = self._resolve_url_with_variables(login_url, variables)
-                        login_body = json.dumps({"username": username, "password": password})
+                        login_url = self._resolve_url_with_variables(
+                            login_url, variables
+                        )
+                        login_body = json.dumps(
+                            {"username": username, "password": password}
+                        )
                         print(f"      🔑 Re-authenticating with stored credentials...")
                         # Make login request
-                        login_response = service.post(login_url, device_id, json=json.loads(login_body))
+                        login_response = service.post(
+                            login_url, device_id, json=json.loads(login_body)
+                        )
                         if login_response.status_code == 200:
                             login_json = login_response.json()
                             # Extract token
-                            token_fields = ["token", "access_token", "accessToken", "auth_token", "authToken"]
+                            token_fields = [
+                                "token",
+                                "access_token",
+                                "accessToken",
+                                "auth_token",
+                                "authToken",
+                            ]
                             for field in token_fields:
                                 if field in login_json:
                                     token = login_json[field]
@@ -3066,13 +3382,15 @@ class TestRunner:
                                     headers["Authorization"] = f"Bearer {token}"
                                     print(f"      ✅ Re-authenticated successfully")
                                     # Retry the original request
-                                    response = service.delete(url, device_id, headers=headers)
+                                    response = service.delete(
+                                        url, device_id, headers=headers
+                                    )
                                     break
 
                 # Store response for validation
                 variables["last_response"] = response
                 variables["last_status"] = response.status_code
-                
+
                 # Parse JSON response
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
@@ -3085,10 +3403,11 @@ class TestRunner:
                         variables["last_json"] = None
                 else:
                     variables["last_json"] = None
-                
+
                 # Print full response if verbose logging enabled
                 if verbose_logging:
                     import json
+
                     print(f"         📡 Status: {response.status_code}")
                     print(f"         📋 Response Headers:")
                     headers_str = json.dumps(dict(response.headers), indent=2)
@@ -3110,14 +3429,15 @@ class TestRunner:
                             print(f"           (empty)")
                 else:
                     print(f"         📡 Status: {response.status_code}")
-                
+
                 # Check if we should fail on error status codes
                 fail_on_error = step_params.get("fail_on_error", True)
                 if isinstance(fail_on_error, str):
                     fail_on_error = fail_on_error.lower() in ("true", "1", "yes", "on")
-                
+
                 if fail_on_error and response.status_code >= 400:
                     import json
+
                     error_msg = f"API request failed with status {response.status_code}"
                     if is_json and response_json:
                         error_msg += f": {json.dumps(response_json, indent=2)}"
@@ -3134,20 +3454,21 @@ class TestRunner:
                 headers = self._get_param(step_params, "headers", {})
                 json_data = self._get_param(step_params, "json_data", {})
                 data = self._get_param(step_params, "data", {})
-                
+
                 # Resolve URL with variable substitution (handles URL-encoded variables)
                 url = self._resolve_url_with_variables(url, variables)
-                
+
                 # Handle headers if it's a string
                 if isinstance(headers, str):
                     try:
                         import json
+
                         headers = json.loads(headers) if headers.strip() else {}
                     except:
                         headers = {}
                 elif not headers:
                     headers = {}
-                
+
                 # Automatically add Authorization header if token is available
                 token = None
                 if device_id and device_id != "default":
@@ -3159,30 +3480,38 @@ class TestRunner:
                 if not token:
                     # Check for token in stored response objects
                     for key, value in variables.items():
-                        if isinstance(value, dict) and ("token" in value or "access_token" in value):
+                        if isinstance(value, dict) and (
+                            "token" in value or "access_token" in value
+                        ):
                             token = value.get("token") or value.get("access_token")
                             break
-                
+
                 # Add Authorization header if token found
                 if token and "Authorization" not in headers:
                     headers["Authorization"] = f"Bearer {token}"
                     print(f"      🔑 Using stored token for authentication")
-                
+
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False) or
-                    variables.get("show_full_response", False) or
-                    variables.get("full_log", False) or
-                    step_params.get("verbose_logging", False) or
-                    step_params.get("show_full_response", False) or
-                    step_params.get("full_log", False)
+                    variables.get("verbose_logging", False)
+                    or variables.get("show_full_response", False)
+                    or variables.get("full_log", False)
+                    or step_params.get("verbose_logging", False)
+                    or step_params.get("show_full_response", False)
+                    or step_params.get("full_log", False)
                 )
                 if isinstance(verbose_logging, str):
-                    verbose_logging = verbose_logging.lower() in ("true", "1", "yes", "on")
+                    verbose_logging = verbose_logging.lower() in (
+                        "true",
+                        "1",
+                        "yes",
+                        "on",
+                    )
 
                 print(f"      API PATCH: {url} (device: {device_id})")
                 if verbose_logging:
                     import json
+
                     if headers:
                         print(f"         📋 Request Headers:")
                         headers_str = json.dumps(headers, indent=2)
@@ -3200,7 +3529,7 @@ class TestRunner:
                                 print(f"           {line}")
                         else:
                             print(f"           {data}")
-                
+
                 response = service.patch(
                     url,
                     device_id,
@@ -3208,7 +3537,7 @@ class TestRunner:
                     json=json_data or None,
                     data=data or None,
                 )
-                
+
                 # Handle 401 errors by attempting to re-authenticate
                 if response.status_code == 401:
                     print(f"      🔄 Received 401, attempting to re-authenticate...")
@@ -3216,23 +3545,38 @@ class TestRunner:
                     api_base_url = variables.get("api_base_url", "")
                     # Resolve api_base_url if it contains variables
                     if api_base_url:
-                        api_base_url = self._resolve_url_with_variables(api_base_url, variables)
+                        api_base_url = self._resolve_url_with_variables(
+                            api_base_url, variables
+                        )
                     username = variables.get("username")
                     password = variables.get("password")
-                    
+
                     if api_base_url and username and password:
                         import json
+
                         login_url = f"{api_base_url}/auth/login"
                         # Ensure login_url is fully resolved
-                        login_url = self._resolve_url_with_variables(login_url, variables)
-                        login_body = json.dumps({"username": username, "password": password})
+                        login_url = self._resolve_url_with_variables(
+                            login_url, variables
+                        )
+                        login_body = json.dumps(
+                            {"username": username, "password": password}
+                        )
                         print(f"      🔑 Re-authenticating with stored credentials...")
                         # Make login request
-                        login_response = service.post(login_url, device_id, json=json.loads(login_body))
+                        login_response = service.post(
+                            login_url, device_id, json=json.loads(login_body)
+                        )
                         if login_response.status_code == 200:
                             login_json = login_response.json()
                             # Extract token
-                            token_fields = ["token", "access_token", "accessToken", "auth_token", "authToken"]
+                            token_fields = [
+                                "token",
+                                "access_token",
+                                "accessToken",
+                                "auth_token",
+                                "authToken",
+                            ]
                             for field in token_fields:
                                 if field in login_json:
                                     token = login_json[field]
@@ -3242,13 +3586,19 @@ class TestRunner:
                                     headers["Authorization"] = f"Bearer {token}"
                                     print(f"      ✅ Re-authenticated successfully")
                                     # Retry the original request
-                                    response = service.patch(url, device_id, headers=headers, json=json_data or None, data=data or None)
+                                    response = service.patch(
+                                        url,
+                                        device_id,
+                                        headers=headers,
+                                        json=json_data or None,
+                                        data=data or None,
+                                    )
                                     break
 
                 # Store response for validation
                 variables["last_response"] = response
                 variables["last_status"] = response.status_code
-                
+
                 # Parse JSON response
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
@@ -3261,19 +3611,24 @@ class TestRunner:
                         variables["last_json"] = None
                 else:
                     variables["last_json"] = None
-                
+
                 # Print full response if verbose logging enabled
                 if verbose_logging:
                     import json
+
                     print(f"         Status: {response.status_code}")
-                    print(f"         Response Headers: {json.dumps(dict(response.headers), indent=2)}")
+                    print(
+                        f"         Response Headers: {json.dumps(dict(response.headers), indent=2)}"
+                    )
                     if is_json and response_json:
                         print(f"         Response Body:")
                         body_str = json.dumps(response_json, indent=2)
                         for line in body_str.split("\n"):
                             print(f"           {line}")
                     else:
-                        print(f"         Response Body: {response.text[:500]}{'...' if len(response.text) > 500 else ''}")
+                        print(
+                            f"         Response Body: {response.text[:500]}{'...' if len(response.text) > 500 else ''}"
+                        )
                 else:
                     print(f"         Status: {response.status_code}")
 

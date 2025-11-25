@@ -17,7 +17,7 @@ A powerful, user-friendly YAML-based BDD testing framework that supports multipl
 - **📊 Report Generation** - Generate beautiful HTML reports with simple and debug logs
 - **🔌 OvrC API Integration** - Full support for OvrC WebSocket and HTTP API
 - **✅ Required Field Validation** - Prevents adding steps until all required fields are valid
-- **🔑 Variable Management** - Easy key-value variable editor with auto-sync to JSON
+- **🔑 Variable Management** - Postman-like environments, collections, and suite variables with scoped variable resolution
 - **📱 Workspace Organization** - Organize tests by workspace/folder with filtering
 - **🔄 Step Copy/Duplicate** - Quickly duplicate test steps
 - **📈 Test Results Dashboard** - View all test results with pagination and filtering
@@ -26,6 +26,7 @@ A powerful, user-friendly YAML-based BDD testing framework that supports multipl
 
 ### 🆕 Recent Features
 
+- **Environment & Collection Variables** - Postman-like variable management with environments, collections/workspaces, and suite variables. Use `${env.variable_name}`, `${collection.variable_name}`, or `${suite.variable_name}` in your tests
 - **Test Suites** - Create test suites, add/remove tests, enable/disable tests, reorder execution, view execution history
 - **OvrC API Actions** - Full support for OvrC WebSocket (JSON-RPC) and HTTP API with automatic authentication
 - **Action Templates** - Pre-filled action templates with all required and optional parameters
@@ -83,8 +84,8 @@ cd ..
 # If using AWS features, configure AWS CLI
 aws configure
 # Or set environment variables:
-export AWS_ACCESS_KEY_ID="your-key"
-export AWS_SECRET_ACCESS_KEY="your-secret"
+export AWS_ACCESS_KEY_ID="your-key"  # pragma: allowlist secret
+export AWS_SECRET_ACCESS_KEY="your-secret"  # pragma: allowlist secret
 export AWS_DEFAULT_REGION="us-east-1"
 ```
 
@@ -127,22 +128,22 @@ name: "My First Test"
 description: "Login to application"
 variables:
   username: "testuser"
-  password: "testpass"
+  password: "testpass"  # pragma: allowlist secret
 steps:
   - browser.open:
       url: "https://example.com"
-    
+
   - browser.fill:
       field: "#username"
       value: "${username}"
-    
+
   - browser.fill:
       field: "#password"
       value: "${password}"
-    
+
   - browser.click:
       button: "Sign In"
-    
+
   - test.assert:
       expression: "'Welcome' in page_content"
       message: "Expected welcome message not found"
@@ -274,20 +275,31 @@ tags: ["tag1", "tag2"]  # Optional
 variables:
   var_name: "value"
   api_url: "https://api.example.com"
-  
+
 setup:  # Optional - runs before test
   - action: "Setup action"
-    
+
 steps:
   - action: "Action name"
     parameter: "value"
-    
+
 cleanup:  # Optional - runs after test
   - action: "Cleanup action"
 ```
 
 ### Variable Usage
-Use `${variable_name}` to reference variables:
+
+Easy BDD supports multiple variable scopes with Postman-like functionality:
+
+#### Variable Scopes (Priority Order)
+1. **Test Variables** - `${variable_name}` - Variables defined in the test YAML file
+2. **Suite Variables** - `${suite.variable_name}` - Variables specific to a test suite
+3. **Collection/Workspace Variables** - `${collection.variable_name}` or `${workspace.variable_name}` - Variables for a workspace/collection
+4. **Environment Variables** - `${env.variable_name}` - Global environment variables (from active environment)
+5. **Global Variables** - Framework defaults and config file variables
+
+#### Basic Variable Usage
+Use `${variable_name}` to reference test-level variables:
 
 ```yaml
 variables:
@@ -307,8 +319,8 @@ steps:
 **Use Environment Variables for Sensitive Data:**
 ```yaml
 # .env file (never commit this!)
-DEVICE_PASSWORD=secret123
-API_KEY=sk_live_abc123xyz
+DEVICE_PASSWORD=secret123  # pragma: allowlist secret
+API_KEY=sk_live_abc123xyz  # pragma: allowlist secret
 
 # test.yaml - reference environment variables
 variables:
@@ -342,30 +354,30 @@ name: Login Test
 variables:
   base_url: "https://example.com"
   username: "testuser"
-  password: "TestPass123"
+  password: "TestPass123"  # pragma: allowlist secret
 
 steps:
   - browser.open:
       url: "${base_url}/login"
-  
+
   - browser.fill:
       field: "#username"
       value: "${username}"
-  
+
   - browser.fill:
       field: "#password"
       value: "${password}"
-  
+
   - browser.click:
       role: button
       name: "Log In"
-  
+
   - browser.wait:
       timeout: 2000
-  
+
   - browser.screenshot:
       name: "after-login"
-  
+
   - test.assert:
       expression: "'Dashboard' in page_content"
 ```
@@ -383,18 +395,18 @@ steps:
   - ovrc.connect:
       server_url: "${server_url}"
       device_id: "${device_id}"
-  
+
   # Get device information
   - ovrc.send:
       method: "dxGetAbout"
       store_as: "device_info"
-  
+
   # Make HTTP API request
   - ovrc.http.request:
       method: "GET"
       endpoint: "/api/v1/devices/${device_id}"
       store_as: "device_data"
-  
+
   # Assert device info
   - test.assert:
       expression: "'firmware' in device_info"
@@ -436,7 +448,7 @@ steps:
       - browser.upload:
           selector: 'iframe >> #firmware'
           file_path: 'Firmware/${firmware_file}'
-      
+
       - browser.click:
           selector: 'iframe >> #upgrade-button'
     else:
@@ -455,7 +467,7 @@ setup:
       file_extension: ".bin"
       download_dir: "Firmware"
       store_as: "firmware_list"
-  
+
   # Get latest firmware
   - aws.s3.get_latest:
       bucket_name: "my-bucket"
@@ -522,7 +534,7 @@ environments:
   staging:
     base_url: "https://staging.example.com"
     api_url: "https://api-staging.example.com"
-  
+
   production:
     base_url: "https://example.com"
     api_url: "https://api.example.com"
@@ -632,8 +644,8 @@ python -m easy_bdd run tests/cases/my_test.yaml --headed
 aws configure
 
 # Or set environment variables
-export AWS_ACCESS_KEY_ID="your-key"
-export AWS_SECRET_ACCESS_KEY="your-secret"
+export AWS_ACCESS_KEY_ID="your-key"  # pragma: allowlist secret
+export AWS_SECRET_ACCESS_KEY="your-secret"  # pragma: allowlist secret
 export AWS_DEFAULT_REGION="us-east-1"
 ```
 
@@ -705,7 +717,7 @@ python -m easy_bdd --help
 
 ---
 
-**Ready to get started?** 
+**Ready to get started?**
 
 1. **Quick Start**: `python frontend/start_builder.py` → http://localhost:8000
 2. **Read the Docs**: Check out `/docs` folder for comprehensive guides

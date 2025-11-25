@@ -794,6 +794,92 @@
             gap: 0.5rem;
         }
 
+        .environments-grid,
+        .collections-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .environment-card,
+        .collection-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            transition: all 0.2s;
+        }
+
+        .environment-card:hover,
+        .collection-card:hover {
+            border-color: var(--primary);
+            box-shadow: var(--shadow-md);
+        }
+
+        .environment-card.active {
+            border-color: var(--success);
+            background: rgba(16, 185, 129, 0.05);
+        }
+
+        .environment-header,
+        .collection-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+        }
+
+        .environment-header h3,
+        .collection-header h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .environment-vars,
+        .collection-vars {
+            margin: 1rem 0;
+            padding: 1rem;
+            background: var(--bg-main);
+            border-radius: 6px;
+            min-height: 60px;
+        }
+
+        .var-item {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.875rem;
+        }
+
+        .var-item:last-child {
+            border-bottom: none;
+        }
+
+        .var-item code {
+            color: var(--primary);
+            font-weight: 500;
+            margin-right: 0.5rem;
+        }
+
+        .environment-actions,
+        .collection-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .variables-editor {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .variable-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
         .test-item {
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -1928,6 +2014,9 @@
                     <button class="nav-button" :class="{active: view === 'actions'}" @click="navigateToView('actions')">
                         <i class="fas fa-th-large"></i> Actions Library
                     </button>
+                    <button class="nav-button" :class="{active: view === 'variables'}" @click="navigateToView('variables'); loadVariables()">
+                        <i class="fas fa-code"></i> Variables
+                    </button>
                     <button class="nav-button" :class="{active: view === 'docs'}" @click="openDocs">
                         <i class="fas fa-book"></i> Documentation
                     </button>
@@ -1958,6 +2047,8 @@
                     <h2 v-else-if="view === 'actions'">Actions Library</h2>
                     <h2 v-else-if="view === 'templates'">Test Templates</h2>
                     <h2 v-else-if="view === 'results'">Test Results</h2>
+                    <h2 v-else-if="view === 'variables'">Variables</h2>
+                    <h2 v-else-if="view === 'test-suites'">Test Suites</h2>
                 </div>
                 <div class="toolbar-right">
                     <button v-if="view === 'builder' && !isRecording" class="btn btn-secondary" @click="startRecording">
@@ -2640,6 +2731,117 @@
                     </div>
                 </div>
 
+                <!-- Variables View -->
+                <div v-if="view === 'variables'" class="container">
+                    <div class="card" style="margin-bottom: 2rem;">
+                        <div class="card-header">
+                            <h2>Environments</h2>
+                            <button class="btn btn-primary" @click="showCreateEnvironmentModal = true">
+                                <i class="fas fa-plus"></i> New Environment
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                                Environments are like Postman environments - global variables that can be activated.
+                                Use <code>${env.variable_name}</code> in your tests.
+                            </p>
+                            <div v-if="environments.length === 0" class="empty-state">
+                                <i class="fas fa-globe"></i>
+                                <p>No environments created yet</p>
+                                <button class="btn btn-primary" @click="showCreateEnvironmentModal = true">
+                                    <i class="fas fa-plus"></i> Create Environment
+                                </button>
+                            </div>
+                            <div v-else class="environments-grid">
+                                <div v-for="env in environments" :key="env.id"
+                                     :class="['environment-card', { 'active': env.is_active }]">
+                                    <div class="environment-header">
+                                        <div>
+                                            <h3>{{ env.name }}</h3>
+                                            <p v-if="env.description" class="text-muted">{{ env.description }}</p>
+                                        </div>
+                                        <div class="environment-badge">
+                                            <span v-if="env.is_active" class="badge badge-success">Active</span>
+                                            <span v-else class="badge badge-secondary">Inactive</span>
+                                        </div>
+                                    </div>
+                                    <div class="environment-vars">
+                                        <div v-if="Object.keys(env.variables || {}).length === 0" class="text-muted" style="font-size: 0.875rem;">
+                                            No variables defined
+                                        </div>
+                                        <div v-else>
+                                            <div v-for="(value, key) in env.variables" :key="key" class="var-item">
+                                                <code>{{ key }}</code>: <span class="text-muted">{{ typeof value === 'object' ? JSON.stringify(value) : value }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="environment-actions">
+                                        <button v-if="!env.is_active" class="btn btn-sm btn-success" @click="activateEnvironment(env.id)">
+                                            <i class="fas fa-check"></i> Activate
+                                        </button>
+                                        <button class="btn btn-sm btn-secondary" @click="editEnvironment(env)">
+                                            <i class="fas fa-edit"></i> Edit
+                                        </button>
+                                        <button class="btn btn-sm btn-danger" @click="deleteEnvironment(env.id)">
+                                            <i class="fas fa-trash"></i> Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Collections / Workspaces</h2>
+                            <button class="btn btn-primary" @click="showCreateCollectionModal = true">
+                                <i class="fas fa-plus"></i> New Collection
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                                Collections are workspace-specific variables. Use <code>${collection.variable_name}</code> or
+                                <code>${workspace.variable_name}</code> in your tests. Variables are automatically loaded based on the test's workspace.
+                            </p>
+                            <div v-if="collections.length === 0" class="empty-state">
+                                <i class="fas fa-folder"></i>
+                                <p>No collections created yet</p>
+                                <button class="btn btn-primary" @click="showCreateCollectionModal = true">
+                                    <i class="fas fa-plus"></i> Create Collection
+                                </button>
+                            </div>
+                            <div v-else class="collections-grid">
+                                <div v-for="collection in collections" :key="collection.id" class="collection-card">
+                                    <div class="collection-header">
+                                        <div>
+                                            <h3>{{ collection.name }}</h3>
+                                            <p v-if="collection.description" class="text-muted">{{ collection.description }}</p>
+                                        </div>
+                                    </div>
+                                    <div class="collection-vars">
+                                        <div v-if="Object.keys(collection.variables || {}).length === 0" class="text-muted" style="font-size: 0.875rem;">
+                                            No variables defined
+                                        </div>
+                                        <div v-else>
+                                            <div v-for="(value, key) in collection.variables" :key="key" class="var-item">
+                                                <code>{{ key }}</code>: <span class="text-muted">{{ typeof value === 'object' ? JSON.stringify(value) : value }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="collection-actions">
+                                        <button class="btn btn-sm btn-secondary" @click="editCollection(collection)">
+                                            <i class="fas fa-edit"></i> Edit
+                                        </button>
+                                        <button class="btn btn-sm btn-danger" @click="deleteCollection(collection.id)">
+                                            <i class="fas fa-trash"></i> Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Results View -->
                 <div v-if="view === 'results'" class="content-area">
                     <div class="card">
@@ -2799,6 +3001,101 @@
                     <button class="btn btn-secondary" @click="showTestSelectionModal = false; selectedTestsForStep = []; pendingActionId = null;">Cancel</button>
                     <button class="btn btn-primary" @click="proceedWithActionStep" :disabled="selectedTestsForStep.length === 0">
                         Continue ({{ selectedTestsForStep.length }} selected)
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Create/Edit Environment Modal -->
+        <div v-if="showCreateEnvironmentModal || showEditEnvironmentModal" class="modal-overlay" @click="showCreateEnvironmentModal = false; showEditEnvironmentModal = false; resetCurrentEnvironment()">
+            <div class="modal-content" style="max-width: 800px;" @click.stop>
+                <div class="modal-header">
+                    <h3>{{ showCreateEnvironmentModal ? 'Create Environment' : 'Edit Environment' }}</h3>
+                    <button class="btn btn-icon" @click="showCreateEnvironmentModal = false; showEditEnvironmentModal = false; resetCurrentEnvironment()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label form-label-required">Environment Name</label>
+                        <input v-model="currentEnvironment.name" type="text" class="form-control" placeholder="e.g., Production, Staging, Development">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Description</label>
+                        <textarea v-model="currentEnvironment.description" class="form-control" placeholder="Describe this environment"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" v-model="currentEnvironment.is_active" style="margin-right: 8px;">
+                            Set as Active Environment
+                        </label>
+                        <div class="form-help">Only one environment can be active at a time. Active environment variables are available via <code>${env.variable_name}</code></div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Variables</label>
+                        <div class="variables-editor">
+                            <div v-for="(varItem, index) in environmentVariablesList" :key="varItem.id" class="variable-row">
+                                <input v-model="varItem.key" type="text" class="form-control" placeholder="Variable name" style="flex: 1;">
+                                <input v-model="varItem.value" type="text" class="form-control" placeholder="Variable value" style="flex: 2;">
+                                <button class="btn btn-icon btn-danger" @click="removeVariableFromList(environmentVariablesList, index)">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                            <button class="btn btn-secondary" @click="addVariableToList(environmentVariablesList)">
+                                <i class="fas fa-plus"></i> Add Variable
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showCreateEnvironmentModal = false; showEditEnvironmentModal = false; resetCurrentEnvironment()">Cancel</button>
+                    <button class="btn btn-primary" @click="showCreateEnvironmentModal ? createEnvironment() : updateEnvironment()">
+                        {{ showCreateEnvironmentModal ? 'Create' : 'Update' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Create/Edit Collection Modal -->
+        <div v-if="showCreateCollectionModal || showEditCollectionModal" class="modal-overlay" @click="showCreateCollectionModal = false; showEditCollectionModal = false; resetCurrentCollection()">
+            <div class="modal-content" style="max-width: 800px;" @click.stop>
+                <div class="modal-header">
+                    <h3>{{ showCreateCollectionModal ? 'Create Collection' : 'Edit Collection' }}</h3>
+                    <button class="btn btn-icon" @click="showCreateCollectionModal = false; showEditCollectionModal = false; resetCurrentCollection()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label form-label-required">Collection/Workspace Name</label>
+                        <input v-model="currentCollection.name" type="text" class="form-control" placeholder="e.g., OvrC, Networking, Audio">
+                        <div class="form-help">This should match the workspace name where your tests are located</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Description</label>
+                        <textarea v-model="currentCollection.description" class="form-control" placeholder="Describe this collection"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Variables</label>
+                        <div class="variables-editor">
+                            <div v-for="(varItem, index) in collectionVariablesList" :key="varItem.id" class="variable-row">
+                                <input v-model="varItem.key" type="text" class="form-control" placeholder="Variable name" style="flex: 1;">
+                                <input v-model="varItem.value" type="text" class="form-control" placeholder="Variable value" style="flex: 2;">
+                                <button class="btn btn-icon btn-danger" @click="removeVariableFromList(collectionVariablesList, index)">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                            <button class="btn btn-secondary" @click="addVariableToList(collectionVariablesList)">
+                                <i class="fas fa-plus"></i> Add Variable
+                            </button>
+                        </div>
+                        <div class="form-help">Use <code>${collection.variable_name}</code> or <code>${workspace.variable_name}</code> in your tests</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showCreateCollectionModal = false; showEditCollectionModal = false; resetCurrentCollection()">Cancel</button>
+                    <button class="btn btn-primary" @click="showCreateCollectionModal ? createCollection() : updateCollection()">
+                        {{ showCreateCollectionModal ? 'Create' : 'Update' }}
                     </button>
                 </div>
             </div>
@@ -3775,7 +4072,30 @@
                     selectedSuiteId: null,
                     selectedSuite: null,
                     draggedStepIndex: null,
-                    draggedSuiteItemIndex: null
+                    draggedSuiteItemIndex: null,
+                    // Variables management
+                    environments: [],
+                    collections: [],
+                    activeEnvironmentId: null,
+                    showCreateEnvironmentModal: false,
+                    showEditEnvironmentModal: false,
+                    showCreateCollectionModal: false,
+                    showEditCollectionModal: false,
+                    currentEnvironment: {
+                        id: '',
+                        name: '',
+                        description: '',
+                        variables: {},
+                        is_active: false
+                    },
+                    currentCollection: {
+                        id: '',
+                        name: '',
+                        description: '',
+                        variables: {}
+                    },
+                    environmentVariablesList: [],
+                    collectionVariablesList: []
                 };
             },
             computed: {
@@ -6290,6 +6610,215 @@ Would you like to enter a selector manually?
                         console.error('Failed to load test suites:', error);
                         alert('Failed to load test suites');
                     }
+                },
+                async loadVariables() {
+                    await Promise.all([
+                        this.loadEnvironments(),
+                        this.loadCollections()
+                    ]);
+                },
+                async loadEnvironments() {
+                    try {
+                        const response = await axios.get('/api/environments');
+                        this.environments = response.data.environments || [];
+                        this.activeEnvironmentId = response.data.active || null;
+                    } catch (error) {
+                        console.error('Failed to load environments:', error);
+                    }
+                },
+                async loadCollections() {
+                    try {
+                        const response = await axios.get('/api/collections');
+                        this.collections = response.data.collections || [];
+                    } catch (error) {
+                        console.error('Failed to load collections:', error);
+                    }
+                },
+                async createEnvironment() {
+                    try {
+                        if (!this.currentEnvironment.name) {
+                            alert('Please enter an environment name');
+                            return;
+                        }
+
+                        const envData = {
+                            name: this.currentEnvironment.name,
+                            description: this.currentEnvironment.description || '',
+                            variables: this.getVariablesFromList(this.environmentVariablesList),
+                            is_active: this.currentEnvironment.is_active
+                        };
+
+                        const response = await axios.post('/api/environments', envData);
+                        this.showCreateEnvironmentModal = false;
+                        this.resetCurrentEnvironment();
+                        await this.loadEnvironments();
+                    } catch (error) {
+                        console.error('Failed to create environment:', error);
+                        alert('Failed to create environment: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async updateEnvironment() {
+                    try {
+                        if (!this.currentEnvironment.name) {
+                            alert('Please enter an environment name');
+                            return;
+                        }
+
+                        const envData = {
+                            id: this.currentEnvironment.id,
+                            name: this.currentEnvironment.name,
+                            description: this.currentEnvironment.description || '',
+                            variables: this.getVariablesFromList(this.environmentVariablesList),
+                            is_active: this.currentEnvironment.is_active
+                        };
+
+                        await axios.put(`/api/environments/${this.currentEnvironment.id}`, envData);
+                        this.showEditEnvironmentModal = false;
+                        this.resetCurrentEnvironment();
+                        await this.loadEnvironments();
+                    } catch (error) {
+                        console.error('Failed to update environment:', error);
+                        alert('Failed to update environment: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async deleteEnvironment(envId) {
+                    if (!confirm('Are you sure you want to delete this environment?')) return;
+
+                    try {
+                        await axios.delete(`/api/environments/${envId}`);
+                        await this.loadEnvironments();
+                    } catch (error) {
+                        console.error('Failed to delete environment:', error);
+                        alert('Failed to delete environment: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async activateEnvironment(envId) {
+                    try {
+                        await axios.post(`/api/environments/${envId}/activate`);
+                        await this.loadEnvironments();
+                    } catch (error) {
+                        console.error('Failed to activate environment:', error);
+                        alert('Failed to activate environment: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                editEnvironment(env) {
+                    this.currentEnvironment = JSON.parse(JSON.stringify(env));
+                    this.environmentVariablesList = this.getVariablesList(env.variables || {});
+                    this.showEditEnvironmentModal = true;
+                },
+                resetCurrentEnvironment() {
+                    this.currentEnvironment = {
+                        id: '',
+                        name: '',
+                        description: '',
+                        variables: {},
+                        is_active: false
+                    };
+                    this.environmentVariablesList = [];
+                },
+                async createCollection() {
+                    try {
+                        if (!this.currentCollection.name) {
+                            alert('Please enter a collection name');
+                            return;
+                        }
+
+                        const collectionData = {
+                            name: this.currentCollection.name,
+                            description: this.currentCollection.description || '',
+                            variables: this.getVariablesFromList(this.collectionVariablesList)
+                        };
+
+                        const response = await axios.post('/api/collections', collectionData);
+                        this.showCreateCollectionModal = false;
+                        this.resetCurrentCollection();
+                        await this.loadCollections();
+                    } catch (error) {
+                        console.error('Failed to create collection:', error);
+                        alert('Failed to create collection: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async updateCollection() {
+                    try {
+                        if (!this.currentCollection.name) {
+                            alert('Please enter a collection name');
+                            return;
+                        }
+
+                        const collectionData = {
+                            id: this.currentCollection.id,
+                            name: this.currentCollection.name,
+                            description: this.currentCollection.description || '',
+                            variables: this.getVariablesFromList(this.collectionVariablesList)
+                        };
+
+                        await axios.put(`/api/collections/${this.currentCollection.id}`, collectionData);
+                        this.showEditCollectionModal = false;
+                        this.resetCurrentCollection();
+                        await this.loadCollections();
+                    } catch (error) {
+                        console.error('Failed to update collection:', error);
+                        alert('Failed to update collection: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async deleteCollection(collectionId) {
+                    if (!confirm('Are you sure you want to delete this collection?')) return;
+
+                    try {
+                        await axios.delete(`/api/collections/${collectionId}`);
+                        await this.loadCollections();
+                    } catch (error) {
+                        console.error('Failed to delete collection:', error);
+                        alert('Failed to delete collection: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                editCollection(collection) {
+                    this.currentCollection = JSON.parse(JSON.stringify(collection));
+                    this.collectionVariablesList = this.getVariablesList(collection.variables || {});
+                    this.showEditCollectionModal = true;
+                },
+                resetCurrentCollection() {
+                    this.currentCollection = {
+                        id: '',
+                        name: '',
+                        description: '',
+                        variables: {}
+                    };
+                    this.collectionVariablesList = [];
+                },
+                getVariablesList(variables) {
+                    // Convert variables object to list format for key-value editor
+                    return Object.entries(variables).map(([key, value], index) => ({
+                        id: `var_${index}_${Date.now()}`,
+                        key: key,
+                        value: typeof value === 'object' ? JSON.stringify(value) : String(value)
+                    }));
+                },
+                getVariablesFromList(variablesList) {
+                    // Convert list format back to object
+                    const result = {};
+                    variablesList.forEach(item => {
+                        if (item.key && item.key.trim()) {
+                            try {
+                                // Try to parse as JSON, otherwise use as string
+                                result[item.key.trim()] = JSON.parse(item.value);
+                            } catch {
+                                result[item.key.trim()] = item.value;
+                            }
+                        }
+                    });
+                    return result;
+                },
+                addVariableToList(list) {
+                    // Add a new empty variable to the list
+                    list.push({
+                        id: `var_${Date.now()}_${Math.random()}`,
+                        key: '',
+                        value: ''
+                    });
+                },
+                removeVariableFromList(list, index) {
+                    list.splice(index, 1);
                 },
                 async createTestSuite() {
                     try {

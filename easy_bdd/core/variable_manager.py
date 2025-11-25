@@ -3,14 +3,15 @@ Centralized Variable and Configuration Management System
 Handles variables, secrets, environment configs, and API authentication centrally
 """
 
-import os
 import json
-import yaml
-from pathlib import Path
-from typing import Dict, Any, Optional, List, Union
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+import os
 import re
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
+import yaml
 
 
 @dataclass
@@ -57,8 +58,16 @@ class VariableManager:
         # Lower priority (evaluated first, can be overridden)
         self.add_scope("framework_defaults", 1)
         self.add_scope("config_file", 2)
-        self.add_scope("environment_vars", 3)
-        self.add_scope("test_variables", 4)
+        self.add_scope(
+            "environment_vars", 3
+        )  # Global environment variables (from environments/*.json)
+        self.add_scope(
+            "collection_vars", 3.5
+        )  # Collection/workspace variables (from collections/*.json)
+        self.add_scope(
+            "suite_vars", 3.7
+        )  # Test suite variables (from test_suites/*_variables.json)
+        self.add_scope("test_variables", 4)  # Test-level variables (from test YAML)
         self.add_scope("runtime_data", 5)  # API responses, calculated values
         # Higher priority (evaluated last, overrides others)
         self.add_scope("session_overrides", 10)
@@ -99,7 +108,7 @@ class VariableManager:
     def substitute_variables(
         self, text: str, additional_vars: Optional[Dict] = None
     ) -> str:
-        """Substitute ${variable} patterns in text with support for nested variables"""
+        """Substitute ${variable} patterns in text with support for nested variables and scoped variables (env.*, collection.*, suite.*)"""
         if not isinstance(text, str):
             return text
 
@@ -108,11 +117,74 @@ class VariableManager:
         if additional_vars:
             variables.update(additional_vars)
 
-        # Enhanced variable substitution with nested support
+        # Enhanced variable substitution with nested support and scoped variables
         def replace_var(match):
             var_name = match.group(1)
 
-            # Support dot notation for nested access
+            # Check for scoped variables: env.*, collection.*, workspace.*, suite.*
+            if var_name.startswith("env."):
+                # Environment variable: ${env.variable_name}
+                actual_var = var_name[4:]  # Remove "env." prefix
+                env_scope = self.get_scope("environment_vars")
+                if env_scope and actual_var in env_scope.variables:
+                    return str(env_scope.variables[actual_var])
+                # Also check in additional_vars if provided (with env. prefix or without)
+                if additional_vars:
+                    if f"env.{actual_var}" in additional_vars:
+                        return str(additional_vars[f"env.{actual_var}"])
+                    # Also check if variable is directly in additional_vars (for backward compatibility)
+                    if actual_var in additional_vars and "env." not in actual_var:
+                        # Check if it's from environment scope
+                        pass
+                # Check in merged variables with env prefix
+                if f"env_{actual_var}" in variables:
+                    return str(variables[f"env_{actual_var}"])
+                # Last resort: check if variable exists in environment_vars scope directly
+                if env_scope and actual_var in env_scope.variables:
+                    return str(env_scope.variables[actual_var])
+                return match.group(0)  # Not found, return original
+
+            elif var_name.startswith("collection.") or var_name.startswith(
+                "workspace."
+            ):
+                # Collection/Workspace variable: ${collection.variable_name} or ${workspace.variable_name}
+                actual_var = var_name.split(".", 1)[
+                    1
+                ]  # Remove "collection." or "workspace." prefix
+                collection_scope = self.get_scope("collection_vars")
+                if collection_scope and actual_var in collection_scope.variables:
+                    return str(collection_scope.variables[actual_var])
+                # Also check in additional_vars if provided
+                if additional_vars:
+                    if var_name in additional_vars:
+                        return str(additional_vars[var_name])
+                    # Also check without prefix
+                    if actual_var in additional_vars:
+                        return str(additional_vars[actual_var])
+                # Check in merged variables with collection prefix
+                if f"collection_{actual_var}" in variables:
+                    return str(variables[f"collection_{actual_var}"])
+                return match.group(0)  # Not found, return original
+
+            elif var_name.startswith("suite."):
+                # Suite variable: ${suite.variable_name}
+                actual_var = var_name[6:]  # Remove "suite." prefix
+                suite_scope = self.get_scope("suite_vars")
+                if suite_scope and actual_var in suite_scope.variables:
+                    return str(suite_scope.variables[actual_var])
+                # Also check in additional_vars if provided
+                if additional_vars:
+                    if var_name in additional_vars:
+                        return str(additional_vars[var_name])
+                    # Also check without prefix
+                    if actual_var in additional_vars:
+                        return str(additional_vars[actual_var])
+                # Check in merged variables with suite prefix
+                if f"suite_{actual_var}" in variables:
+                    return str(variables[f"suite_{actual_var}"])
+                return match.group(0)  # Not found, return original
+
+            # Regular variable substitution with dot notation for nested access
             value = variables
             for part in var_name.split("."):
                 if isinstance(value, dict) and part in value:
@@ -130,7 +202,7 @@ class VariableManager:
         max_iterations = 10  # Prevent infinite loops
         iteration = 0
         previous_result = None
-        
+
         while iteration < max_iterations:
             previous_result = result
             result = re.sub(pattern, replace_var, result)
@@ -138,7 +210,7 @@ class VariableManager:
             if result == previous_result:
                 break
             iteration += 1
-        
+
         return result
 
     def substitute_recursive(
