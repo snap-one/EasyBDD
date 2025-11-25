@@ -36,7 +36,7 @@
             --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5);
             --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5);
             --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5);
-            
+
             /* Code Syntax Highlighting */
             --code-bg: #0f172a;
             --code-text: #e2e8f0;
@@ -1912,9 +1912,9 @@
                     <button class="nav-button" :class="{active: selectedFolder === null}" @click="filterByFolder(null)">
                         <i class="fas fa-folder-open"></i> All Tests
                     </button>
-                    <button v-for="folder in folders" :key="folder.path" 
-                            class="nav-button folder-button" 
-                            :class="{active: selectedFolder === folder.path}" 
+                    <button v-for="folder in folders" :key="folder.path"
+                            class="nav-button folder-button"
+                            :class="{active: selectedFolder === folder.path}"
                             @click="filterByFolder(folder.path)">
                         <i class="fas fa-folder"></i> {{ folder.name }}
                         <span class="folder-count">{{ folder.test_count }}</span>
@@ -1939,15 +1939,15 @@
             <!-- Toolbar -->
             <div class="toolbar">
                 <div class="toolbar-left">
-                    <button v-if="view !== 'dashboard'" 
-                            class="btn btn-icon btn-secondary" 
+                    <button v-if="view !== 'dashboard'"
+                            class="btn btn-icon btn-secondary"
                             @click="goBack()"
                             title="Go back"
                             :disabled="viewHistory.length === 0">
                         <i class="fas fa-arrow-left"></i>
                     </button>
-                    <button v-if="view !== 'dashboard'" 
-                            class="btn btn-icon btn-secondary" 
+                    <button v-if="view !== 'dashboard'"
+                            class="btn btn-icon btn-secondary"
                             @click="navigateToView('dashboard'); loadDashboard()"
                             title="Go to Home">
                         <i class="fas fa-home"></i>
@@ -2071,8 +2071,8 @@
                                 <div v-if="dashboardStats.recent_results && dashboardStats.recent_results.length === 0" class="empty-state-small">
                                     <p>No recent test runs</p>
                                 </div>
-                                <div v-for="result in dashboardStats.recent_results" :key="result.timestamp" 
-                                     class="activity-item" 
+                                <div v-for="result in dashboardStats.recent_results" :key="result.timestamp"
+                                     class="activity-item"
                                      :class="'activity-' + (result.status || 'unknown')"
                                      @click="viewResultFromActivity(result)">
                                     <div class="activity-status">
@@ -2284,9 +2284,9 @@
                                     <p>No tests in this suite. Click "Add Test" to add tests.</p>
                                 </div>
                                 <div v-else class="test-list">
-                                    <div v-for="(suiteItem, index) in selectedSuite.tests" 
-                                         :key="suiteItem.test_id" 
-                                         class="test-item" 
+                                    <div v-for="(suiteItem, index) in selectedSuite.tests"
+                                         :key="suiteItem.test_id"
+                                         class="test-item"
                                          style="cursor: move;"
                                          draggable="true"
                                          @dragstart="handleSuiteItemDragStart($event, index)"
@@ -2309,25 +2309,25 @@
                                             </div>
                                         </div>
                                         <div class="test-item-actions">
-                                            <button class="btn btn-icon btn-sm" 
+                                            <button class="btn btn-icon btn-sm"
                                                     :class="suiteItem.enabled ? 'btn-warning' : 'btn-success'"
                                                     @click="toggleTestEnabled(suiteItem.test_id)"
                                                     :title="suiteItem.enabled ? 'Disable Test' : 'Enable Test'">
                                                 <i class="fas" :class="suiteItem.enabled ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
                                             </button>
-                                            <button class="btn btn-icon btn-sm btn-secondary" 
+                                            <button class="btn btn-icon btn-sm btn-secondary"
                                                     @click="moveTestUp(index)"
                                                     :disabled="index === 0"
                                                     title="Move Up">
                                                 <i class="fas fa-arrow-up"></i>
                                             </button>
-                                            <button class="btn btn-icon btn-sm btn-secondary" 
+                                            <button class="btn btn-icon btn-sm btn-secondary"
                                                     @click="moveTestDown(index)"
                                                     :disabled="index === selectedSuite.tests.length - 1"
                                                     title="Move Down">
                                                 <i class="fas fa-arrow-down"></i>
                                             </button>
-                                            <button class="btn btn-icon btn-sm btn-danger" 
+                                            <button class="btn btn-icon btn-sm btn-danger"
                                                     @click="removeTestFromSuite(suiteItem.test_id)"
                                                     title="Remove Test">
                                                 <i class="fas fa-times"></i>
@@ -2408,7 +2408,7 @@
                             <h2>Variables</h2>
                             <div style="display: flex; gap: 0.5rem;">
                                 <button class="btn btn-secondary btn-sm" @click="variablesViewMode = variablesViewMode === 'keyvalue' ? 'json' : 'keyvalue'">
-                                    <i class="fas" :class="variablesViewMode === 'keyvalue' ? 'fa-code' : 'fa-list'"></i> 
+                                    <i class="fas" :class="variablesViewMode === 'keyvalue' ? 'fa-code' : 'fa-list'"></i>
                                     {{ variablesViewMode === 'keyvalue' ? 'View JSON' : 'View Key-Value' }}
                                 </button>
                                 <button v-if="variablesViewMode === 'json'" class="btn btn-secondary btn-sm" @click="formatVariables">
@@ -2423,18 +2423,18 @@
                                     <label class="form-label">Test Variables</label>
                                     <div class="variables-list">
                                         <div v-for="(item, index) in variablesList" :key="item.id" class="variable-row">
-                                            <input 
-                                                type="text" 
-                                                class="form-control variable-key" 
+                                            <input
+                                                type="text"
+                                                class="form-control variable-key"
                                                 :value="item.key"
                                                 @input="item.key = $event.target.value"
                                                 @blur="updateVariableKeyFromItem(item)"
                                                 @keyup.enter="$event.target.blur()"
                                                 placeholder="Variable name">
                                             <span class="variable-separator">:</span>
-                                            <input 
-                                                type="text" 
-                                                class="form-control variable-value" 
+                                            <input
+                                                type="text"
+                                                class="form-control variable-value"
                                                 :value="item.value"
                                                 @input="updateVariableValueFromItem(item, $event.target.value)"
                                                 placeholder="Variable value">
@@ -2455,14 +2455,14 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <!-- JSON Editor View -->
                             <div v-else>
                                 <div class="form-group">
                                     <label class="form-label">Test Variables (JSON)</label>
-                                    <textarea 
-                                        v-model="variablesInput" 
-                                        class="form-control code-editor" 
+                                    <textarea
+                                        v-model="variablesInput"
+                                        class="form-control code-editor"
                                         rows="10"
                                         placeholder='{\n  "base_url": "https://api.example.com",\n  "timeout": 30\n}'
                                         @blur="updateVariables"></textarea>
@@ -2543,8 +2543,8 @@
                                 </button>
                             </div>
                             <div v-else class="test-steps">
-                                <div v-for="(step, index) in currentTest.steps" 
-                                     :key="step.id" 
+                                <div v-for="(step, index) in currentTest.steps"
+                                     :key="step.id"
                                      class="test-step"
                                      draggable="true"
                                      @dragstart="handleStepDragStart($event, index)"
@@ -2674,7 +2674,7 @@
                                         </span>
                                     </div>
                                     <div class="results-list">
-                                        <div v-for="result in getWorkspaceResults(workspace)" :key="result.filename" 
+                                        <div v-for="result in getWorkspaceResults(workspace)" :key="result.filename"
                                                  :class="['result-card', 'status-card-' + (result.statusClass || (result.status || 'unknown').toLowerCase())]">
                                             <div class="result-header">
                                                 <div class="result-title">
@@ -2707,7 +2707,7 @@
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Pagination -->
                                 <div v-if="resultsTotalPages > 1 || resultsTotal > resultsPerPage" class="pagination" style="display: flex; justify-content: center; align-items: center; gap: 0.5rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border);">
                                     <button class="btn btn-secondary" @click="goToResultsPage(resultsPage - 1)" :disabled="resultsPage === 1">
@@ -2743,16 +2743,16 @@
                     <p style="margin-bottom: 1rem; color: var(--text-secondary);">
                         Select one or more tests to add the step "<strong>{{ getActionLabel(pendingActionId) }}</strong>" to:
                     </p>
-                    
+
                     <!-- Search and Filter Controls -->
                     <div style="margin-bottom: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
                         <div style="flex: 1; min-width: 200px;">
                             <div class="search-bar">
                                 <i class="fas fa-search search-icon"></i>
-                                <input 
-                                    v-model="testSelectionSearchQuery" 
-                                    type="text" 
-                                    class="search-input" 
+                                <input
+                                    v-model="testSelectionSearchQuery"
+                                    type="text"
+                                    class="search-input"
                                     placeholder="Search tests by name..."
                                     @input="filterTestsForSelection">
                             </div>
@@ -2766,7 +2766,7 @@
                             </select>
                         </div>
                     </div>
-                    
+
                     <div v-if="filteredTestsForSelection.length === 0" class="empty-state-small">
                         <p v-if="tests.length === 0">No tests available. Create tests first.</p>
                         <p v-else>No tests match your search/filter criteria.</p>
@@ -2775,12 +2775,12 @@
                         <div style="margin-bottom: 0.5rem; font-size: 0.875rem; color: var(--text-secondary);">
                             Showing {{ filteredTestsForSelection.length }} of {{ tests.length }} tests
                         </div>
-                        <div v-for="test in filteredTestsForSelection" :key="test.id" class="test-selection-item" 
+                        <div v-for="test in filteredTestsForSelection" :key="test.id" class="test-selection-item"
                              :class="{ 'selected': selectedTestsForStep.includes(test.id) }"
                              @click="toggleTestSelectionForStep(test.id)">
                             <div style="display: flex; align-items: center; gap: 0.75rem;">
                                 <div class="checkbox-wrapper">
-                                    <input type="checkbox" 
+                                    <input type="checkbox"
                                            :checked="selectedTestsForStep.includes(test.id)"
                                            @change.stop="toggleTestSelectionForStep(test.id)"
                                            @click.stop>
@@ -2816,10 +2816,10 @@
                 <div class="modal-body">
                     <div class="search-bar">
                         <i class="fas fa-search search-icon"></i>
-                        <input 
-                            v-model="actionSearchQuery" 
-                            type="text" 
-                            class="search-input" 
+                        <input
+                            v-model="actionSearchQuery"
+                            type="text"
+                            class="search-input"
                             placeholder="Search actions by name, category, or description..."
                             @input="filterActions">
                     </div>
@@ -2874,14 +2874,14 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <!-- Step Description Field (at top, before parameters) -->
                             <div class="form-group" style="margin-bottom: 1.5rem;">
                                 <label class="form-label">Step Description <span style="color: var(--text-secondary); font-weight: 400;">(optional)</span></label>
-                                <input 
-                                    v-model="currentStep.description" 
-                                    type="text" 
-                                    class="form-control" 
+                                <input
+                                    v-model="currentStep.description"
+                                    type="text"
+                                    class="form-control"
                                     placeholder="Add a note about this step">
                                 <div class="form-help">Add a note about this step</div>
                             </div>
@@ -2895,13 +2895,13 @@
                                     <label class="form-label form-label-required">
                                         {{ param.label }}
                                     </label>
-                                    
+
                                     <!-- Text Input with Autocomplete Suggestions -->
                                     <div v-if="param.type === 'text' || param.type === 'file'">
-                                        <input 
-                                           v-model="currentStep.parameters[paramName]" 
-                                           type="text" 
-                                           class="form-control" 
+                                        <input
+                                           v-model="currentStep.parameters[paramName]"
+                                           type="text"
+                                           class="form-control"
                                            :placeholder="param.placeholder"
                                            :list="'suggestions-' + paramName"
                                            autocomplete="off">
@@ -2909,56 +2909,56 @@
                                             <option v-for="suggestion in param.suggestions" :key="suggestion" :value="suggestion">
                                         </datalist>
                                     </div>
-                                    
+
                                     <!-- Number Input -->
-                                    <input v-else-if="param.type === 'number'" 
-                                           v-model.number="currentStep.parameters[paramName]" 
-                                           type="number" 
-                                           class="form-control" 
+                                    <input v-else-if="param.type === 'number'"
+                                           v-model.number="currentStep.parameters[paramName]"
+                                           type="number"
+                                           class="form-control"
                                            :placeholder="param.placeholder">
-                                    
+
                                     <!-- Checkbox -->
-                                    <input v-else-if="param.type === 'checkbox'" 
-                                           v-model="currentStep.parameters[paramName]" 
+                                    <input v-else-if="param.type === 'checkbox'"
+                                           v-model="currentStep.parameters[paramName]"
                                            type="checkbox">
-                                    
+
                                     <!-- Select -->
-                                    <select v-else-if="param.type === 'select'" 
-                                            v-model="currentStep.parameters[paramName]" 
+                                    <select v-else-if="param.type === 'select'"
+                                            v-model="currentStep.parameters[paramName]"
                                             class="form-control">
                                         <option value="">-- Select --</option>
-                                        <option v-for="option in param.options" 
-                                                :key="option.value || option" 
+                                        <option v-for="option in param.options"
+                                                :key="option.value || option"
                                                 :value="option.value || option">
                                             {{ option.label || option }}
                                         </option>
                                     </select>
-                                    
+
                                     <!-- Key-Value Editor (for JSON parameters) -->
                                     <div v-else-if="param.type === 'keyvalue'" class="keyvalue-param-editor">
                                         <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center;">
                                             <button class="btn btn-secondary btn-sm" @click="toggleParamViewMode(paramName)">
-                                                <i class="fas" :class="getParamViewMode(paramName) === 'keyvalue' ? 'fa-code' : 'fa-list'"></i> 
+                                                <i class="fas" :class="getParamViewMode(paramName) === 'keyvalue' ? 'fa-code' : 'fa-list'"></i>
                                                 {{ getParamViewMode(paramName) === 'keyvalue' ? 'View JSON' : 'View Key-Value' }}
                                             </button>
                                         </div>
-                                        
+
                                         <!-- Key-Value Editor View -->
                                         <div v-if="getParamViewMode(paramName) === 'keyvalue'">
                                             <div class="variables-list">
                                                 <div v-for="(item, index) in (paramKeyValueData[paramName]?.list || [])" :key="item.id" class="variable-row">
-                                                    <input 
-                                                        type="text" 
-                                                        class="form-control variable-key" 
+                                                    <input
+                                                        type="text"
+                                                        class="form-control variable-key"
                                                         :value="item.key"
                                                         @input="item.key = $event.target.value"
                                                         @blur="updateParamKeyValueKey(paramName, item)"
                                                         @keyup.enter="$event.target.blur()"
                                                         placeholder="Parameter name">
                                                     <span class="variable-separator">:</span>
-                                                    <input 
-                                                        type="text" 
-                                                        class="form-control variable-value" 
+                                                    <input
+                                                        type="text"
+                                                        class="form-control variable-value"
                                                         :value="item.value"
                                                         @input="updateParamKeyValueValue(paramName, item, $event.target.value)"
                                                         placeholder="Parameter value">
@@ -2974,24 +2974,24 @@
                                                 </button>
                                             </div>
                                         </div>
-                                        
+
                                         <!-- JSON Editor View -->
                                         <div v-else>
-                                            <textarea 
+                                            <textarea
                                                 :value="currentStep.parameters[paramName] || '{}'"
                                                 @input="updateParamJSON(paramName, $event.target.value)"
-                                                class="form-control code-editor" 
+                                                class="form-control code-editor"
                                                 rows="6"
                                                 :placeholder="param.placeholder"></textarea>
                                         </div>
                                     </div>
-                                    
+
                                     <!-- Textarea -->
-                                    <textarea v-else-if="param.type === 'textarea' || param.type === 'json'" 
-                                              v-model="currentStep.parameters[paramName]" 
-                                              class="form-control" 
+                                    <textarea v-else-if="param.type === 'textarea' || param.type === 'json'"
+                                              v-model="currentStep.parameters[paramName]"
+                                              class="form-control"
                                               :placeholder="param.placeholder"></textarea>
-                                    
+
                                     <div class="form-help">{{ param.help }}</div>
                                     <!-- Show suggestions as clickable chips if available -->
                                     <div v-if="param.suggestions && param.suggestions.length > 0 && !currentStep.parameters[paramName]" class="suggestions-hint">
@@ -2999,8 +2999,8 @@
                                             <i class="fas fa-lightbulb"></i> Common options:
                                         </div>
                                         <div class="suggestions-chips">
-                                            <span v-for="suggestion in param.suggestions.slice(0, 8)" 
-                                                  :key="suggestion" 
+                                            <span v-for="suggestion in param.suggestions.slice(0, 8)"
+                                                  :key="suggestion"
                                                   class="suggestion-chip"
                                                   @click="currentStep.parameters[paramName] = suggestion"
                                                   :title="'Click to use: ' + suggestion">
@@ -3023,13 +3023,13 @@
                                     <label class="form-label">
                                         {{ param.label }}
                                     </label>
-                                    
+
                                     <!-- Text Input with Autocomplete Suggestions -->
                                     <div v-if="param.type === 'text' || param.type === 'file'">
-                                        <input 
-                                           v-model="currentStep.parameters[paramName]" 
-                                           type="text" 
-                                           class="form-control" 
+                                        <input
+                                           v-model="currentStep.parameters[paramName]"
+                                           type="text"
+                                           class="form-control"
                                            :placeholder="param.placeholder"
                                            :list="'suggestions-' + paramName"
                                            autocomplete="off">
@@ -3037,56 +3037,56 @@
                                             <option v-for="suggestion in param.suggestions" :key="suggestion" :value="suggestion">
                                         </datalist>
                                     </div>
-                                    
+
                                     <!-- Number Input -->
-                                    <input v-else-if="param.type === 'number'" 
-                                           v-model.number="currentStep.parameters[paramName]" 
-                                           type="number" 
-                                           class="form-control" 
+                                    <input v-else-if="param.type === 'number'"
+                                           v-model.number="currentStep.parameters[paramName]"
+                                           type="number"
+                                           class="form-control"
                                            :placeholder="param.placeholder">
-                                    
+
                                     <!-- Checkbox -->
-                                    <input v-else-if="param.type === 'checkbox'" 
-                                           v-model="currentStep.parameters[paramName]" 
+                                    <input v-else-if="param.type === 'checkbox'"
+                                           v-model="currentStep.parameters[paramName]"
                                            type="checkbox">
-                                    
+
                                     <!-- Select -->
-                                    <select v-else-if="param.type === 'select'" 
-                                            v-model="currentStep.parameters[paramName]" 
+                                    <select v-else-if="param.type === 'select'"
+                                            v-model="currentStep.parameters[paramName]"
                                             class="form-control">
                                         <option value="">-- Select --</option>
-                                        <option v-for="option in param.options" 
-                                                :key="option.value || option" 
+                                        <option v-for="option in param.options"
+                                                :key="option.value || option"
                                                 :value="option.value || option">
                                             {{ option.label || option }}
                                         </option>
                                     </select>
-                                    
+
                                     <!-- Key-Value Editor (for JSON parameters) -->
                                     <div v-else-if="param.type === 'keyvalue'" class="keyvalue-param-editor">
                                         <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center;">
                                             <button class="btn btn-secondary btn-sm" @click="toggleParamViewMode(paramName)">
-                                                <i class="fas" :class="getParamViewMode(paramName) === 'keyvalue' ? 'fa-code' : 'fa-list'"></i> 
+                                                <i class="fas" :class="getParamViewMode(paramName) === 'keyvalue' ? 'fa-code' : 'fa-list'"></i>
                                                 {{ getParamViewMode(paramName) === 'keyvalue' ? 'View JSON' : 'View Key-Value' }}
                                             </button>
                                         </div>
-                                        
+
                                         <!-- Key-Value Editor View -->
                                         <div v-if="getParamViewMode(paramName) === 'keyvalue'">
                                             <div class="variables-list">
                                                 <div v-for="(item, index) in (paramKeyValueData[paramName]?.list || [])" :key="item.id" class="variable-row">
-                                                    <input 
-                                                        type="text" 
-                                                        class="form-control variable-key" 
+                                                    <input
+                                                        type="text"
+                                                        class="form-control variable-key"
                                                         :value="item.key"
                                                         @input="item.key = $event.target.value"
                                                         @blur="updateParamKeyValueKey(paramName, item)"
                                                         @keyup.enter="$event.target.blur()"
                                                         placeholder="Parameter name">
                                                     <span class="variable-separator">:</span>
-                                                    <input 
-                                                        type="text" 
-                                                        class="form-control variable-value" 
+                                                    <input
+                                                        type="text"
+                                                        class="form-control variable-value"
                                                         :value="item.value"
                                                         @input="updateParamKeyValueValue(paramName, item, $event.target.value)"
                                                         placeholder="Parameter value">
@@ -3102,24 +3102,24 @@
                                                 </button>
                                             </div>
                                         </div>
-                                        
+
                                         <!-- JSON Editor View -->
                                         <div v-else>
-                                            <textarea 
+                                            <textarea
                                                 :value="currentStep.parameters[paramName] || '{}'"
                                                 @input="updateParamJSON(paramName, $event.target.value)"
-                                                class="form-control code-editor" 
+                                                class="form-control code-editor"
                                                 rows="6"
                                                 :placeholder="param.placeholder"></textarea>
                                         </div>
                                     </div>
-                                    
+
                                     <!-- Textarea -->
-                                    <textarea v-else-if="param.type === 'textarea' || param.type === 'json'" 
-                                              v-model="currentStep.parameters[paramName]" 
-                                              class="form-control" 
+                                    <textarea v-else-if="param.type === 'textarea' || param.type === 'json'"
+                                              v-model="currentStep.parameters[paramName]"
+                                              class="form-control"
                                               :placeholder="param.placeholder"></textarea>
-                                    
+
                                     <div class="form-help">{{ param.help }}</div>
                                     <!-- Show suggestions as clickable chips if available -->
                                     <div v-if="param.suggestions && param.suggestions.length > 0 && !currentStep.parameters[paramName]" class="suggestions-hint">
@@ -3127,8 +3127,8 @@
                                             <i class="fas fa-lightbulb"></i> Common options:
                                         </div>
                                         <div class="suggestions-chips">
-                                            <span v-for="suggestion in param.suggestions.slice(0, 8)" 
-                                                  :key="suggestion" 
+                                            <span v-for="suggestion in param.suggestions.slice(0, 8)"
+                                                  :key="suggestion"
                                                   class="suggestion-chip"
                                                   @click="currentStep.parameters[paramName] = suggestion"
                                                   :title="'Click to use: ' + suggestion">
@@ -3144,7 +3144,7 @@
                         </div>
                     </div>
                     </div>
-                    
+
                     <!-- Web Inspector Panel -->
                     <div v-if="showInspector && isBrowserAction(currentStep.action)" class="inspector-panel">
                         <div class="inspector-header">
@@ -3157,8 +3157,8 @@
                             </div>
                         </div>
                         <div class="inspector-content">
-                            <iframe v-if="inspectorActive" 
-                                    :src="inspectorUrl" 
+                            <iframe v-if="inspectorActive"
+                                    :src="inspectorUrl"
                                     class="inspector-frame"
                                     @load="onInspectorLoad"></iframe>
                             <div v-else class="inspector-empty">
@@ -3178,7 +3178,7 @@
                         </div>
                         <div class="inspector-footer">
                             <div class="inspector-info">
-                                <strong>Selector Mode:</strong> 
+                                <strong>Selector Mode:</strong>
                                 <button class="btn btn-sm" :class="selectorMode === 'css' ? 'btn-primary' : 'btn-secondary'" @click="selectorMode = 'css'">CSS</button>
                                 <button class="btn btn-sm" :class="selectorMode === 'xpath' ? 'btn-primary' : 'btn-secondary'" @click="selectorMode = 'xpath'">XPath</button>
                                 <button class="btn btn-sm" :class="selectorMode === 'text' ? 'btn-primary' : 'btn-secondary'" @click="selectorMode = 'text'">Text</button>
@@ -3227,10 +3227,14 @@
         </div>
 
         <!-- Live Progress Modal -->
-        <div v-if="showProgressModal" class="modal-overlay" @click.self="closeProgressModal">
-            <div class="modal modal-large" @click.stop>
+        <div v-if="showProgressModal"
+             :key="'progress-modal-' + (executionProgress && executionProgress.testId ? executionProgress.testId : 'default')"
+             class="modal-overlay"
+             @click.self="closeProgressModal"
+             style="z-index: 99999 !important; display: flex !important; position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;">
+            <div class="modal modal-large" @click.stop style="z-index: 100000 !important; pointer-events: auto !important;">
                 <div class="modal-header">
-                    <h3 class="modal-title"><i class="fas fa-play-circle"></i> Test Execution - {{ executionProgress.testName }}</h3>
+                    <h3 class="modal-title"><i class="fas fa-play-circle"></i> Test Execution - {{ executionProgress && executionProgress.testName ? executionProgress.testName : 'Running...' }}</h3>
                     <button class="btn btn-icon btn-secondary" @click="closeProgressModal">
                         <i class="fas fa-times"></i>
                     </button>
@@ -3239,15 +3243,15 @@
                     <!-- Progress Bar -->
                     <div class="progress-container">
                         <div class="progress-bar-wrapper">
-                            <div class="progress-bar" :style="{width: executionProgress.percentage + '%'}">
-                                {{ executionProgress.percentage }}%
+                            <div class="progress-bar" :style="{width: (executionProgress && executionProgress.percentage ? executionProgress.percentage : 0) + '%'}">
+                                {{ executionProgress && executionProgress.percentage ? executionProgress.percentage : 0 }}%
                             </div>
                         </div>
                         <div class="progress-info">
                             <span>
-                                <span class="status-badge" :class="'status-' + executionProgress.status">{{ executionProgress.status.toUpperCase() }}</span>
+                                <span class="status-badge" :class="'status-' + (executionProgress && executionProgress.status ? executionProgress.status : 'running')">{{ executionProgress && executionProgress.status ? executionProgress.status.toUpperCase() : 'RUNNING' }}</span>
                             </span>
-                            <span>{{ executionProgress.currentStep }} / {{ executionProgress.totalSteps }} steps</span>
+                            <span>{{ executionProgress && executionProgress.currentStep ? executionProgress.currentStep : 0 }} / {{ executionProgress && executionProgress.totalSteps ? executionProgress.totalSteps : 0 }} steps</span>
                         </div>
                     </div>
 
@@ -3255,7 +3259,7 @@
                     <div class="form-group">
                         <label class="form-label"><i class="fas fa-list"></i> Test Steps</label>
                         <div class="steps-list">
-                            <div v-for="(step, index) in executionProgress.steps" :key="index" 
+                            <div v-for="(step, index) in (executionProgress && executionProgress.steps ? executionProgress.steps : [])" :key="index"
                                  class="step-item" :class="step.status">
                                 <div class="step-icon">
                                     <i v-if="step.status === 'pending'" class="fas fa-circle"></i>
@@ -3276,17 +3280,17 @@
                         <div class="log-controls">
                             <label class="form-label"><i class="fas fa-terminal"></i> Live Output</label>
                             <div>
-                                <span class="log-stats">{{ executionProgress.output.length }} lines</span>
+                                <span class="log-stats">{{ executionProgress && executionProgress.output ? executionProgress.output.length : 0 }} lines</span>
                                 <button class="btn btn-sm btn-secondary" @click="copyLogOutput" style="margin-left: 0.5rem;">
                                     <i class="fas fa-copy"></i> Copy
                                 </button>
                             </div>
                         </div>
-                        <pre class="live-log" ref="liveLog">{{ executionProgress.output.length > 0 ? executionProgress.output.join('\n') : 'Waiting for output...' }}</pre>
+                        <pre class="live-log" ref="liveLog">{{ executionProgress && executionProgress.output && executionProgress.output.length > 0 ? executionProgress.output.join('\n') : 'Waiting for output...' }}</pre>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button v-if="executionProgress.status === 'completed' || executionProgress.status === 'failed'" 
+                    <button v-if="executionProgress && (executionProgress.status === 'completed' || executionProgress.status === 'failed')"
                             class="btn btn-primary" @click="closeProgressModal">
                         <i class="fas fa-check"></i> Done
                     </button>
@@ -3298,8 +3302,14 @@
         </div>
 
         <!-- Result Detail Modal -->
-        <div v-if="showResultModal" class="modal-overlay" data-modal-type="result-detail" @click.self.prevent="closeResultModal()" @keydown.esc.prevent="closeResultModal()">
-            <div class="modal modal-large" @click.stop>
+        <div v-if="showResultModal"
+             :key="'result-modal-' + (currentResult && currentResult.test_id ? currentResult.test_id : 'default')"
+             class="modal-overlay"
+             data-modal-type="result-detail"
+             @click.self.prevent="closeResultModal()"
+             @keydown.esc.prevent="closeResultModal()"
+             style="z-index: 99999 !important; display: flex !important; position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;">
+            <div class="modal modal-large" @click.stop style="z-index: 100000 !important; pointer-events: auto !important;">
                 <div class="modal-header">
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
                         <button class="btn btn-icon btn-secondary" @click.stop.prevent="closeResultModal()" type="button" title="Back to Results">
@@ -3404,11 +3414,11 @@
                             </div>
                             <div v-else>
                                 <div v-for="test in availableTestsForSuite" :key="test.id" class="test-selection-item">
-                                    <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 8px; border-radius: 4px; transition: background 0.2s;" 
+                                    <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 8px; border-radius: 4px; transition: background 0.2s;"
                                            :style="isTestInSuite(test.id) ? 'background: var(--bg-hover);' : ''"
                                            @mouseover="$event.currentTarget.style.background = 'var(--bg-hover)'"
                                            @mouseleave="$event.currentTarget.style.background = isTestInSuite(test.id) ? 'var(--bg-hover)' : 'transparent'">
-                                        <input type="checkbox" 
+                                        <input type="checkbox"
                                                :checked="isTestInSuite(test.id)"
                                                @change="toggleTestInSuite(test.id)"
                                                style="cursor: pointer;">
@@ -3419,8 +3429,8 @@
                                                 <span v-if="test.step_count"> • {{ test.step_count }} steps</span>
                                             </div>
                                         </div>
-                                        <input v-if="isTestInSuite(test.id)" 
-                                               type="number" 
+                                        <input v-if="isTestInSuite(test.id)"
+                                               type="number"
                                                v-model.number="currentSuite.tests.find(t => t.test_id === test.id).order"
                                                min="0"
                                                style="width: 60px; padding: 4px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-primary);"
@@ -3486,7 +3496,7 @@
                                    :style="isTestSelected(suiteItem.test_id) ? 'background: var(--bg-hover);' : ''"
                                    @mouseover="$event.currentTarget.style.background = 'var(--bg-hover)'"
                                    @mouseleave="$event.currentTarget.style.background = isTestSelected(suiteItem.test_id) ? 'var(--bg-hover)' : 'transparent'">
-                                <input type="checkbox" 
+                                <input type="checkbox"
                                        :checked="isTestSelected(suiteItem.test_id)"
                                        @change="toggleTestSelection(suiteItem.test_id)"
                                        :disabled="!suiteItem.enabled"
@@ -3535,11 +3545,11 @@
                             </template>
                             <template v-else-if="availableTestsForSuite && availableTestsForSuite.length > 0">
                                 <div v-for="test in availableTestsForSuite" :key="test.id" class="test-selection-item">
-                                    <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 8px; border-radius: 4px; transition: background 0.2s;" 
+                                    <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 8px; border-radius: 4px; transition: background 0.2s;"
                                            :style="isTestInSuite(test.id) ? 'background: var(--bg-hover);' : ''"
                                            @mouseover="$event.currentTarget.style.background = 'var(--bg-hover)'"
                                            @mouseleave="$event.currentTarget.style.background = isTestInSuite(test.id) ? 'var(--bg-hover)' : 'transparent'">
-                                        <input type="checkbox" 
+                                        <input type="checkbox"
                                                :checked="isTestInSuite(test.id)"
                                                @change="toggleTestInSuite(test.id)"
                                                style="cursor: pointer;">
@@ -3575,7 +3585,7 @@
 
     <script>
         const { createApp } = Vue;
-        
+
         // Check if VueRouter is available (from CDN) - make it optional
         let router = null;
         try {
@@ -3635,7 +3645,7 @@
                 const savedTestId = localStorage.getItem('testBuilder_currentTestId');
                 const savedResultsPage = parseInt(localStorage.getItem('testBuilder_resultsPage') || '1');
                 const savedWorkspace = localStorage.getItem('testBuilder_selectedWorkspace');
-                
+
                 return {
                     view: savedView,
                     tests: [],
@@ -3697,6 +3707,7 @@
                     // Live progress tracking
                     ws: null,
                     showProgressModal: false,
+                    executionPollInterval: null, // Interval for polling execution status
                     executionProgress: {
                         testId: null,
                         testName: '',
@@ -3770,23 +3781,23 @@
             computed: {
                 filteredTestsForSelection() {
                     if (!this.tests || this.tests.length === 0) return [];
-                    
+
                     let filtered = this.tests;
-                    
+
                     // Filter by workspace
                     if (this.testSelectionWorkspaceFilter) {
                         filtered = filtered.filter(test => test.workspace === this.testSelectionWorkspaceFilter);
                     }
-                    
+
                     // Filter by search query
                     if (this.testSelectionSearchQuery && this.testSelectionSearchQuery.trim()) {
                         const query = this.testSelectionSearchQuery.toLowerCase().trim();
-                        filtered = filtered.filter(test => 
+                        filtered = filtered.filter(test =>
                             test.name.toLowerCase().includes(query) ||
                             (test.workspace && test.workspace.toLowerCase().includes(query))
                         );
                     }
-                    
+
                     return filtered;
                 },
                 isStepValid() {
@@ -3799,14 +3810,14 @@
                 '$route': {
                     handler(to) {
                         if (!to || !this.$router) return;
-                        
+
                         const routeToViewMap = {
                             '/': 'dashboard',
                             '/tests': 'tests',
                             '/results': 'results',
                             '/suites': 'test-suites'
                         };
-                        
+
                         // Handle dynamic routes
                         if (to.path.startsWith('/tests/') && to.params.id) {
                             if (to.params.id === 'new') {
@@ -3834,25 +3845,45 @@
             } : {},
             async mounted() {
                 // Clear all modal states on mount to prevent them from persisting
+                // BUT don't clear progress modal or result modal if they're actively being used
                 this.showAddTestModal = false;
                 this.showCreateSuiteModal = false;
                 this.showEditSuiteModal = false;
                 this.showExecuteSuiteModal = false;
-                this.showResultModal = false;
+                // Only clear result modal if not actively viewing a result
+                if (!this.currentResult) {
+                    this.showResultModal = false;
+                }
                 this.showSuiteDetailView = false;
-                this.currentResult = null;
-                
-                // Force remove any existing modals from DOM
+                // Don't clear currentResult if we're viewing it
+
+                // Force remove any existing modals from DOM, but preserve progress and result modals if they should be shown
                 const existingOverlays = document.querySelectorAll('.modal-overlay');
                 if (existingOverlays.length > 0) {
                     console.log(`Clearing ${existingOverlays.length} existing modal overlays on mount`);
-                    existingOverlays.forEach(overlay => overlay.remove());
+                    existingOverlays.forEach(overlay => {
+                        // Don't remove progress modal if it should be shown
+                        if (overlay.querySelector('.modal-title') && overlay.querySelector('.modal-title').textContent.includes('Test Execution')) {
+                            if (this.showProgressModal) {
+                                console.log('Preserving progress modal');
+                                return;
+                            }
+                        }
+                        // Don't remove result modal if it should be shown
+                        if (overlay.getAttribute('data-modal-type') === 'result-detail') {
+                            if (this.showResultModal) {
+                                console.log('Preserving result modal');
+                                return;
+                            }
+                        }
+                        overlay.remove();
+                    });
                 }
-                
+
                 await this.loadFolders();
                 await this.loadActions();
                 await this.loadTemplates();
-                
+
                 // Initialize router - sync current route to view (only if router is available)
                 if (this.$router && this.$route) {
                     const routeToViewMap = {
@@ -3861,7 +3892,7 @@
                         '/results': 'results',
                         '/suites': 'test-suites'
                     };
-                    
+
                     if (this.$route.path.startsWith('/tests/') && this.$route.params.id) {
                         if (this.$route.params.id === 'new') {
                             this.view = 'builder';
@@ -3884,7 +3915,7 @@
                         this.view = routeToViewMap[this.$route.path];
                     }
                 }
-                
+
                 // Restore state based on saved view (fallback if no route)
                 if (this.view === 'tests') {
                     await this.loadTests();
@@ -3915,7 +3946,7 @@
                     await this.loadDashboard();
                     this.saveViewState();
                 }
-                
+
                 this.connectWebSocket();
             },
             beforeUnmount() {
@@ -3983,14 +4014,14 @@
                             alert('Please enter a suite name');
                             return;
                         }
-                        
+
                         const suiteData = {
                             name: this.currentSuite.name,
                             description: this.currentSuite.description || '',
                             workspace: this.currentSuite.workspace || null,
                             tests: this.currentSuite.tests || []
                         };
-                        
+
                         await axios.post('/api/test-suites', suiteData);
                         this.showCreateSuiteModal = false;
                         this.resetCurrentSuite();
@@ -4012,7 +4043,7 @@
                             alert('Please enter a suite name');
                             return;
                         }
-                        
+
                         await axios.put(`/api/test-suites/${this.currentSuite.id}`, this.currentSuite);
                         this.showEditSuiteModal = false;
                         this.resetCurrentSuite();
@@ -4024,7 +4055,7 @@
                 },
                 async deleteTestSuite(suiteId) {
                     if (!confirm('Are you sure you want to delete this test suite?')) return;
-                    
+
                     try {
                         await axios.delete(`/api/test-suites/${suiteId}`);
                         await this.loadTestSuites();
@@ -4049,13 +4080,13 @@
                 },
                 closeAddTestModal() {
                     console.log('closeAddTestModal called, current value:', this.showAddTestModal);
-                    
+
                     // Set all modal states to false
                     this.showAddTestModal = false;
                     this.showCreateSuiteModal = false;
                     this.showEditSuiteModal = false;
                     this.showExecuteSuiteModal = false;
-                    
+
                     // Immediately force remove all overlays
                     const overlays = document.querySelectorAll('.modal-overlay');
                     console.log(`closeAddTestModal: Found ${overlays.length} overlays, removing all`);
@@ -4063,7 +4094,7 @@
                         overlay.style.display = 'none';
                         overlay.remove();
                     });
-                    
+
                     // Backup removal after next tick
                     this.$nextTick(() => {
                         const remainingOverlays = document.querySelectorAll('.modal-overlay');
@@ -4073,7 +4104,7 @@
                         }
                         this.$forceUpdate();
                     });
-                    
+
                     console.log('All modals closed and removed');
                 },
                 closeAllModals() {
@@ -4083,7 +4114,7 @@
                     this.showEditSuiteModal = false;
                     this.showExecuteSuiteModal = false;
                     this.showSuiteDetailView = false;
-                    
+
                     // Immediately force remove all overlays
                     const overlays = document.querySelectorAll('.modal-overlay');
                     console.log(`closeAllModals: Found ${overlays.length} overlays, removing all`);
@@ -4091,7 +4122,7 @@
                         overlay.style.display = 'none';
                         overlay.remove();
                     });
-                    
+
                     // Backup removal after next tick
                     this.$nextTick(() => {
                         const remainingOverlays = document.querySelectorAll('.modal-overlay');
@@ -4100,7 +4131,7 @@
                         }
                         this.$forceUpdate();
                     });
-                    
+
                     console.log('All modals closed via closeAllModals');
                 },
                 async executeTestSuite(suite) {
@@ -4121,7 +4152,7 @@
                             max_tests: this.suiteExecutionConfig.max_tests || null,
                             headless: this.suiteExecutionConfig.headless
                         };
-                        
+
                         const response = await axios.post(`/api/test-suites/${this.currentSuite.id}/execute`, request);
                         this.showExecuteSuiteModal = false;
                         alert(`Test suite execution started: ${response.data.message}`);
@@ -4146,11 +4177,11 @@
                     // Use selectedSuite if in detail view, otherwise currentSuite
                     const suite = this.selectedSuite || this.currentSuite;
                     if (!suite) return;
-                    
+
                     if (!suite.tests) {
                         suite.tests = [];
                     }
-                    
+
                     const index = suite.tests.findIndex(t => t.test_id === testId);
                     if (index >= 0) {
                         // Test already in suite - if in detail view, remove it; if in edit modal, toggle enabled
@@ -4168,7 +4199,7 @@
                         }
                     } else {
                         // Add new test to suite
-                        const maxOrder = suite.tests.length > 0 
+                        const maxOrder = suite.tests.length > 0
                             ? Math.max(...suite.tests.map(t => t.order || 0))
                             : -1;
                         suite.tests.push({
@@ -4191,13 +4222,13 @@
                 },
                 async saveTestsToSuite() {
                     if (!this.selectedSuite) return;
-                    
+
                     try {
                         // Update order values
                         this.selectedSuite.tests.forEach((test, idx) => {
                             test.order = idx;
                         });
-                        
+
                         await axios.put(`/api/test-suites/${this.selectedSuite.id}`, this.selectedSuite);
                         this.showAddTestModal = false;
                         // Reload suite to get updated data
@@ -4342,7 +4373,7 @@
                     try {
                         const response = await axios.get('/api/action-templates');
                         this.actionTemplates = response.data.templates || [];
-                        
+
                         // Group by category
                         this.actionTemplatesByCategory = {};
                         this.actionTemplates.forEach(template => {
@@ -4352,7 +4383,7 @@
                             }
                             this.actionTemplatesByCategory[category].push(template);
                         });
-                        
+
                         this.actionTemplatesLoaded = true;
                         console.log(`Loaded ${this.actionTemplates.length} action templates`);
                     } catch (error) {
@@ -4465,7 +4496,7 @@
                     // Preserve existing IDs when possible to prevent re-renders
                     const existingIds = new Map();
                     const seenKeys = new Set();
-                    
+
                     // Map existing items by key
                     this.variablesList.forEach(item => {
                         if (item.key && !seenKeys.has(item.key)) {
@@ -4473,18 +4504,18 @@
                             seenKeys.add(item.key);
                         }
                     });
-                    
+
                     // Create new list, preserving IDs for existing keys and avoiding duplicates
                     const newList = [];
                     const processedKeys = new Set();
-                    
+
                     Object.entries(this.variablesKeyValue).forEach(([key, value]) => {
                         // Skip if we've already processed this key (prevent duplicates)
                         if (processedKeys.has(key)) {
                             return;
                         }
                         processedKeys.add(key);
-                        
+
                         const existingId = existingIds.get(key);
                         if (existingId) {
                             // Preserve existing ID
@@ -4503,7 +4534,7 @@
                             });
                         }
                     });
-                    
+
                     this.variablesList = newList;
                 },
                 addVariable() {
@@ -4532,16 +4563,16 @@
                     // Find the original key by matching the item ID
                     const originalItem = this.variablesList.find(i => i.id === item.id);
                     if (!originalItem) return;
-                    
+
                     const oldKey = originalItem.key;
                     const trimmedNewKey = item.key && item.key.trim() ? item.key.trim() : null;
-                    
+
                     if (!trimmedNewKey) {
                         // If key is empty, restore original key
                         item.key = oldKey;
                         return;
                     }
-                    
+
                     if (oldKey !== trimmedNewKey) {
                         // Key changed - update the object
                         const value = this.variablesKeyValue[oldKey];
@@ -4571,7 +4602,7 @@
                             if (key && key.trim()) {
                                 const trimmedKey = key.trim();
                                 const strValue = String(value);
-                                
+
                                 // Try to parse as number, boolean, or JSON
                                 if (strValue === 'true' || strValue === 'false') {
                                     jsonObj[trimmedKey] = strValue === 'true';
@@ -4611,22 +4642,22 @@
                         alert('⚠️ Please enter a test name before saving.');
                         return;
                     }
-                    
+
                     // Validate test has steps
                     if (this.currentTest.steps.length === 0) {
                         alert('⚠️ Please add at least one step to the test before saving.');
                         return;
                     }
-                    
+
                     // Parse tags
                     this.currentTest.tags = this.tagsInput.split(',').map(t => t.trim()).filter(t => t);
-                    
+
                     // Update variables from input
                     this.updateVariables();
-                    
+
                     console.log('Saving test:', this.currentTest);
                     console.log('Test steps:', JSON.stringify(this.currentTest.steps, null, 2));
-                    
+
                     try {
                         if (this.currentTestId) {
                             console.log('Updating existing test:', this.currentTestId);
@@ -4649,7 +4680,7 @@
                 },
                 async deleteTest(testId) {
                     if (!confirm('Are you sure you want to delete this test?')) return;
-                    
+
                     try {
                         await axios.delete(`/api/tests/${testId}`);
                         await this.loadTests();
@@ -4663,7 +4694,7 @@
                         // Load the test to duplicate
                         const response = await axios.get(`/api/tests/${testId}`);
                         const testToDuplicate = response.data;
-                        
+
                         // Create a new test with "Copy of" prefix
                         const newTest = {
                             name: `Copy of ${testToDuplicate.name}`,
@@ -4684,16 +4715,16 @@
                                 id: Date.now().toString() + Math.random().toString(36).substr(2, 9)
                             })) : []
                         };
-                        
+
                         // Determine folder/workspace from original test
                         const testPath = testId.split('/');
                         const folder = testPath.length > 1 ? testPath.slice(0, -1).join('/') : null;
-                        
+
                         // Save the new test
                         const saveResponse = await axios.post(`/api/tests`, newTest, {
                             params: folder ? { folder: folder } : {}
                         });
-                        
+
                         await this.loadTests();
                         alert(`Test "${newTest.name}" duplicated successfully!`);
                     } catch (error) {
@@ -4703,12 +4734,12 @@
                 },
                 async validateTest() {
                     this.currentTest.tags = this.tagsInput.split(',').map(t => t.trim()).filter(t => t);
-                    
+
                     try {
                         const response = await axios.post('/api/tests/validate', {
                             test_definition: this.currentTest
                         });
-                        
+
                         if (response.data.valid) {
                             alert('✅ Test is valid!');
                         } else {
@@ -4724,7 +4755,7 @@
                         alert('Please save the test before running it');
                         return;
                     }
-                    
+
                     try {
                         // Initialize progress tracking
                         this.executionProgress = {
@@ -4741,21 +4772,72 @@
                             })),
                             output: []
                         };
-                        
-                        
+
+                        // Set flag (Vue 3 reactivity is automatic)
                         this.showProgressModal = true;
-                        
+
+                        // Force Vue to update multiple times to ensure render
+                        await this.$nextTick();
+                        this.$forceUpdate();
+                        await this.$nextTick();
+                        this.$forceUpdate();
+
+                        console.log('Progress modal should be visible, showProgressModal:', this.showProgressModal);
+                        console.log('Vue instance:', this.$);
+
+                        // Verify modal is in DOM with multiple retries, create manually if Vue fails
+                        const checkModal = (attempt = 0) => {
+                            let modal = document.querySelector('.modal-overlay:not([data-modal-type])');
+                            if (modal) {
+                                console.log('Modal in DOM:', 'YES (attempt ' + attempt + ')');
+                                modal.style.display = 'flex';
+                                modal.style.zIndex = '99999';
+                                modal.style.position = 'fixed';
+                                modal.style.top = '0';
+                                modal.style.left = '0';
+                                modal.style.right = '0';
+                                modal.style.bottom = '0';
+                            } else if (attempt < 5) {
+                                console.log('Modal not found, retrying... (attempt ' + attempt + ')');
+                                this.$forceUpdate();
+                                setTimeout(() => checkModal(attempt + 1), 50);
+                            } else {
+                                console.warn('Modal still not in DOM after 5 attempts, creating manually');
+                                // Create modal manually as fallback
+                                this.createProgressModalManually();
+                            }
+                        };
+
+                        this.$nextTick(() => checkModal(0));
+
+                        // Construct test path - currentTestId is relative to tests/cases/
+                        // Backend expects path relative to project root
+                        const testPath = `tests/cases/${this.currentTestId}`;
+
+                        console.log('Executing test:', testPath);
+
                         const response = await axios.post('/api/tests/execute', {
-                            test_path: `tests/cases/${this.currentTestId}`,
+                            test_path: testPath,
                             headless: true
                         });
-                        
+
+                        console.log('Test execution started:', response.data);
+
                         // Store test execution ID for WebSocket updates
                         if (response.data.test_id) {
                             this.executionProgress.testId = response.data.test_id;
+                            console.log('Test execution ID:', response.data.test_id);
+                            console.log('Test path:', response.data.test_path);
+                            console.log('Waiting for WebSocket messages...');
+
+                            // Start polling as fallback if WebSocket doesn't work
+                            this.startExecutionPolling(response.data.test_id);
+                        } else {
+                            console.warn('No test_id in response:', response.data);
                         }
                     } catch (error) {
                         console.error('Failed to run test:', error);
+                        console.error('Error details:', error.response?.data);
                         alert('Failed to run test: ' + (error.response?.data?.detail || error.message));
                         this.showProgressModal = false;
                     }
@@ -4912,29 +4994,29 @@
                             alert('Cannot edit step: Invalid step index');
                             return;
                         }
-                        
+
                         const step = this.currentTest.steps[index];
                         if (!step || !step.action) {
                             console.error('Invalid step data:', step);
                             alert('Cannot edit step: Step data is invalid');
                             return;
                         }
-                        
+
                         // Deep copy the step to avoid reactivity issues
                         this.currentStep = JSON.parse(JSON.stringify(step));
                         this.editingStepIndex = index;
-                        
+
                         // URL encode the action ID to handle special characters like dots
                         const encodedActionId = encodeURIComponent(step.action);
                         const response = await axios.get(`/api/actions/${encodedActionId}`);
                         this.currentActionDef = response.data;
-                        
+
                         if (!this.currentActionDef) {
                             console.error('Action definition not found for:', step.action);
                             alert(`Cannot edit step: Action definition not found for "${step.action}"`);
                             return;
                         }
-                        
+
                         // Initialize parameter key-value editors for keyvalue type parameters
                         if (this.currentActionDef && this.currentActionDef.parameters) {
                             Object.keys(this.currentActionDef.parameters).forEach(paramName => {
@@ -4981,11 +5063,11 @@
                                 }
                             });
                         }
-                        
+
                         // Show modal immediately, even before action definition loads
                         // This ensures the modal appears and user can see what's happening
                         this.showStepModal = true;
-                        
+
                         // Defer key-value editor initialization to avoid blocking
                         // Use requestAnimationFrame + setTimeout to ensure it's truly async
                         requestAnimationFrame(() => {
@@ -5023,19 +5105,19 @@
                 },
                 validateRequiredParameters() {
                     if (!this.currentActionDef || !this.currentActionDef.parameters) return { valid: true, errors: [] };
-                    
+
                     const errors = [];
                     const requiredParams = this.getRequiredParams();
-                    
+
                     for (const [paramName, param] of Object.entries(requiredParams)) {
                         const value = this.currentStep.parameters[paramName];
-                        
+
                         // Check if value is missing or empty
                         if (value === undefined || value === null || value === '') {
                             errors.push(`${param.label || paramName} is required`);
                             continue;
                         }
-                        
+
                         // Type-specific validation
                         if (param.type === 'text' || param.type === 'file') {
                             if (typeof value !== 'string' || value.trim() === '') {
@@ -5062,7 +5144,7 @@
                         } else if (param.type === 'select') {
                             // Check if value is in options
                             if (param.options && param.options.length > 0) {
-                                const validValues = param.options.map(opt => 
+                                const validValues = param.options.map(opt =>
                                     typeof opt === 'object' ? opt.value : opt
                                 );
                                 if (!validValues.includes(value)) {
@@ -5071,7 +5153,7 @@
                             }
                         }
                     }
-                    
+
                     return {
                         valid: errors.length === 0,
                         errors: errors
@@ -5084,7 +5166,7 @@
                         alert('Please fix the following errors:\n\n' + validation.errors.join('\n'));
                         return;
                     }
-                    
+
                     // Sync all parameter key-value editors to JSON before saving
                     // Only sync parameters that are actually in the current action definition
                     if (this.currentActionDef && this.currentActionDef.parameters) {
@@ -5099,17 +5181,17 @@
                             }
                         });
                     }
-                    
+
                     // Re-validate after syncing (in case keyvalue params changed)
                     const revalidation = this.validateRequiredParameters();
                     if (!revalidation.valid) {
                         alert('Please fix the following errors:\n\n' + revalidation.errors.join('\n'));
                         return;
                     }
-                    
+
                     // Create a deep copy to ensure reactivity
                     const stepToSave = JSON.parse(JSON.stringify(this.currentStep));
-                    
+
                     if (this.addingToMultipleTests && this.selectedTestsForStep.length > 0) {
                         // Add step to multiple selected tests
                         try {
@@ -5140,7 +5222,7 @@
                             this.currentTest.steps.push(stepToSave);
                         }
                     }
-                    
+
                     this.showStepModal = false;
                     this.showInspector = false;
                     this.inspectorActive = false;
@@ -5231,12 +5313,12 @@
                     // Ensure data structure exists
                     this.initParamKeyValue(paramName);
                     const data = this.paramKeyValueData[paramName];
-                    
+
                     // If list doesn't exist or is out of sync, rebuild it
                     if (!data.list || data.list.length === 0) {
                         this._buildParamKeyValueListDirectly(paramName);
                     }
-                    
+
                     // Return a copy to avoid reactivity issues
                     return (data.list || []).map(item => ({ ...item }));
                 },
@@ -5307,21 +5389,21 @@
                     // Direct list building without triggering reactivity - called only from sync
                     const data = this.paramKeyValueData[paramName];
                     if (!data) return;
-                    
+
                     const existingIds = new Map();
                     (data.list || []).forEach(item => {
                         if (item && item.key) {
                             existingIds.set(item.key, item.id);
                         }
                     });
-                    
+
                     const newList = [];
                     const processedKeys = new Set();
-                    
+
                     Object.entries(data.keyValue || {}).forEach(([key, value]) => {
                         if (processedKeys.has(key)) return;
                         processedKeys.add(key);
-                        
+
                         const existingId = existingIds.get(key);
                         if (existingId) {
                             newList.push({
@@ -5341,7 +5423,7 @@
                             });
                         }
                     });
-                    
+
                     // Direct assignment to avoid reactivity triggers
                     data.list = newList;
                 },
@@ -5380,15 +5462,15 @@
                     const data = this.paramKeyValueData[paramName];
                     const originalItem = data.list.find(i => i.id === item.id);
                     if (!originalItem) return;
-                    
+
                     const oldKey = originalItem.key;
                     const trimmedNewKey = item.key && item.key.trim() ? item.key.trim() : null;
-                    
+
                     if (!trimmedNewKey) {
                         item.key = oldKey;
                         return;
                     }
-                    
+
                     if (oldKey !== trimmedNewKey) {
                         const newObj = { ...data.keyValue };
                         const value = newObj[oldKey];
@@ -5424,18 +5506,18 @@
                         console.error('Invalid step index for duplication:', index);
                         return;
                     }
-                    
+
                     // Create a deep copy of the step
                     const originalStep = this.currentTest.steps[index];
                     const duplicatedStep = JSON.parse(JSON.stringify(originalStep));
-                    
+
                     // Generate a new unique ID for the duplicated step
                     // Use the same format as addActionStep for consistency
                     duplicatedStep.id = Date.now().toString();
-                    
+
                     // Insert the duplicated step right after the original
                     this.currentTest.steps.splice(index + 1, 0, duplicatedStep);
-                    
+
                     // Optional: Show a brief notification
                     console.log(`Step ${index + 1} duplicated successfully`);
                 },
@@ -5461,12 +5543,12 @@
                         try {
                             const iframe = document.querySelector('.inspector-frame');
                             if (!iframe) return;
-                            
+
                             const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                            
+
                             // Test if we can access the document
                             const testAccess = iframeDoc.body;
-                            
+
                             // Create style for highlighting
                             const style = iframeDoc.createElement('style');
                             style.textContent = `
@@ -5478,16 +5560,16 @@
                                 }
                             `;
                             iframeDoc.head.appendChild(style);
-                            
+
                             // Add click handler for element selection
                             iframeDoc.addEventListener('mouseover', (e) => {
                                 e.target.classList.add('__inspector-highlight');
                             });
-                            
+
                             iframeDoc.addEventListener('mouseout', (e) => {
                                 e.target.classList.remove('__inspector-highlight');
                             });
-                            
+
                             iframeDoc.addEventListener('click', (e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -5528,7 +5610,7 @@ Alternative methods to capture selectors:
 
 Would you like to enter a selector manually?
                     `;
-                    
+
                     if (confirm(message.trim())) {
                         const manualSelector = prompt('Enter CSS selector or XPath:', '');
                         if (manualSelector) {
@@ -5538,7 +5620,7 @@ Would you like to enter a selector manually?
                 },
                 captureElement(element) {
                     let selector = null;
-                    
+
                     if (this.selectorMode === 'css') {
                         // Generate CSS selector
                         if (element.id) {
@@ -5577,13 +5659,13 @@ Would you like to enter a selector manually?
                         // Get text content
                         selector = element.textContent.trim().substring(0, 50);
                     }
-                    
+
                     this.capturedSelector = selector;
                 },
                 applyCapturedSelector() {
                     // Apply captured selector to the current step parameter
                     if (!this.capturedSelector) return;
-                    
+
                     // Find the appropriate parameter to update
                     if (this.currentActionDef && this.currentActionDef.parameters) {
                         const selectorParams = ['selector', 'element', 'locator', 'xpath', 'css_selector'];
@@ -5594,7 +5676,7 @@ Would you like to enter a selector manually?
                                 return;
                             }
                         }
-                        
+
                         // If no selector parameter found, try to find text parameter
                         if (this.selectorMode === 'text' && this.currentActionDef.parameters.text) {
                             this.currentStep.parameters.text = this.capturedSelector;
@@ -5605,7 +5687,7 @@ Would you like to enter a selector manually?
                 moveStep(index, direction) {
                     const newIndex = index + direction;
                     if (newIndex < 0 || newIndex >= this.currentTest.steps.length) return;
-                    
+
                     const step = this.currentTest.steps.splice(index, 1)[0];
                     this.currentTest.steps.splice(newIndex, 0, step);
                 },
@@ -5627,16 +5709,16 @@ Would you like to enter a selector manually?
                 handleStepDrop(event, index) {
                     event.preventDefault();
                     const draggedIndex = this.draggedStepIndex;
-                    
+
                     if (draggedIndex === null || draggedIndex === index) {
                         this.draggedStepIndex = null;
                         return;
                     }
-                    
+
                     // Move the step
                     const step = this.currentTest.steps.splice(draggedIndex, 1)[0];
                     this.currentTest.steps.splice(index, 0, step);
-                    
+
                     // Reset
                     this.draggedStepIndex = null;
                     event.currentTarget.classList.remove('drag-over');
@@ -5660,28 +5742,28 @@ Would you like to enter a selector manually?
                 handleSuiteItemDrop(event, index) {
                     event.preventDefault();
                     const draggedIndex = this.draggedSuiteItemIndex;
-                    
+
                     if (draggedIndex === null || draggedIndex === index) {
                         this.draggedSuiteItemIndex = null;
                         // Remove drag-over class from all items
                         document.querySelectorAll('.test-item').forEach(el => el.classList.remove('drag-over'));
                         return;
                     }
-                    
+
                     if (!this.selectedSuite) return;
-                    
+
                     // Move the suite item
                     const item = this.selectedSuite.tests.splice(draggedIndex, 1)[0];
                     this.selectedSuite.tests.splice(index, 0, item);
-                    
+
                     // Update order values
                     this.selectedSuite.tests.forEach((test, idx) => {
                         test.order = idx;
                     });
-                    
+
                     // Save changes
                     this.updateSuiteTests();
-                    
+
                     // Reset
                     this.draggedSuiteItemIndex = null;
                     // Remove drag-over class from all items
@@ -5702,21 +5784,21 @@ Would you like to enter a selector manually?
                         this.viewHistory.push(this.view);
                         this.view = 'builder';
                     }
-                    
+
                     // Create a new step from the template
                     const newStep = {
                         action: template.step.action,
                         parameters: JSON.parse(JSON.stringify(template.step.parameters)),
                         description: template.step.description || ''
                     };
-                    
+
                     // Add the step to the current test
                     this.currentTest.steps.push(newStep);
-                    
+
                     // Open the step editor to allow customization
                     this.editingStepIndex = this.currentTest.steps.length - 1;
                     this.currentStep = JSON.parse(JSON.stringify(newStep));
-                    
+
                     // Find and set the action definition
                     for (const [category, actions] of Object.entries(this.actionsByCategory)) {
                         const action = actions.find(a => a.id === template.step.action);
@@ -5725,7 +5807,7 @@ Would you like to enter a selector manually?
                             break;
                         }
                     }
-                    
+
                     this.showStepModal = true;
                 },
                 async startRecording() {
@@ -5735,10 +5817,10 @@ Would you like to enter a selector manually?
                             return;
                         }
                     }
-                    
+
                     const url = prompt('Enter URL to start recording:', 'https://example.com');
                     if (!url) return;
-                    
+
                     try {
                         const sessionId = 'rec_' + Date.now();
                         const response = await axios.post('/api/recorder/start', {
@@ -5746,12 +5828,12 @@ Would you like to enter a selector manually?
                             url: url,
                             headless: false
                         });
-                        
+
                         if (response.data.success) {
                             this.isRecording = true;
                             this.recordingSessionId = sessionId;
                             this.recordingUrl = url;
-                            
+
                             // Poll for recorded actions
                             this.pollRecordedActions();
                         }
@@ -5765,10 +5847,10 @@ Would you like to enter a selector manually?
                 },
                 async stopRecording() {
                     if (!this.recordingSessionId) return;
-                    
+
                     try {
                         const response = await axios.post(`/api/recorder/stop/${this.recordingSessionId}`);
-                        
+
                         if (response.data.success) {
                             // Add recorded actions to current test with proper formatting
                             const actions = response.data.actions;
@@ -5779,13 +5861,13 @@ Would you like to enter a selector manually?
                                     parameters: action.parameters || {},
                                     description: action.description || ''
                                 };
-                                
+
                                 this.currentTest.steps.push(step);
                             }
-                            
+
                             this.isRecording = false;
                             this.recordingSessionId = null;
-                            
+
                             if (actions.length > 0) {
                                 alert(`✅ Recording stopped!\n\nAdded ${actions.length} step(s) to your test.\n\nNext steps:\n1. Give your test a name\n2. (Optional) Select a workspace\n3. Click 'Save Test'`);
                             } else {
@@ -5798,10 +5880,10 @@ Would you like to enter a selector manually?
                 },
                 async pollRecordedActions() {
                     if (!this.isRecording || !this.recordingSessionId) return;
-                    
+
                     try {
                         const response = await axios.get(`/api/recorder/status/${this.recordingSessionId}`);
-                        
+
                         // Continue polling if still recording
                         if (this.isRecording) {
                             setTimeout(() => this.pollRecordedActions(), 2000);
@@ -5838,7 +5920,7 @@ Would you like to enter a selector manually?
                         if (this.resultsPage > 1 && !this.selectedWorkspace) {
                             // Only reset if we're not filtering
                         }
-                        
+
                         const params = {
                             page: this.resultsPage,
                             per_page: this.resultsPerPage
@@ -5846,11 +5928,11 @@ Would you like to enter a selector manually?
                         if (this.selectedWorkspace) {
                             params.workspace = this.selectedWorkspace;
                         }
-                        
+
                         console.log('Loading results with params:', params);
                         const response = await axios.get('/api/results', { params });
                         console.log('Results response:', response.data);
-                        
+
                         // Normalize results to ensure consistent status values
                         this.results = response.data.results.map(result => {
                             const originalStatus = (result.status || 'unknown').toString();
@@ -5863,7 +5945,7 @@ Would you like to enter a selector manually?
                                 statusClass: statusForClass // Use this for CSS classes
                             };
                         });
-                        
+
                         // Update pagination info
                         if (response.data.pagination) {
                             this.resultsTotalPages = response.data.pagination.total_pages || 1;
@@ -5873,17 +5955,17 @@ Would you like to enter a selector manually?
                                 this.resultsPage = this.resultsTotalPages;
                             }
                         }
-                        
+
                         // Update available workspaces (always get all, not filtered)
                         if (response.data.workspaces) {
                             this.availableWorkspaces = response.data.workspaces;
                         }
-                        
+
                         // Update workspace counts (always get all, not filtered)
                         if (response.data.workspace_counts) {
                             this.workspaceCounts = response.data.workspace_counts;
                         }
-                        
+
                         console.log('Loaded results:', this.results.length, 'Total:', this.resultsTotal, 'Pages:', this.resultsTotalPages);
                     } catch (error) {
                         console.error('Failed to load results:', error);
@@ -5915,7 +5997,7 @@ Would you like to enter a selector manually?
                     const statusRaw = (testInfo?.status || data.status || 'unknown').toString().toLowerCase();
                     const started = data.started || data.start_time || data.timestamp || testInfo?.started || null;
                     const finished = data.finished || data.end_time || data.timestamp || testInfo?.finished || null;
-                    
+
                     let outputLines = [];
                     if (Array.isArray(data.output)) {
                         outputLines = data.output;
@@ -5930,7 +6012,7 @@ Would you like to enter a selector manually?
                     if (outputLines.length === 0) {
                         outputLines = ['No execution log available.'];
                     }
-                    
+
                     return {
                         source_filename: filename,
                         raw: data,
@@ -5947,32 +6029,71 @@ Would you like to enter a selector manually?
                 },
                 async viewResult(filename) {
                     try {
+                        console.log('Viewing result:', filename);
                         // Don't add to history if we're already in results view
                         if (this.view !== 'results') {
                             this.viewHistory.push(this.view);
                         }
                         const response = await axios.get(`/api/results/${filename}`);
+                        console.log('Result data received:', response.data);
                         this.currentResult = this.normalizeResultData(response.data, filename);
+                        console.log('Normalized result:', this.currentResult);
+                        // Set flag (Vue 3 reactivity is automatic)
                         this.showResultModal = true;
+
+                        // Force Vue to update multiple times to ensure render
+                        await this.$nextTick();
+                        this.$forceUpdate();
+                        await this.$nextTick();
+                        this.$forceUpdate();
+
+                        console.log('Result modal should be visible now, showResultModal:', this.showResultModal);
+                        console.log('Vue instance:', this.$);
+
+                        // Verify modal is in DOM with multiple retries, create manually if Vue fails
+                        const checkModal = (attempt = 0) => {
+                            let modal = document.querySelector('.modal-overlay[data-modal-type="result-detail"]');
+                            if (modal) {
+                                console.log('Result modal in DOM:', 'YES (attempt ' + attempt + ')');
+                                modal.style.display = 'flex';
+                                modal.style.zIndex = '99999';
+                                modal.style.position = 'fixed';
+                                modal.style.top = '0';
+                                modal.style.left = '0';
+                                modal.style.right = '0';
+                                modal.style.bottom = '0';
+                            } else if (attempt < 5) {
+                                console.log('Result modal not found, retrying... (attempt ' + attempt + ')');
+                                this.$forceUpdate();
+                                setTimeout(() => checkModal(attempt + 1), 50);
+                            } else {
+                                console.warn('Result modal still not in DOM after 5 attempts, creating manually');
+                                // Create modal manually as fallback
+                                this.createResultModalManually();
+                            }
+                        };
+
+                        this.$nextTick(() => checkModal(0));
                     } catch (error) {
                         console.error('Failed to load result:', error);
+                        console.error('Error details:', error.response?.data);
                         this.currentResult = null;
-                        alert('Failed to load result details');
+                        alert('Failed to load result details: ' + (error.response?.data?.detail || error.message));
                     }
                 },
                 closeResultModal() {
                     console.log('closeResultModal called');
                     this.showResultModal = false;
                     this.currentResult = null;
-                    
-                    // Force remove from DOM
+
+                    // Force remove from DOM (both Vue-rendered and manually created)
                     const overlays = document.querySelectorAll('.modal-overlay[data-modal-type="result-detail"]');
                     console.log(`closeResultModal: Found ${overlays.length} result detail overlays, removing all`);
                     overlays.forEach(overlay => {
                         overlay.style.display = 'none';
                         overlay.remove();
                     });
-                    
+
                     // Backup removal after next tick
                     this.$nextTick(() => {
                         const remainingOverlays = document.querySelectorAll('.modal-overlay[data-modal-type="result-detail"]');
@@ -5987,7 +6108,7 @@ Would you like to enter a selector manually?
                 },
                 async deleteResult(filename) {
                     if (!confirm('Delete this test result?')) return;
-                    
+
                     try {
                         await axios.delete(`/api/results/${filename}`);
                         await this.loadResults();
@@ -6096,16 +6217,16 @@ Would you like to enter a selector manually?
                         // Show loading indicator
                         const loadingMsg = `Generating HTML report from ${filename}...`;
                         console.log(loadingMsg);
-                        
+
                         const response = await axios.post(`/api/results/${filename}/generate-report`, {}, {
                             responseType: 'blob'
                         });
-                        
+
                         // Create download link for the generated HTML report
                         const url = window.URL.createObjectURL(new Blob([response.data]));
                         const link = document.createElement('a');
                         link.href = url;
-                        
+
                         // Extract filename from response headers or generate one
                         const contentDisposition = response.headers['content-disposition'];
                         let reportFilename = filename.replace('.json', '_report.html');
@@ -6115,13 +6236,13 @@ Would you like to enter a selector manually?
                                 reportFilename = filenameMatch[1];
                             }
                         }
-                        
+
                         link.setAttribute('download', reportFilename);
                         document.body.appendChild(link);
                         link.click();
                         document.body.removeChild(link);
                         window.URL.revokeObjectURL(url);
-                        
+
                         // Refresh reports list to show the new HTML report
                         if (this.currentTestId) {
                             await this.loadTestReports(this.currentTestId);
@@ -6137,7 +6258,7 @@ Would you like to enter a selector manually?
                 },
                 async deleteReport(filename) {
                     if (!confirm('Delete this test report? This action cannot be undone.')) return;
-                    
+
                     try {
                         await axios.delete(`/api/results/${filename}`);
                         await this.loadTestReports(this.currentTestId);
@@ -6176,14 +6297,14 @@ Would you like to enter a selector manually?
                             alert('Please enter a suite name');
                             return;
                         }
-                        
+
                         const suiteData = {
                             name: this.currentSuite.name,
                             description: this.currentSuite.description || '',
                             workspace: this.currentSuite.workspace || null,
                             tests: this.currentSuite.tests || []
                         };
-                        
+
                         await axios.post('/api/test-suites', suiteData);
                         this.showCreateSuiteModal = false;
                         this.resetCurrentSuite();
@@ -6204,7 +6325,7 @@ Would you like to enter a selector manually?
                             alert('Please enter a suite name');
                             return;
                         }
-                        
+
                         await axios.put(`/api/test-suites/${this.currentSuite.id}`, this.currentSuite);
                         this.showEditSuiteModal = false;
                         this.resetCurrentSuite();
@@ -6216,7 +6337,7 @@ Would you like to enter a selector manually?
                 },
                 async deleteTestSuite(suiteId) {
                     if (!confirm('Are you sure you want to delete this test suite?')) return;
-                    
+
                     try {
                         await axios.delete(`/api/test-suites/${suiteId}`);
                         await this.loadTestSuites();
@@ -6241,13 +6362,13 @@ Would you like to enter a selector manually?
                 },
                 closeAddTestModal() {
                     console.log('closeAddTestModal called, current value:', this.showAddTestModal);
-                    
+
                     // Set all modal states to false
                     this.showAddTestModal = false;
                     this.showCreateSuiteModal = false;
                     this.showEditSuiteModal = false;
                     this.showExecuteSuiteModal = false;
-                    
+
                     // Immediately force remove all overlays
                     const overlays = document.querySelectorAll('.modal-overlay');
                     console.log(`closeAddTestModal: Found ${overlays.length} overlays, removing all`);
@@ -6255,7 +6376,7 @@ Would you like to enter a selector manually?
                         overlay.style.display = 'none';
                         overlay.remove();
                     });
-                    
+
                     // Backup removal after next tick
                     this.$nextTick(() => {
                         const remainingOverlays = document.querySelectorAll('.modal-overlay');
@@ -6265,7 +6386,7 @@ Would you like to enter a selector manually?
                         }
                         this.$forceUpdate();
                     });
-                    
+
                     console.log('All modals closed and removed');
                 },
                 closeAllModals() {
@@ -6275,7 +6396,7 @@ Would you like to enter a selector manually?
                     this.showEditSuiteModal = false;
                     this.showExecuteSuiteModal = false;
                     this.showSuiteDetailView = false;
-                    
+
                     // Immediately force remove all overlays
                     const overlays = document.querySelectorAll('.modal-overlay');
                     console.log(`closeAllModals: Found ${overlays.length} overlays, removing all`);
@@ -6283,7 +6404,7 @@ Would you like to enter a selector manually?
                         overlay.style.display = 'none';
                         overlay.remove();
                     });
-                    
+
                     // Backup removal after next tick
                     this.$nextTick(() => {
                         const remainingOverlays = document.querySelectorAll('.modal-overlay');
@@ -6292,7 +6413,7 @@ Would you like to enter a selector manually?
                         }
                         this.$forceUpdate();
                     });
-                    
+
                     console.log('All modals closed via closeAllModals');
                 },
                 async executeTestSuite(suite) {
@@ -6313,7 +6434,7 @@ Would you like to enter a selector manually?
                             max_tests: this.suiteExecutionConfig.max_tests || null,
                             headless: this.suiteExecutionConfig.headless
                         };
-                        
+
                         const response = await axios.post(`/api/test-suites/${this.currentSuite.id}/execute`, request);
                         this.showExecuteSuiteModal = false;
                         alert(`Test suite execution started: ${response.data.message}`);
@@ -6338,11 +6459,11 @@ Would you like to enter a selector manually?
                     // Use selectedSuite if in detail view, otherwise currentSuite
                     const suite = this.selectedSuite || this.currentSuite;
                     if (!suite) return;
-                    
+
                     if (!suite.tests) {
                         suite.tests = [];
                     }
-                    
+
                     const index = suite.tests.findIndex(t => t.test_id === testId);
                     if (index >= 0) {
                         // Test already in suite - if in detail view, remove it; if in edit modal, toggle enabled
@@ -6360,7 +6481,7 @@ Would you like to enter a selector manually?
                         }
                     } else {
                         // Add new test to suite
-                        const maxOrder = suite.tests.length > 0 
+                        const maxOrder = suite.tests.length > 0
                             ? Math.max(...suite.tests.map(t => t.order || 0))
                             : -1;
                         suite.tests.push({
@@ -6414,19 +6535,19 @@ Would you like to enter a selector manually?
                         const last7Days = [];
                         const passedData = [];
                         const failedData = [];
-                        
+
                         for (let i = 6; i >= 0; i--) {
                             const date = new Date();
                             date.setDate(date.getDate() - i);
                             const dateStr = date.toISOString().split('T')[0];
                             last7Days.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-                            
+
                             const dayResults = recentResults.filter(r => {
                                 if (!r.timestamp) return false;
                                 const resultDate = new Date(r.timestamp).toISOString().split('T')[0];
                                 return resultDate === dateStr;
                             });
-                            
+
                             passedData.push(dayResults.filter(r => r.status === 'passed').length);
                             failedData.push(dayResults.filter(r => r.status === 'failed').length);
                         }
@@ -6525,7 +6646,7 @@ Would you like to enter a selector manually?
                     this.loadResults().then(() => {
                         // Try to find and view the result
                         const matchingResult = this.results.find(r => {
-                            return r.test_id === result.test_name || 
+                            return r.test_id === result.test_name ||
                                    r.test_path === result.test_name ||
                                    r.filename && r.filename.includes(result.test_name);
                         });
@@ -6538,7 +6659,7 @@ Would you like to enter a selector manually?
                     if (this.viewHistory.length > 0) {
                         const previousView = this.viewHistory.pop();
                         this.view = previousView;
-                        
+
                         // Reload data for the view
                         if (previousView === 'dashboard') {
                             this.loadDashboard();
@@ -6571,7 +6692,7 @@ Would you like to enter a selector manually?
                         }
                     }
                     this.view = newView;
-                    
+
                     // Update router
                     const routeMap = {
                         'dashboard': '/',
@@ -6581,7 +6702,7 @@ Would you like to enter a selector manually?
                         'test-suites': '/suites',
                         'suite-detail': params.id ? `/suites/${params.id}` : '/suites'
                     };
-                    
+
                     if (routeMap[newView]) {
                         this.$router.push(routeMap[newView]).catch(err => {
                             // Ignore navigation duplicated errors
@@ -6590,7 +6711,7 @@ Would you like to enter a selector manually?
                             }
                         });
                     }
-                    
+
                     // Save view to localStorage
                     this.saveViewState();
                 },
@@ -6614,11 +6735,11 @@ Would you like to enter a selector manually?
                         this.filteredActions = [];
                         return;
                     }
-                    
+
                     const query = this.actionSearchQuery.toLowerCase();
                     const filtered = {};
                     let allFiltered = [];
-                    
+
                     for (const [category, actions] of Object.entries(this.actionsByCategory)) {
                         const matchingActions = actions.filter(action => {
                             return action.label.toLowerCase().includes(query) ||
@@ -6626,26 +6747,26 @@ Would you like to enter a selector manually?
                                    action.id.toLowerCase().includes(query) ||
                                    category.toLowerCase().includes(query);
                         });
-                        
+
                         if (matchingActions.length > 0) {
                             filtered[category] = matchingActions;
                             allFiltered = allFiltered.concat(matchingActions);
                         }
                     }
-                    
+
                     this.filteredActionsByCategory = filtered;
                     this.filteredActions = allFiltered;
                 },
                 connectWebSocket() {
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const wsUrl = `${protocol}//${window.location.host}/ws`;
-                    
+
                     this.ws = new WebSocket(wsUrl);
-                    
+
                     this.ws.onopen = () => {
                         console.log('WebSocket connected');
                     };
-                    
+
                     this.ws.onmessage = (event) => {
                         try {
                             const message = JSON.parse(event.data);
@@ -6654,49 +6775,219 @@ Would you like to enter a selector manually?
                             console.error('Failed to parse WebSocket message:', error);
                         }
                     };
-                    
+
                     this.ws.onerror = (error) => {
                         console.error('WebSocket error:', error);
                     };
-                    
+
                     this.ws.onclose = () => {
                         console.log('WebSocket disconnected, reconnecting...');
                         setTimeout(() => this.connectWebSocket(), 3000);
                     };
                 },
                 handleWebSocketMessage(message) {
-                    if (!this.showProgressModal) return;
-                    
+                    console.log('WebSocket message received:', message);
+
+                    // Handle ping/pong messages
+                    if (message.type === 'ping' || message.type === 'pong') {
+                        return;
+                    }
+
+                    // Check if this message is for the current test execution
+                    if (message.test_id) {
+                        if (!this.executionProgress) {
+                            console.log('No executionProgress initialized, ignoring message');
+                            return;
+                        }
+                        if (this.executionProgress.testId !== message.test_id) {
+                            console.log(`Ignoring message for different test: ${message.test_id} (current: ${this.executionProgress.testId})`);
+                            return;
+                        }
+                    }
+
+                    // Show progress modal if not already shown
+                    if (!this.showProgressModal && this.executionProgress) {
+                        console.log('Progress modal not shown, showing it now');
+                        this.showProgressModal = true;
+                    }
+
                     switch (message.type) {
                         case 'test_output':
+                            if (!this.executionProgress) {
+                                console.warn('executionProgress not initialized, initializing now');
+                                // Initialize executionProgress if it doesn't exist
+                                this.executionProgress = {
+                                    testId: message.test_id || null,
+                                    testName: 'Running Test',
+                                    status: 'running',
+                                    currentStep: 0,
+                                    totalSteps: 0,
+                                    percentage: 0,
+                                    steps: [],
+                                    output: []
+                                };
+                            }
+
+                            // Ensure progress modal is shown
+                            if (!this.showProgressModal) {
+                                console.log('Showing progress modal for test output');
+                                this.showProgressModal = true;
+                                // Force Vue to render the modal
+                                this.$nextTick(() => {
+                                    this.$forceUpdate();
+                                    // Verify and ensure modal is visible
+                                    const modal = document.querySelector('.modal-overlay');
+                                    if (modal) {
+                                        modal.style.display = 'flex';
+                                        modal.style.zIndex = '99999';
+                                    }
+                                });
+                            } else {
+                                // Ensure modal is still visible even if already shown
+                                this.$nextTick(() => {
+                                    const modal = document.querySelector('.modal-overlay');
+                                    if (modal) {
+                                        modal.style.display = 'flex';
+                                        modal.style.zIndex = '99999';
+                                    }
+                                });
+                            }
+
+                            // Ensure output array exists
+                            if (!this.executionProgress.output) {
+                                this.executionProgress.output = [];
+                            }
+
                             this.executionProgress.output.push(message.line);
+                            console.log('Test output:', message.line);
+
+                            // Force Vue to update
+                            this.$forceUpdate();
+
                             this.$nextTick(() => {
                                 const logEl = this.$refs.liveLog;
                                 if (logEl) {
                                     logEl.scrollTop = logEl.scrollHeight;
                                 }
                             });
-                            
+
                             // Parse output for step progress
                             this.parseStepProgress(message.line);
                             break;
-                            
+
                         case 'test_completed':
-                            if (message.test_id === this.executionProgress.testId) {
-                                this.executionProgress.status = message.status;
-                                this.executionProgress.percentage = 100;
-                                this.executionProgress.currentStep = this.executionProgress.totalSteps;
-                                // Mark all remaining steps as completed or failed
-                                this.executionProgress.steps.forEach(step => {
-                                    if (step.status === 'pending' || step.status === 'running') {
-                                        step.status = message.status === 'completed' ? 'completed' : 'failed';
+                            if (!this.executionProgress || this.executionProgress.testId === message.test_id) {
+                                console.log('Test completed via WebSocket:', message.status);
+
+                                // Initialize executionProgress if it doesn't exist
+                                if (!this.executionProgress) {
+                                    this.executionProgress = {
+                                        testId: message.test_id,
+                                        testName: 'Test',
+                                        status: message.status,
+                                        currentStep: 0,
+                                        totalSteps: 0,
+                                        percentage: 100,
+                                        steps: [],
+                                        output: []
+                                    };
+                                } else {
+                                    this.executionProgress.status = message.status;
+                                    this.executionProgress.percentage = 100;
+                                    this.executionProgress.currentStep = this.executionProgress.totalSteps;
+                                    // Mark all remaining steps as completed or failed
+                                    if (this.executionProgress.steps) {
+                                        this.executionProgress.steps.forEach(step => {
+                                            if (step.status === 'pending' || step.status === 'running') {
+                                                step.status = message.status === 'completed' ? 'completed' : 'failed';
+                                            }
+                                        });
+                                    }
+                                }
+
+                                // Mark test as completed in polling context
+                                if (this._pollingContext && this._pollingContext[message.test_id]) {
+                                    this._pollingContext[message.test_id].testCompleted = true;
+                                }
+
+                                // Stop polling since test is completed
+                                if (this.executionPollInterval) {
+                                    clearInterval(this.executionPollInterval);
+                                    this.executionPollInterval = null;
+                                    console.log('Stopped execution polling - test completed');
+                                }
+
+                                // Ensure progress modal is shown
+                                if (!this.showProgressModal) {
+                                    this.showProgressModal = true;
+                                }
+
+                                // Force update
+                                this.$forceUpdate();
+
+                                // Ensure modal is visible in DOM
+                                this.$nextTick(() => {
+                                    const modal = document.querySelector('.modal-overlay');
+                                    if (modal) {
+                                        modal.style.display = 'flex';
+                                        modal.style.zIndex = '99999';
                                     }
                                 });
+
                                 // Reload results
                                 this.loadResults();
                             }
                             break;
-                            
+
+                        case 'test_error':
+                            // Initialize executionProgress if it doesn't exist
+                            if (!this.executionProgress) {
+                                this.executionProgress = {
+                                    testId: message.test_id || null,
+                                    testName: 'Test',
+                                    status: 'error',
+                                    currentStep: 0,
+                                    totalSteps: 0,
+                                    percentage: 0,
+                                    steps: [],
+                                    output: []
+                                };
+                            }
+
+                            if (!this.executionProgress.testId || this.executionProgress.testId === message.test_id) {
+                                console.error('Test error via WebSocket:', message.error);
+                                this.executionProgress.testId = message.test_id;
+                                this.executionProgress.status = 'error';
+                                if (!this.executionProgress.output) {
+                                    this.executionProgress.output = [];
+                                }
+                                this.executionProgress.output.push(`❌ Error: ${message.error}`);
+
+                                // Mark test as completed in polling context
+                                if (this._pollingContext && this._pollingContext[message.test_id]) {
+                                    this._pollingContext[message.test_id].testCompleted = true;
+                                }
+
+                                // Stop polling since test errored
+                                if (this.executionPollInterval) {
+                                    clearInterval(this.executionPollInterval);
+                                    this.executionPollInterval = null;
+                                    console.log('Stopped execution polling - test errored');
+                                }
+
+                                // Ensure progress modal is shown
+                                if (!this.showProgressModal) {
+                                    this.showProgressModal = true;
+                                }
+
+                                // Force update
+                                this.$forceUpdate();
+
+                                // Reload results
+                                this.loadResults();
+                            }
+                            break;
+
                         case 'test_failed':
                             if (message.test_id === this.executionProgress.testId) {
                                 this.executionProgress.status = 'failed';
@@ -6708,6 +6999,103 @@ Would you like to enter a selector manually?
                             break;
                     }
                 },
+                startExecutionPolling(testId) {
+                    // Poll for execution status every 2 seconds as fallback
+                    if (this.executionPollInterval) {
+                        clearInterval(this.executionPollInterval);
+                        this.executionPollInterval = null;
+                    }
+
+                    console.log('Starting execution polling for test:', testId);
+
+                    let pollCount = 0;
+                    const maxPolls = 300; // Stop after 10 minutes (300 * 2 seconds)
+                    let testCompleted = false; // Flag to track if test completed via WebSocket
+
+                    this.executionPollInterval = setInterval(async () => {
+                        // Check if test was already completed via WebSocket
+                        if (testCompleted || (this.executionProgress && (this.executionProgress.status === 'completed' || this.executionProgress.status === 'failed' || this.executionProgress.status === 'error'))) {
+                            console.log('Stopped polling - test already completed');
+                            clearInterval(this.executionPollInterval);
+                            this.executionPollInterval = null;
+                            return;
+                        }
+
+                        pollCount++;
+
+                        // Stop polling if we've exceeded max polls
+                        if (pollCount > maxPolls) {
+                            console.log('Stopped polling - exceeded max polls');
+                            clearInterval(this.executionPollInterval);
+                            this.executionPollInterval = null;
+                            return;
+                        }
+
+                        try {
+                            const response = await axios.get(`/api/tests/execution/${testId}`);
+                            const execution = response.data;
+
+                            // Only log every 10th poll to reduce console spam
+                            if (pollCount % 10 === 0) {
+                                console.log('Polling execution status:', execution.status);
+                            }
+
+                            if (execution.status === 'completed' || execution.status === 'failed' || execution.status === 'error') {
+                                // Test finished, stop polling
+                                testCompleted = true;
+                                clearInterval(this.executionPollInterval);
+                                this.executionPollInterval = null;
+                                console.log('Stopped polling - test finished with status:', execution.status);
+
+                                // Update progress
+                                if (this.executionProgress) {
+                                    this.executionProgress.status = execution.status;
+                                    this.executionProgress.output = execution.output || [];
+
+                                    // Reload results
+                                    this.loadResults();
+                                }
+                            } else if (execution.output) {
+                                // Update output
+                                if (this.executionProgress) {
+                                    this.executionProgress.output = execution.output;
+                                }
+                            }
+                        } catch (error) {
+                            // If 404, the test might have completed and been cleaned up
+                            // Check if we received a test_completed message via WebSocket
+                            if (error.response?.status === 404) {
+                                // Check if test was completed via WebSocket
+                                if (testCompleted || (this.executionProgress && (this.executionProgress.status === 'completed' || this.executionProgress.status === 'failed'))) {
+                                    // Test already completed, stop polling
+                                    clearInterval(this.executionPollInterval);
+                                    this.executionPollInterval = null;
+                                    return;
+                                }
+
+                                // Only log every 10th 404 to reduce spam
+                                if (pollCount % 10 === 0) {
+                                    console.log('Execution record not found (404) - test may have completed. Poll count:', pollCount);
+                                }
+
+                                // If we've been polling for a while and still getting 404, stop
+                                if (pollCount > 30) {
+                                    console.log('Stopped polling - execution record not found after 1 minute');
+                                    clearInterval(this.executionPollInterval);
+                                    this.executionPollInterval = null;
+                                }
+                            } else {
+                                console.error('Error polling execution status:', error);
+                            }
+                        }
+                    }, 2000);
+
+                    // Store the testId and completion flag in the polling context
+                    if (!this._pollingContext) {
+                        this._pollingContext = {};
+                    }
+                    this._pollingContext[testId] = { testCompleted: false };
+                },
                 parseStepProgress(line) {
                     // Parse output for step indicators
                     // Common patterns: "Running step X", "Step X:", "[X/Y]", etc.
@@ -6717,7 +7105,7 @@ Would you like to enter a selector manually?
                         /Running.*step (\d+)/i,
                         /Executing.*step (\d+)/i
                     ];
-                    
+
                     for (const pattern of stepPatterns) {
                         const match = line.match(pattern);
                         if (match) {
@@ -6735,7 +7123,7 @@ Would you like to enter a selector manually?
                             break;
                         }
                     }
-                    
+
                     // Check for error indicators
                     if (line.toLowerCase().includes('error') || line.toLowerCase().includes('failed')) {
                         if (this.executionProgress.currentStep > 0) {
@@ -6758,22 +7146,31 @@ Would you like to enter a selector manually?
                 },
                 closeProgressModal() {
                     this.showProgressModal = false;
+                    // Remove manually created modal if it exists
+                    const overlays = document.querySelectorAll('.modal-overlay:not([data-modal-type])');
+                    overlays.forEach(overlay => {
+                        // Check if it's a progress modal by looking for "Test Execution" in title
+                        const title = overlay.querySelector('.modal-title');
+                        if (title && title.textContent.includes('Test Execution')) {
+                            overlay.remove();
+                        }
+                    });
                 },
                 async copyLogOutput(event) {
                     const logText = this.executionProgress.output.join('\n');
                     const btn = event.target.closest('button');
                     const originalHTML = btn.innerHTML;
-                    
+
                     try {
                         // Try modern clipboard API first
                         if (navigator.clipboard && window.isSecureContext) {
                             await navigator.clipboard.writeText(logText);
-                            
+
                             // Show success feedback
                             btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
                             btn.classList.add('btn-success');
                             btn.classList.remove('btn-secondary');
-                            
+
                             setTimeout(() => {
                                 btn.innerHTML = originalHTML;
                                 btn.classList.add('btn-secondary');
@@ -6787,16 +7184,16 @@ Would you like to enter a selector manually?
                             const selection = window.getSelection();
                             selection.removeAllRanges();
                             selection.addRange(range);
-                            
+
                             // Try execCommand
                             const successful = document.execCommand('copy');
                             selection.removeAllRanges();
-                            
+
                             if (successful) {
                                 btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
                                 btn.classList.add('btn-success');
                                 btn.classList.remove('btn-secondary');
-                                
+
                                 setTimeout(() => {
                                     btn.innerHTML = originalHTML;
                                     btn.classList.add('btn-secondary');
@@ -6824,16 +7221,16 @@ Would you like to enter a selector manually?
                         document.body.appendChild(textArea);
                         textArea.focus();
                         textArea.select();
-                        
+
                         try {
                             const successful = document.execCommand('copy');
                             document.body.removeChild(textArea);
-                            
+
                             if (successful) {
                                 btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
                                 btn.classList.add('btn-success');
                                 btn.classList.remove('btn-secondary');
-                                
+
                                 setTimeout(() => {
                                     btn.innerHTML = originalHTML;
                                     btn.classList.add('btn-secondary');
@@ -6847,6 +7244,173 @@ Would you like to enter a selector manually?
                             alert('Could not copy. Please select the text manually and press Ctrl+C (or Cmd+C on Mac)');
                         }
                     }
+                },
+                createProgressModalManually() {
+                    // Remove any existing progress modal
+                    const existing = document.querySelector('.modal-overlay:not([data-modal-type])');
+                    if (existing) existing.remove();
+
+                    // Create modal overlay
+                    const overlay = document.createElement('div');
+                    overlay.className = 'modal-overlay';
+                    overlay.style.cssText = 'z-index: 99999 !important; display: flex !important; position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;';
+                    overlay.onclick = (e) => {
+                        if (e.target === overlay) this.closeProgressModal();
+                    };
+
+                    // Create modal content
+                    const modal = document.createElement('div');
+                    modal.className = 'modal modal-large';
+                    modal.style.cssText = 'z-index: 100000 !important; pointer-events: auto !important;';
+                    modal.onclick = (e) => e.stopPropagation();
+
+                    const testName = this.executionProgress && this.executionProgress.testName ? this.executionProgress.testName : 'Running...';
+                    const status = this.executionProgress && this.executionProgress.status ? this.executionProgress.status : 'running';
+                    const percentage = this.executionProgress && this.executionProgress.percentage ? this.executionProgress.percentage : 0;
+                    const currentStep = this.executionProgress && this.executionProgress.currentStep ? this.executionProgress.currentStep : 0;
+                    const totalSteps = this.executionProgress && this.executionProgress.totalSteps ? this.executionProgress.totalSteps : 0;
+                    const output = this.executionProgress && this.executionProgress.output ? this.executionProgress.output.join('\n') : 'Waiting for output...';
+
+                    modal.innerHTML = `
+                        <div class="modal-header">
+                            <h3 class="modal-title"><i class="fas fa-play-circle"></i> Test Execution - ${testName}</h3>
+                            <button class="btn btn-icon btn-secondary" onclick="window.vueApp.closeProgressModal()">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="progress-container">
+                                <div class="progress-bar-wrapper">
+                                    <div class="progress-bar" style="width: ${percentage}%">${percentage}%</div>
+                                </div>
+                                <div class="progress-info">
+                                    <span><span class="status-badge status-${status}">${status.toUpperCase()}</span></span>
+                                    <span>${currentStep} / ${totalSteps} steps</span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <div class="log-controls">
+                                    <label class="form-label"><i class="fas fa-terminal"></i> Live Output</label>
+                                    <div>
+                                        <span class="log-stats">${this.executionProgress && this.executionProgress.output ? this.executionProgress.output.length : 0} lines</span>
+                                        <button class="btn btn-sm btn-secondary" onclick="navigator.clipboard.writeText(window.vueApp.executionProgress.output.join('\\n'))">
+                                            <i class="fas fa-copy"></i> Copy
+                                        </button>
+                                    </div>
+                                </div>
+                                <pre class="live-log" style="max-height: 400px; overflow-y: auto; background: var(--bg-secondary); padding: 1rem; border-radius: 0.5rem; font-family: monospace; font-size: 0.875rem;">${output}</pre>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn ${status === 'completed' || status === 'failed' ? 'btn-primary' : 'btn-secondary'}" onclick="window.vueApp.closeProgressModal()">
+                                <i class="fas fa-${status === 'completed' || status === 'failed' ? 'check' : 'times'}"></i> ${status === 'completed' || status === 'failed' ? 'Done' : 'Run in Background'}
+                            </button>
+                        </div>
+                    `;
+
+                    overlay.appendChild(modal);
+                    document.body.appendChild(overlay);
+
+                    // Update output periodically
+                    const updateInterval = setInterval(() => {
+                        if (!this.showProgressModal || !document.body.contains(overlay)) {
+                            clearInterval(updateInterval);
+                            return;
+                        }
+                        const logEl = overlay.querySelector('.live-log');
+                        if (logEl && this.executionProgress && this.executionProgress.output) {
+                            logEl.textContent = this.executionProgress.output.join('\n');
+                            logEl.scrollTop = logEl.scrollHeight;
+                        }
+                        const progressBar = overlay.querySelector('.progress-bar');
+                        if (progressBar && this.executionProgress) {
+                            const pct = this.executionProgress.percentage || 0;
+                            progressBar.style.width = pct + '%';
+                            progressBar.textContent = pct + '%';
+                        }
+                    }, 500);
+
+                    console.log('Progress modal created manually');
+                },
+                createResultModalManually() {
+                    // Remove any existing result modal
+                    const existing = document.querySelector('.modal-overlay[data-modal-type="result-detail"]');
+                    if (existing) existing.remove();
+
+                    if (!this.currentResult) {
+                        console.error('Cannot create result modal: currentResult is null');
+                        return;
+                    }
+
+                    // Create modal overlay
+                    const overlay = document.createElement('div');
+                    overlay.className = 'modal-overlay';
+                    overlay.setAttribute('data-modal-type', 'result-detail');
+                    overlay.style.cssText = 'z-index: 99999 !important; display: flex !important; position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;';
+                    overlay.onclick = (e) => {
+                        if (e.target === overlay) this.closeResultModal();
+                    };
+                    overlay.onkeydown = (e) => {
+                        if (e.key === 'Escape') this.closeResultModal();
+                    };
+
+                    // Create modal content
+                    const modal = document.createElement('div');
+                    modal.className = 'modal modal-large';
+                    modal.style.cssText = 'z-index: 100000 !important; pointer-events: auto !important;';
+                    modal.onclick = (e) => e.stopPropagation();
+
+                    const result = this.currentResult;
+                    const output = result.output && result.output.length > 0 ? result.output.join('\n') : 'No output available';
+
+                    modal.innerHTML = `
+                        <div class="modal-header">
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <button class="btn btn-icon btn-secondary" onclick="window.vueApp.closeResultModal()" type="button">
+                                    <i class="fas fa-arrow-left"></i>
+                                </button>
+                                <h3 class="modal-title">Test Result Details</h3>
+                            </div>
+                            <button class="btn btn-icon btn-secondary" onclick="window.vueApp.closeResultModal()" type="button">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label class="form-label">Test Path</label>
+                                <div class="result-detail">${result.test_path || 'N/A'}</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Status</label>
+                                <div>
+                                    <span class="status-badge status-${(result.status || 'unknown').toLowerCase()}">
+                                        ${(result.status_display || result.status || 'unknown').toUpperCase()}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Return Code</label>
+                                <div class="result-detail">${result.return_code !== undefined ? result.return_code : 'N/A'}</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Execution Output</label>
+                                <pre class="live-log" style="max-height: 400px; overflow-y: auto; background: var(--bg-secondary); padding: 1rem; border-radius: 0.5rem; font-family: monospace; font-size: 0.875rem;">${output}</pre>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="window.vueApp.closeResultModal()">
+                                <i class="fas fa-arrow-left"></i> Back
+                            </button>
+                            <button class="btn btn-success" ${!result.source_filename ? 'disabled' : ''} onclick="if(window.vueApp.currentResult && window.vueApp.currentResult.source_filename) window.vueApp.generateReportFromJson(window.vueApp.currentResult.source_filename)">
+                                <i class="fas fa-file-code"></i> Generate Report
+                            </button>
+                        </div>
+                    `;
+
+                    overlay.appendChild(modal);
+                    document.body.appendChild(overlay);
+
+                    console.log('Result modal created manually');
                 }
             }
         });
@@ -6855,11 +7419,11 @@ Would you like to enter a selector manually?
         if (router) {
             app.use(router);
         }
-        
+
         // Mount the app and store reference globally for debugging
         const mountedApp = app.mount('#app');
         window.vueApp = mountedApp; // Store for easy debugging
-        
+
         // Add global method to close all modals (emergency function)
         window.closeAllModals = function() {
             if (mountedApp) {
@@ -6868,7 +7432,7 @@ Would you like to enter a selector manually?
                 mountedApp.showEditSuiteModal = false;
                 mountedApp.showExecuteSuiteModal = false;
                 mountedApp.showSuiteDetailView = false;
-                
+
                 // Force remove all modal overlays from DOM
                 setTimeout(() => {
                     const overlays = document.querySelectorAll('.modal-overlay');
@@ -6878,7 +7442,7 @@ Would you like to enter a selector manually?
                         overlay.remove();
                     });
                 }, 100);
-                
+
                 console.log('✅ All modals closed via global function');
                 return true;
             } else {
@@ -6886,7 +7450,7 @@ Would you like to enter a selector manually?
                 return false;
             }
         };
-        
+
         // Emergency DOM cleanup function
         window.forceRemoveAllModals = function() {
             const overlays = document.querySelectorAll('.modal-overlay');
@@ -6897,10 +7461,10 @@ Would you like to enter a selector manually?
             });
             console.log('✅ All modal overlays force-removed');
         };
-        
+
         console.log('✅ Vue app mounted and available at window.vueApp');
         console.log('✅ Global function available: window.closeAllModals()');
-        
+
         // Add direct DOM event listeners as fallback for modal close buttons
         document.addEventListener('click', function(e) {
             // Check if clicked element is a modal close button
@@ -6932,7 +7496,7 @@ Would you like to enter a selector manually?
                 }
             }
         });
-        
+
         // ESC key handler
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape' || e.keyCode === 27) {

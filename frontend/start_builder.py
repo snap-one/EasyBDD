@@ -3,13 +3,14 @@
 Start the Test Builder Web Application
 """
 
-import sys
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
 
 def main():
     print("🚀 Starting Easy BDD Test Builder...")
@@ -21,24 +22,33 @@ def main():
     print("Press Ctrl+C to stop the server")
     print("=" * 60)
     print()
-    
+
     # Change to frontend directory
     os.chdir(Path(__file__).parent)
-    
-    # Run uvicorn
+
+    # Run uvicorn with keep-alive settings
     try:
-        subprocess.run([
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "test_builder_app:app",
-            "--host", "0.0.0.0",
-            "--port", "8000",
-            "--reload"
-        ])
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "test_builder_app:app",
+                "--host",
+                "0.0.0.0",  # nosec B104 - Development server binding
+                "--port",
+                "8000",
+                "--reload",
+                "--timeout-keep-alive",
+                "300",  # Keep connections alive for 5 minutes
+                "--timeout-graceful-shutdown",
+                "30",  # Graceful shutdown timeout
+            ]
+        )
     except KeyboardInterrupt:
         print("\n\n✅ Server stopped")
         sys.exit(0)
+
 
 if __name__ == "__main__":
     main()

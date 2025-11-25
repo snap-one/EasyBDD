@@ -23,11 +23,10 @@ repos:
     rev: 7.0.0
     hooks:
       - id: flake8
-        args: [
-          --max-line-length=88,
-          --extend-ignore=E203,W503,E501,
-          --exclude=.venv,__pycache__,*.egg-info,build,dist,
-        ]
+        args:
+          - --max-line-length=88
+          - --extend-ignore=E203,W503,E501
+          - --exclude=.venv,__pycache__,*.egg-info,build,dist
 
   # Python security checks
   - repo: https://github.com/PyCQA/bandit
@@ -73,10 +72,9 @@ repos:
     rev: v1.4.0
     hooks:
       - id: detect-secrets
-        args: [
-          --baseline, .secrets.baseline,
-          --exclude-files, '.env.example'
-        ]
+        args:
+          - --exclude-files
+          - .env.example
 
 # Configuration
 default_language_version:
