@@ -54,6 +54,7 @@ Thumbs.db
 # Demo/experimental files
 demo_*.py
 test_*.py
+!frontend/test_builder_app.py
 enhanced_cli.py
 frontend_demo.py
 convert_chrome_recording.py

@@ -1004,6 +1004,12 @@ class TestRunner:
             ):
                 return self._handle_aws_action(action, step_params, variables)
 
+            # Test execution action (run another test as a step)
+            if action_lower in ["test.run", "run test", "execute test"]:
+                return self._handle_test_run_action(
+                    step_params, variables, soft_assert_manager
+                )
+
             # Check if we have custom actions defined
             if hasattr(self.config, "get_custom_action"):
                 custom_action = self.config.get_custom_action(action)
@@ -1924,6 +1930,204 @@ class TestRunner:
         except Exception as e:
             print(f"      ❌ OvrC HTTP API action failed: {e}")
             raise
+
+    def _handle_test_run_action(
+        self, step_params: dict, variables: dict, soft_assert_manager=None
+    ) -> bool:
+        """Handle test.run action - execute another test as a reusable step."""
+        params = self._get_params(step_params)
+
+        # Get test path
+        test_path = params.get("test_path", "")
+        if not test_path:
+            raise ValueError("test.run requires 'test_path' parameter")
+
+        # Resolve test path (support relative paths from tests/cases/)
+        if not Path(test_path).is_absolute():
+            # Try relative to tests/cases/ directory
+            # Get tests directory from config
+            tests_dir = self.config.get_variable("tests_dir", "tests")
+            if isinstance(tests_dir, str):
+                tests_dir = Path(tests_dir)
+            else:
+                tests_dir = Path("tests")
+
+            base_path = tests_dir / "cases"
+            test_file = base_path / test_path
+            if not test_file.exists():
+                # Try as-is (might already be full path relative to tests/)
+                test_file = tests_dir / test_path
+                if not test_file.exists():
+                    # Try from current working directory
+                    test_file = Path.cwd() / "tests" / "cases" / test_path
+        else:
+            test_file = Path(test_path)
+
+        if not test_file.exists():
+            raise FileNotFoundError(f"Test file not found: {test_path}")
+
+        print(f"      🔄 Running test as step: {test_file.name}")
+
+        # Get input variables to pass to the called test
+        input_vars = params.get("variables", {})
+        if isinstance(input_vars, str):
+            # Try to parse as JSON
+            try:
+                import json
+
+                input_vars = json.loads(input_vars)
+            except Exception:
+                # If not JSON, treat as key-value pairs
+                input_vars = {}
+
+        # Merge input variables with current variables (input_vars take precedence)
+        called_test_vars = dict(variables)
+        called_test_vars.update(input_vars)
+
+        # Parse and load the test
+        try:
+            called_test = self.parser.parse_file(str(test_file))
+        except Exception as e:
+            raise ValueError(f"Failed to parse test file {test_path}: {e}")
+
+        # Execute the called test using the same runner instance
+        # Create a test detail dict to capture results
+        called_test_detail = {
+            "name": called_test.name,
+            "status": "unknown",
+            "variables": {},
+        }
+
+        # Execute the test with the merged variables
+        # Store original variables and set merged variables
+        original_test_vars = (
+            called_test.variables.copy() if called_test.variables else {}
+        )
+        called_test.variables = called_test_vars.copy()
+        # Also store as _merged_variables for step execution
+        called_test._merged_variables = called_test_vars
+
+        try:
+            # Execute the test - it will use called_test.variables (which is now merged)
+            success = self._execute_single_test(
+                called_test, test_detail=called_test_detail
+            )
+
+            # Clean up the temporary attribute
+            if hasattr(called_test, "_merged_variables"):
+                delattr(called_test, "_merged_variables")
+
+            # After execution, extract variables from the called test's variables
+            # The called test may have set variables during execution
+            store_vars = params.get("store_variables", {})
+            if isinstance(store_vars, str):
+                try:
+                    import json
+
+                    store_vars = json.loads(store_vars)
+                except Exception:
+                    store_vars = {}
+
+            # Extract variables from called test's variables (after execution)
+            if store_vars:
+                print(f"      📦 Extracting variables from called test...")
+                for var_name, var_path in store_vars.items():
+                    try:
+                        # Support dot notation paths (e.g., "about_result.firmware")
+                        # Try from called_test.variables first (most up-to-date after execution)
+                        value = self._extract_nested_value(
+                            called_test.variables, var_path
+                        )
+                        if value is None:
+                            # Fallback to called_test_vars
+                            value = self._extract_nested_value(
+                                called_test_vars, var_path
+                            )
+                        if value is not None:
+                            variables[var_name] = value
+                            print(f"      ✓ Extracted {var_name} = {value}")
+                        else:
+                            print(
+                                f"      ⚠ Could not extract {var_name} from path: {var_path}"
+                            )
+                    except Exception as e:
+                        print(f"      ⚠ Error extracting {var_name}: {e}")
+
+            # Also merge any new variables that were set during execution
+            # (variables that were stored in called_test.variables but not in original variables)
+            for key, value in called_test.variables.items():
+                if key not in input_vars:  # Don't overwrite input variables
+                    # Add new variables or update existing ones (except input vars)
+                    if key not in variables or (
+                        key in variables and key not in input_vars
+                    ):
+                        variables[key] = value
+
+            # Check continue_on_failure flag
+            continue_on_failure = params.get("continue_on_failure", False)
+            if isinstance(continue_on_failure, str):
+                continue_on_failure = continue_on_failure.lower() in (
+                    "true",
+                    "1",
+                    "yes",
+                    "on",
+                )
+
+            if success:
+                print(f"      ✅ Test step completed successfully")
+                return True
+            else:
+                print(f"      ❌ Test step failed")
+                if continue_on_failure:
+                    print(
+                        f"      ⚠ Continuing despite failure (continue_on_failure=true)"
+                    )
+                    return True
+                else:
+                    return False
+
+        except Exception as e:
+            print(f"      ❌ Error executing test step: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+            continue_on_failure = params.get("continue_on_failure", False)
+            if isinstance(continue_on_failure, str):
+                continue_on_failure = continue_on_failure.lower() in (
+                    "true",
+                    "1",
+                    "yes",
+                    "on",
+                )
+
+            if continue_on_failure:
+                print(f"      ⚠ Continuing despite error (continue_on_failure=true)")
+                return True
+            else:
+                raise
+
+    def _extract_nested_value(self, data: dict, path: str) -> Any:
+        """Extract a value from nested dict using dot notation path."""
+        keys = path.split(".")
+        current = data
+
+        for key in keys:
+            if isinstance(current, dict):
+                current = current.get(key)
+            elif isinstance(current, list):
+                try:
+                    index = int(key)
+                    current = current[index] if 0 <= index < len(current) else None
+                except (ValueError, IndexError):
+                    return None
+            else:
+                return None
+
+            if current is None:
+                return None
+
+        return current
 
     def _handle_aws_action(
         self, action: str, step_params: dict, variables: dict

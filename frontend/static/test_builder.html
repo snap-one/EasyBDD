@@ -1790,7 +1790,40 @@
             position: relative;
         }
 
+        .hardware-stats-section {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: var(--bg-secondary);
+            border-radius: 0.75rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .hardware-card {
+            min-height: 140px;
+        }
+
+        .metric-subtext {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            margin-top: 0.25rem;
+        }
+
         .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 0.5rem;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease, background 0.3s ease;
+        }
+
+        .progress-bar-old {
             height: 100%;
             background: linear-gradient(90deg, #3b82f6, #60a5fa);
             transition: width 0.3s ease;
@@ -2244,6 +2277,75 @@
                             <div class="metric-content">
                                 <div class="metric-label">Running Tests</div>
                                 <div class="metric-value">{{ dashboardStats.running_tests }}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Hardware Statistics -->
+                    <div class="hardware-stats-section" v-if="dashboardStats.hardware">
+                        <h3 style="margin-bottom: 1rem; color: #e2e8f0; font-size: 1.25rem;">
+                            <i class="fas fa-server"></i> System Resources
+                        </h3>
+                        <div class="metrics-grid">
+                            <!-- CPU Card -->
+                            <div class="metric-card hardware-card">
+                                <div class="metric-icon" style="background: rgba(239, 68, 68, 0.1); color: #ef4444;">
+                                    <i class="fas fa-microchip"></i>
+                                </div>
+                                <div class="metric-content">
+                                    <div class="metric-label">CPU Usage</div>
+                                    <div class="metric-value">{{ dashboardStats.hardware.cpu.usage_percent || 0 }}%</div>
+                                    <div class="metric-subtext" v-if="dashboardStats.hardware.cpu.cores">
+                                        {{ dashboardStats.hardware.cpu.cores }} cores
+                                        <span v-if="dashboardStats.hardware.cpu.frequency">
+                                            • {{ dashboardStats.hardware.cpu.frequency }} GHz
+                                        </span>
+                                    </div>
+                                    <div class="progress-bar" style="margin-top: 0.5rem;">
+                                        <div class="progress-fill"
+                                             :style="`width: ${dashboardStats.hardware.cpu.usage_percent || 0}%; background: ${getUsageColor(dashboardStats.hardware.cpu.usage_percent || 0)};`">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Memory Card -->
+                            <div class="metric-card hardware-card">
+                                <div class="metric-icon" style="background: rgba(34, 197, 94, 0.1); color: #22c55e;">
+                                    <i class="fas fa-memory"></i>
+                                </div>
+                                <div class="metric-content">
+                                    <div class="metric-label">Memory Usage</div>
+                                    <div class="metric-value">{{ dashboardStats.hardware.memory.usage_percent || 0 }}%</div>
+                                    <div class="metric-subtext" v-if="dashboardStats.hardware.memory.total_gb">
+                                        {{ dashboardStats.hardware.memory.used_gb || 0 }} GB / {{ dashboardStats.hardware.memory.total_gb }} GB
+                                    </div>
+                                    <div class="progress-bar" style="margin-top: 0.5rem;">
+                                        <div class="progress-fill"
+                                             :style="`width: ${dashboardStats.hardware.memory.usage_percent || 0}%; background: ${getUsageColor(dashboardStats.hardware.memory.usage_percent || 0)};`">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Disk Card -->
+                            <div class="metric-card hardware-card">
+                                <div class="metric-icon" style="background: rgba(245, 158, 11, 0.1); color: #f59e0b;">
+                                    <i class="fas fa-hdd"></i>
+                                </div>
+                                <div class="metric-content">
+                                    <div class="metric-label">Disk Usage</div>
+                                    <div class="metric-value">{{ dashboardStats.hardware.disk.usage_percent || 0 }}%</div>
+                                    <div class="metric-subtext" v-if="dashboardStats.hardware.disk.total_gb">
+                                        {{ dashboardStats.hardware.disk.used_gb || 0 }} GB / {{ dashboardStats.hardware.disk.total_gb }} GB
+                                        <span style="color: #94a3b8;">({{ dashboardStats.hardware.disk.free_gb || 0 }} GB free)</span>
+                                    </div>
+                                    <div class="progress-bar" style="margin-top: 0.5rem;">
+                                        <div class="progress-fill"
+                                             :style="`width: ${dashboardStats.hardware.disk.usage_percent || 0}%; background: ${getUsageColor(dashboardStats.hardware.disk.usage_percent || 0)};`">
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -3557,8 +3659,24 @@
                                         {{ param.label }}
                                     </label>
 
+                                    <!-- Test Selector (special case for test.run action with test_path parameter) -->
+                                    <div v-if="currentStep.action === 'test.run' && paramName === 'test_path'" class="test-selector-group">
+                                        <select v-model="currentStep.parameters[paramName]"
+                                                class="form-control"
+                                                :required="param.required"
+                                                @change="onTestPathSelected">
+                                            <option value="">-- Select a test --</option>
+                                            <optgroup v-for="(tests, workspace) in testsByWorkspace" :key="workspace" :label="workspace || 'Root'">
+                                                <option v-for="test in tests" :key="test.path" :value="test.path">
+                                                    {{ test.name }} ({{ test.path }})
+                                                </option>
+                                            </optgroup>
+                                        </select>
+                                        <div class="form-help">{{ param.help }}</div>
+                                    </div>
+
                                     <!-- Text Input with Autocomplete Suggestions -->
-                                    <div v-if="param.type === 'text' || param.type === 'file'">
+                                    <div v-else-if="param.type === 'text' || param.type === 'file'">
                                         <input
                                            v-model="currentStep.parameters[paramName]"
                                            type="text"
@@ -4357,6 +4475,28 @@
                     }
 
                     return filtered;
+                },
+                testsByWorkspace() {
+                    // Group tests by workspace for the test.run selector
+                    const grouped = {};
+                    this.tests.forEach(test => {
+                        const workspace = test.workspace || 'Root';
+                        if (!grouped[workspace]) {
+                            grouped[workspace] = [];
+                        }
+                        // Calculate relative path from tests/cases/
+                        let path = test.path || test.id || '';
+                        if (path.startsWith('tests/cases/')) {
+                            path = path.replace('tests/cases/', '');
+                        } else if (path.startsWith('cases/')) {
+                            path = path.replace('cases/', '');
+                        }
+                        grouped[workspace].push({
+                            ...test,
+                            path: path
+                        });
+                    });
+                    return grouped;
                 },
                 isStepValid() {
                     const validation = this.validateRequiredParameters();
@@ -5563,6 +5703,11 @@
                         // Deep copy the step to avoid reactivity issues
                     this.currentStep = JSON.parse(JSON.stringify(step));
                     this.editingStepIndex = index;
+
+                        // Load tests if this is a test.run action
+                        if (step.action === 'test.run' && !this.tests.length) {
+                            await this.loadTests();
+                        }
 
                         // URL encode the action ID to handle special characters like dots
                         const encodedActionId = encodeURIComponent(step.action);
@@ -6799,6 +6944,12 @@ Would you like to enter a selector manually?
                     const secs = (seconds % 60).toFixed(2);
                     return `${mins}m ${secs}s`;
                 },
+                onTestPathSelected() {
+                    // When a test is selected for test.run, ensure tests are loaded
+                    if (this.currentStep && this.currentStep.action === 'test.run' && !this.tests.length) {
+                        this.loadTests();
+                    }
+                },
                 formatFileSize(bytes) {
                     if (!bytes) return '0 B';
                     if (bytes < 1024) return `${bytes} B`;
@@ -6929,6 +7080,19 @@ Would you like to enter a selector manually?
                         });
                     } catch (error) {
                         console.error('Failed to load dashboard:', error);
+                    }
+                },
+                getUsageColor(usage) {
+                    // Return color based on usage percentage
+                    if (usage >= 90) return '#ef4444'; // Red for critical
+                    if (usage >= 70) return '#f59e0b'; // Orange for warning
+                    if (usage >= 50) return '#eab308'; // Yellow for moderate
+                    return '#22c55e'; // Green for good
+                },
+                onTestPathSelected() {
+                    // When a test is selected for test.run, ensure tests are loaded
+                    if (this.currentStep.action === 'test.run' && !this.tests.length) {
+                        this.loadTests();
                     }
                 },
                 async loadTestSuites() {
