@@ -1,0 +1,20 @@
+name: dxGetAbout
+description: ''
+tags:
+- audio
+- api
+- ovrc
+- base spec
+variables:
+  server_url: wss://firmware.testing.ovrc.com:7443
+  mac: D4:6A:91:4E:F1:82
+  full_log: true
+steps:
+- ovrc.send:
+  method: dxGetAbout
+  params:
+    deviceId: D4:6A:91:4E:F1:82
+    version: 0
+  store_as: about_result
+- log:
+  message: About Result: ${about_result}

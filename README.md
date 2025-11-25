@@ -1,8 +1,42 @@
 # Easy BDD Testing Framework
 
-A powerful, user-friendly YAML-based BDD testing framework that supports multiple protocols including browser automation, REST APIs, WebSocket, AWS S3, Serial, and Android. No programming knowledge required.
+A powerful, user-friendly YAML-based BDD testing framework that supports multiple protocols including browser automation, REST APIs, WebSocket, AWS S3, Serial, and Android. **No programming knowledge required.**
 
 ## ✨ What's New
+
+### 🎨 **Test Builder Web Application** (Latest!)
+**Zero-code visual test creation with modern web UI!**
+
+- **🎯 Visual Test Builder** - Drag & drop interface, no programming needed
+- **📚 50+ Actions Library** - Browse all available actions in categorized library
+- **📝 Form-Based Configuration** - Dynamic forms with validation for each action
+- **⚡ Real-Time Execution** - Run tests from web UI with live output streaming
+- **📋 Template System** - Start from pre-built test templates or action templates
+- **📦 Test Suites** - Group and execute multiple tests with specific configurations
+- **🔍 Test Management** - Create, edit, delete, copy tests in beautiful UI
+- **📊 Report Generation** - Generate beautiful HTML reports with simple and debug logs
+- **🔌 OvrC API Integration** - Full support for OvrC WebSocket and HTTP API
+- **✅ Required Field Validation** - Prevents adding steps until all required fields are valid
+- **🔑 Variable Management** - Easy key-value variable editor with auto-sync to JSON
+- **📱 Workspace Organization** - Organize tests by workspace/folder with filtering
+- **🔄 Step Copy/Duplicate** - Quickly duplicate test steps
+- **📈 Test Results Dashboard** - View all test results with pagination and filtering
+
+**[📖 Full Test Builder Guide](docs/TEST_BUILDER.md)** | **Quick Start**: `python frontend/start_builder.py` → http://localhost:8000
+
+### 🆕 Recent Features
+
+- **Test Suites** - Create test suites, add/remove tests, enable/disable tests, reorder execution, view execution history
+- **OvrC API Actions** - Full support for OvrC WebSocket (JSON-RPC) and HTTP API with automatic authentication
+- **Action Templates** - Pre-filled action templates with all required and optional parameters
+- **HTML Report Generation** - Professional HTML reports with simple and debug log tabs
+- **Variable Key-Value Editor** - Easy-to-use interface for managing test variables
+- **Automatic OvrC Connection Management** - Auto-connect/disconnect for OvrC actions
+- **Test Result Management** - View, download, and generate HTML reports for test results
+- **Workspace Filtering** - Filter tests and results by workspace/folder
+- **Step Validation** - Real-time validation of required fields before adding steps
+
+### Framework Enhancements
 
 - 🔁 **Retry Logic** - Configurable retry with exponential backoff for flaky tests
 - 📊 **Enhanced Data-Driven** - CSV, JSON, Excel file support for test data
@@ -37,7 +71,14 @@ pip install -e .
 playwright install chromium  # Or: firefox, webkit
 ```
 
-2. **Configure AWS (Optional)**
+2. **Install Test Builder Dependencies** (Optional but Recommended)
+```bash
+cd frontend
+pip install -r requirements_builder.txt
+cd ..
+```
+
+3. **Configure AWS (Optional)**
 ```bash
 # If using AWS features, configure AWS CLI
 aws configure
@@ -47,32 +88,64 @@ export AWS_SECRET_ACCESS_KEY="your-secret"
 export AWS_DEFAULT_REGION="us-east-1"
 ```
 
-3. **Verify Installation**
+4. **Verify Installation**
 ```bash
 python -m easy_bdd --help
 ```
 
+### Start the Test Builder (Recommended)
+
+```bash
+# Start the web application
+python frontend/start_builder.py
+
+# Open in browser: http://localhost:8000
+```
+
+The Test Builder provides a visual interface for creating and managing tests without writing YAML manually.
+
 ### Your First Test
+
+#### Option 1: Using Test Builder (Easiest)
+
+1. Start the Test Builder: `python frontend/start_builder.py`
+2. Open http://localhost:8000 in your browser
+3. Click "New Test" in the sidebar
+4. Fill in test information (name, description, tags)
+5. Click "Add Step" and select an action from the library
+6. Fill in the parameters using the form
+7. Click "Save" to save your test
+8. Click "Run Test" to execute it
+
+**[📖 Complete Test Builder Guide](docs/TEST_BUILDER.md)**
+
+#### Option 2: Manual YAML Creation
 
 Create `tests/cases/hello_world.yaml`:
 ```yaml
-name: Hello World Test
-description: My first Easy BDD test
-tags: [demo]
-
+name: "My First Test"
+description: "Login to application"
 variables:
-  website: "https://example.com"
-
+  username: "testuser"
+  password: "testpass"
 steps:
-  - action: browser.open
-    url: ${website}
-  
-  - action: browser.screenshot
-    name: "homepage"
-  
-  - action: test.assert
-    expression: "'Example Domain' in page_content"
-    message: "Should show Example Domain"
+  - browser.open:
+      url: "https://example.com"
+    
+  - browser.fill:
+      field: "#username"
+      value: "${username}"
+    
+  - browser.fill:
+      field: "#password"
+      value: "${password}"
+    
+  - browser.click:
+      button: "Sign In"
+    
+  - test.assert:
+      expression: "'Welcome' in page_content"
+      message: "Expected welcome message not found"
 ```
 
 Run it:
@@ -91,80 +164,80 @@ python -m easy_bdd run --tags demo
 
 Comprehensive guides available in the `/docs` folder:
 
+### 🚀 Quick Reference
+- **[📋 Complete Syntax Cheat Sheet](docs/SYNTAX_CHEATSHEET.md)** - ⭐ ALL actions, options, and examples in one place!
+- **[🎨 Test Builder Guide](docs/TEST_BUILDER.md)** - Complete guide to the web application
+- **[YAML Syntax Reference](docs/syntax.md)** - Test file structure and variable syntax
+- **[Action Reference](docs/actions.md)** - Detailed action documentation
+- **[Dot Notation Actions](docs/dot-notation-actions.md)** - New `service.action` syntax
+
+### 📖 Guides & Tutorials
 - **[Getting Started Guide](docs/setup.md)** - Installation and configuration
-- **[Contributing Guide](CONTRIBUTING.md)** - How to contribute, code standards 🎯
-- **[Code Quality Tools](WEEK3_QUALITY.md)** - Pre-commit hooks, Makefile, development setup
-- **[Performance Optimizations](WEEK2_PERFORMANCE.md)** - AWS S3 pooling, regex caching ⚡
-- **[Security Implementation](SECURITY_IMPLEMENTATION.md)** - Security features and best practices 🔒
-- **[Recommendations](RECOMMENDATIONS.md)** - Security, performance, and feature recommendations
-- **[Dot Notation Actions](docs/dot-notation-actions.md)** - New unified action syntax ✨
-- **[YAML Syntax Reference](docs/syntax.md)** - Test file structure
-- **[Action Reference](docs/actions.md)** - All available actions
 - **[Examples](docs/examples.md)** - Real-world test examples
-- **[Conditional Steps](docs/conditional-steps.md)** - If/then/else logic
-- **[AWS S3 Integration](docs/aws-s3-integration.md)** - Firmware management
-- **[Chrome Recorder Conversion](docs/CHROME_RECORDER_CONVERSION.md)** - Import Chrome recordings
-- **[Browser Configuration](docs/BROWSER_CONFIG.md)** - Browser settings
-- **[Troubleshooting](docs/troubleshooting.md)** - Common issues
+- **[Conditional Steps](docs/conditional-steps.md)** - If/then/else logic for dynamic flows
+- **[Data-Driven Testing](docs/data-driven.md)** - CSV, JSON, Excel data sources
+- **[Soft Assertions](docs/soft-assertions.md)** - Continue tests on failures
+- **[Test Suites](docs/TEST_BUILDER.md#test-suites)** - Group and execute multiple tests
 
-### 🎯 Key Features
+### 🔧 Integration Guides
+- **[AWS S3 Integration](docs/aws-s3-integration.md)** - Firmware management and version extraction
+- **[OvrC API Integration](docs/TEST_BUILDER.md#ovrc-api-integration)** - WebSocket and HTTP API
+- **[JSON-RPC WebSocket](docs/jsonrpc-websocket.md)** - Device communication protocol
+- **[API Authentication](docs/api-authentication.md)** - OAuth, JWT, API keys
+- **[Chrome Recorder Conversion](docs/CHROME_RECORDER_CONVERSION.md)** - Import Playwright recordings
 
-**Core Framework:**
-- ✅ **No Programming Required** - Write tests in simple YAML
+### ⚙️ Configuration
+- **[Browser Configuration](docs/BROWSER_CONFIG.md)** - Browser settings and options
+- **[Security Implementation](SECURITY_IMPLEMENTATION.md)** - Security features and best practices 🔒
+- **[Datalake Integration](docs/datalake-logger.md)** - Advanced logging and metrics
+- **[Workspace Management](docs/WORKSPACE_MANAGEMENT.md)** - Organizing tests by workspace
+
+### 🛠️ Development
+- **[Contributing Guide](CONTRIBUTING.md)** - How to contribute, code standards 🎯
+- **[Code Quality Tools](WEEK3_QUALITY.md)** - Pre-commit hooks, Makefile commands
+- **[Performance Optimizations](WEEK2_PERFORMANCE.md)** - AWS S3 pooling, regex caching ⚡
+- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
+
+## 🎯 Key Features
+
+### Core Framework
+- ✅ **No Programming Required** - Write tests in simple YAML or use visual Test Builder
 - ✅ **Multi-Protocol Support** - Browser (Playwright), REST API, WebSocket, AWS S3, Serial, Android
 - ✅ **Conditional Logic** - If/then/else steps for dynamic test flows
 - ✅ **Variable Substitution** - Use `${variable}` syntax throughout tests
 - ✅ **Setup/Cleanup Phases** - Proper test phase organization
 
-**Browser Automation:**
+### Browser Automation
 - ✅ **Playwright Integration** - Chrome, Firefox, Safari, Edge support
 - ✅ **Iframe Support** - File uploads and clicks inside iframes (`iframe >> selector`)
 - ✅ **File Chooser API** - Handle hidden file inputs automatically
 - ✅ **Role-Based Selectors** - Click by role (button, link, etc.) and name
 - ✅ **Chrome Recorder** - Convert Playwright recordings to YAML
 
-**Testing Capabilities:**
+### Testing Capabilities
 - ✅ **Soft Assertions** - Continue on failures, collect all issues
 - ✅ **Custom Assertions** - Python expression evaluation, JSON schema validation
 - ✅ **Data-Driven Testing** - Run same test with multiple data sets
 - ✅ **Async Execution** - 3x faster with concurrent test execution
+- ✅ **Test Suites** - Group and execute multiple tests together
 
-**AWS Integration:**
+### AWS Integration
 - ✅ **S3 Operations** - List, download, upload firmware files
 - ✅ **Version Management** - Auto-extract firmware versions, intelligent sorting
 - ✅ **CloudFront URLs** - Generate CDN URLs from S3 paths
 
-**Reporting & Logging:**
+### OvrC API Integration
+- ✅ **WebSocket Support** - JSON-RPC over WebSocket for device communication
+- ✅ **HTTP API Support** - RESTful API with automatic authentication
+- ✅ **Auto-Connection Management** - Automatic connect/disconnect handling
+- ✅ **Flexible Commands** - Support for any OvrC command via `ovrc.send` or `ovrc.http.request`
+
+### Reporting & Logging
 - ✅ **Automatic Time Tracking** - Calculate time savings automatically
 - ✅ **Datalake Integration** - Advanced logging with error hints
-- ✅ **Rich Reporting** - HTML reports, screenshots, video recordings
+- ✅ **Rich Reporting** - HTML reports with simple and debug log tabs
+- ✅ **Report Generation** - Generate beautiful HTML reports from test results
 - ✅ **Teams Notifications** - Auto-post results to Microsoft Teams
-    value: "${password}"
-    
-  - action: "Click button"
-    button: "Sign In"
-    
-  - action: "Verify page contains"
-    text: "Welcome"
-```
-
-### 3. Run Your Tests
-```bash
-# Validate tests first (recommended)
-python -m easy_bdd validate tests/cases/
-
-# Run all tests
-python -m easy_bdd run
-
-# Run specific test file
-python -m easy_bdd run tests/cases/my_first_test.yaml
-
-# Run tests with specific tags
-python -m easy_bdd run --tags browser,login
-
-# Generate Gherkin features only
-python -m easy_bdd generate tests/cases/
-```
 
 ## 🎥 UI Recorder Integration
 
@@ -222,11 +295,11 @@ variables:
   username: "testuser"
 
 steps:
-  - action: "Open browser"
-    url: "${base_url}/login"
-  - action: "Fill form field"
-    field: "username"
-    value: "${username}"
+  - browser.open:
+      url: "${base_url}/login"
+  - browser.fill:
+      field: "username"
+      value: "${username}"
 ```
 
 ### 🔒 Security Best Practices
@@ -272,40 +345,82 @@ variables:
   password: "TestPass123"
 
 steps:
-  - action: Open browser
-    url: "${base_url}/login"
+  - browser.open:
+      url: "${base_url}/login"
   
-  - action: Fill form field
-    field: "#username"
-    value: "${username}"
+  - browser.fill:
+      field: "#username"
+      value: "${username}"
   
-  - action: Fill form field
-    field: "#password"
-    value: "${password}"
+  - browser.fill:
+      field: "#password"
+      value: "${password}"
   
-  - action: Click element
-    role: button
-    name: "Log In"
+  - browser.click:
+      role: button
+      name: "Log In"
   
-  - action: Wait
-    timeout: 2000
+  - browser.wait:
+      timeout: 2000
   
-  - action: Take screenshot
-    name: "after-login"
+  - browser.screenshot:
+      name: "after-login"
   
-  - action: Assert
-    expression: "'Dashboard' in page_content"
+  - test.assert:
+      expression: "'Dashboard' in page_content"
 ```
+
+### OvrC API Testing
+
+```yaml
+name: OvrC Device Info Test
+variables:
+  server_url: "ws://192.168.1.100:8080"
+  device_id: "4B:00:00:00:00:15"
+
+steps:
+  # Connect to OvrC WebSocket
+  - ovrc.connect:
+      server_url: "${server_url}"
+      device_id: "${device_id}"
+  
+  # Get device information
+  - ovrc.send:
+      method: "dxGetAbout"
+      store_as: "device_info"
+  
+  # Make HTTP API request
+  - ovrc.http.request:
+      method: "GET"
+      endpoint: "/api/v1/devices/${device_id}"
+      store_as: "device_data"
+  
+  # Assert device info
+  - test.assert:
+      expression: "'firmware' in device_info"
+      message: "Device info should contain firmware"
+```
+
+### Test Suites
+
+Create a test suite to run multiple tests:
+
+1. **In Test Builder**: Click "Test Suites" → "Create Suite"
+2. **Add Tests**: Select tests to include in the suite
+3. **Configure**: Set execution order, enable/disable tests
+4. **Execute**: Run the entire suite with one click
+
+See [Test Builder Guide](docs/TEST_BUILDER.md#test-suites) for detailed instructions.
 
 ### File Upload in Iframe
 
 ```yaml
-- action: Upload file
-  selector: 'iframe >> #file-input'
-  file_path: 'path/to/file.bin'
+- browser.upload:
+    selector: 'iframe >> #file-input'
+    file_path: 'path/to/file.bin'
 
-- action: Click element
-  selector: 'iframe >> #upload-button'
+- browser.click:
+    selector: 'iframe >> #upload-button'
 ```
 
 ### Conditional Firmware Upgrade
@@ -318,15 +433,15 @@ variables:
 steps:
   - condition: "current_version < target_version"
     then:
-      - action: Upload file
-        selector: 'iframe >> #firmware'
-        file_path: 'Firmware/${firmware_file}'
+      - browser.upload:
+          selector: 'iframe >> #firmware'
+          file_path: 'Firmware/${firmware_file}'
       
-      - action: Click element
-        selector: 'iframe >> #upgrade-button'
+      - browser.click:
+          selector: 'iframe >> #upgrade-button'
     else:
-      - action: Take screenshot
-        name: "already-updated"
+      - browser.screenshot:
+          name: "already-updated"
 ```
 
 ### AWS S3 Firmware Management
@@ -334,129 +449,48 @@ steps:
 ```yaml
 setup:
   # Get list of all firmware files
-  - action: "AWS list firmware files"
-    bucket_name: "my-bucket"
-    folder_prefix: "firmware/"
-    file_extension: ".bin"
-    download_dir: "Firmware"
-    store_as: "firmware_list"
+  - aws.s3.list:
+      bucket_name: "my-bucket"
+      folder_prefix: "firmware/"
+      file_extension: ".bin"
+      download_dir: "Firmware"
+      store_as: "firmware_list"
   
   # Get latest firmware
-  - action: "AWS get latest firmware"
-    bucket_name: "my-bucket"
-    folder_prefix: "firmware/"
-    file_extension: ".bin"
-    download_dir: "Firmware"
-    store_filename_as: "latest_fw"
-    store_version_as: "latest_version"
+  - aws.s3.get_latest:
+      bucket_name: "my-bucket"
+      folder_prefix: "firmware/"
+      file_extension: ".bin"
+      download_dir: "Firmware"
+      store_filename_as: "latest_fw"
+      store_version_as: "latest_version"
 
 steps:
   # Use downloaded firmware
-  - action: Upload file
-    selector: "#firmware-input"
-    file_path: "Firmware/${latest_fw_basename}"
+  - browser.upload:
+      selector: "#firmware-input"
+      file_path: "Firmware/${latest_fw_basename}"
 ```
 
 ### API Testing with Assertions
 
 ```yaml
-- action: Send API request
-  method: GET
-  url: "https://api.example.com/users/123"
-  headers:
-    Authorization: "Bearer ${api_token}"
+- api.get:
+    url: "https://api.example.com/users/123"
+    headers:
+      Authorization: "Bearer ${api_token}"
 
-- action: Assert
-  expression: "last_status == 200"
-  message: "API should return 200"
+- test.assert:
+    expression: "last_status == 200"
+    message: "API should return 200"
 
-- action: Assert
-  expression: "last_json['id'] == 123"
-  message: "Should return correct user ID"
+- test.assert:
+    expression: "last_json['id'] == 123"
+    message: "Should return correct user ID"
 
-- action: Assert
-  expression: "'email' in last_json"
-  message: "Response should contain email field"
-```
-
-### 🔌 API Actions
-```yaml
-# Send HTTP requests
-- action: "Send API request"
-  method: "POST"
-  url: "https://api.example.com/users"
-  headers:
-    Content-Type: "application/json"
-    Authorization: "Bearer ${token}"
-  body:
-    name: "John Doe"
-    email: "john@example.com"
-
-# Verify responses
-- action: "Verify API response"
-  status_code: 200
-  contains:
-    message: "User created"
-
-# Extract data from responses
-- action: "Extract from response"
-  field: "user.id"
-  save_as: "user_id"
-```
-
-### 📱 Android Actions
-```yaml
-# Connect to device
-- action: "Connect to android device"
-  device_id: "emulator-5554"
-
-# Interact with elements
-- action: "Tap element"
-  id: "com.app:id/login_button"
-
-- action: "Enter text"
-  id: "com.app:id/username"
-  text: "testuser"
-
-# Verify screen content
-- action: "Verify screen contains"
-  text: "Login successful"
-```
-
-### ☁️ AWS Actions
-```yaml
-# S3 operations
-- action: "AWS S3 upload"
-  bucket: "test-bucket"
-  file: "test.txt"
-  key: "uploads/test.txt"
-
-# Lambda functions
-- action: "AWS Lambda invoke"
-  function: "test-function"
-  payload:
-    message: "test"
-
-# Verify AWS responses
-- action: "Verify AWS response"
-  contains:
-    statusCode: 200
-```
-
-### 🔌 WebSocket Actions
-```yaml
-# Connect to WebSocket
-- action: "Connect to websocket"
-  url: "ws://localhost:8080/chat"
-
-# Send messages
-- action: "Send websocket message"
-  message: "Hello World"
-
-# Wait for messages
-- action: "Wait for websocket message"
-  contains: "Welcome"
-  timeout: 10
+- test.assert:
+    expression: "'email' in last_json"
+    message: "Response should contain email field"
 ```
 
 ## ⚙️ Configuration
@@ -497,21 +531,35 @@ environments:
 ## 🏗️ Project Structure
 
 ```
-easy-bdd-framework/
+Automation-Framework/
 ├── easy_bdd/                # Framework core
 │   ├── core/               # Core functionality
 │   │   ├── config.py       # Configuration management
 │   │   ├── parser.py       # YAML parser
 │   │   ├── generator.py    # Gherkin generator
 │   │   └── runner.py       # Test runner
-│   └── services/           # Protocol implementations (future)
+│   └── services/           # Protocol implementations
+│       ├── browser_service.py
+│       ├── api_service.py
+│       ├── aws_service.py
+│       ├── jsonrpc_service.py
+│       └── ovrc_api_service.py
+├── frontend/                # Test Builder Web Application
+│   ├── test_builder_app.py # FastAPI backend
+│   ├── action_definitions.py # Action catalog
+│   ├── static/
+│   │   └── test_builder.html # Vue.js frontend
+│   └── start_builder.py    # Server launcher
 ├── tests/
 │   ├── cases/              # Your YAML test definitions
+│   ├── data/               # Test data (CSV, JSON)
+│   ├── templates/          # Test templates
 │   └── features/           # Generated Gherkin files
 ├── config/
 │   └── framework.yaml      # Framework configuration
 ├── reports/                # Test reports and artifacts
-├── pyproject.toml          # Python package configuration
+├── test_suites/            # Test suite definitions
+├── docs/                   # Complete documentation
 └── README.md
 ```
 
@@ -535,61 +583,13 @@ python -m easy_bdd run --tags browser,api
 
 ### Test Data Management
 ```yaml
-# Reference external data (future feature)
+# Reference external data
 data_source: "test_data.csv"
 steps:
-  - action: "Fill form field"
-    field: "username"
-    value: "${data.username}"  # From CSV column
+  - browser.fill:
+      field: "username"
+      value: "${data.username}"  # From CSV column
 ```
-
-## 🔧 VS Code Integration
-
-The framework includes VS Code tasks for easy execution:
-
-- **Run Tests**: `Ctrl+Shift+P` → "Tasks: Run Task" → "Run Easy BDD Tests"
-- **Python Extension**: Automatic syntax highlighting and validation
-- **Integrated Terminal**: Run commands directly in VS Code
-
-## 🆚 Comparison with Original Framework
-
-| Feature | Original Framework | Easy BDD Framework |
-|---------|-------------------|-------------------|
-| Test Definition | Pipe-delimited syntax | Simple YAML |
-| Test Storage | TestRail integration | File-based |
-| Learning Curve | Requires training | Intuitive for non-programmers |
-| Protocol Support | ✅ All protocols | ✅ All protocols (architecture ready) |
-| Variable System | `$variable` | `${variable}` |
-| Gherkin Generation | ✅ | ✅ |
-| Flexibility | High | High |
-| Maintenance | Custom syntax | Standard YAML |
-
-## 🤝 Migration from Original Framework
-
-To migrate from your original framework:
-
-1. **Convert Test Cases**: Transform pipe-delimited tests to YAML format
-2. **Update Variables**: Change `$var` to `${var}` syntax  
-3. **File Organization**: Move tests from TestRail to YAML files
-4. **Configuration**: Set up `framework.yaml` configuration
-5. **Execution**: Use new command-line interface
-
-## 📋 Development Guidelines
-
-- Keep test definitions simple and readable
-- Use descriptive action names
-- Organize tests with meaningful tags
-- Leverage variables for reusability
-- Follow consistent naming conventions
-
-## 🔮 Future Roadmap
-
-- **Service Implementations**: Complete browser, API, WebSocket, Android, AWS, and Serial services
-- **Data-Driven Testing**: CSV/Excel file integration
-- **Custom Actions**: Plugin system for extending functionality
-- **Enhanced Reporting**: Allure integration, video recording
-- **IDE Integration**: Enhanced VS Code extension
-- **CI/CD Integration**: Jenkins, GitHub Actions templates
 
 ## 🐛 Common Issues & Debugging
 
@@ -607,25 +607,21 @@ python -m easy_bdd run tests/cases/my_test.yaml --headed
 **Issue: Element not found**
 ```yaml
 # Add wait before clicking
-- action: Wait
-  timeout: 2000
+- browser.wait:
+    timeout: 2000
 
 # Use role-based selectors (more reliable)
-- action: Click element
-  role: button
-  name: "Submit"
-
-# Check selector in browser DevTools
+- browser.click:
+    role: button
+    name: "Submit"
 ```
 
 **Issue: File upload fails**
 ```yaml
 # For hidden inputs in iframes, use iframe syntax
-- action: Upload file
-  selector: 'iframe >> #file-input'
-  file_path: 'full/path/to/file.bin'
-
-# Framework automatically handles hidden inputs with file chooser API
+- browser.upload:
+    selector: 'iframe >> #file-input'
+    file_path: 'full/path/to/file.bin'
 ```
 
 ### AWS Issues
@@ -639,22 +635,6 @@ aws configure
 export AWS_ACCESS_KEY_ID="your-key"
 export AWS_SECRET_ACCESS_KEY="your-secret"
 export AWS_DEFAULT_REGION="us-east-1"
-
-# Framework uses this priority: explicit params > env vars > AWS CLI config
-```
-
-**Issue: Firmware file not found**
-```yaml
-# The framework stores basename automatically
-setup:
-  - action: "AWS get latest firmware"
-    store_filename_as: "firmware_key"
-    # This creates: firmware_key_basename
-
-steps:
-  # Use the basename for local file path
-  - action: Upload file
-    file_path: "Firmware/${firmware_key_basename}"
 ```
 
 ### Test Execution Issues
@@ -662,13 +642,13 @@ steps:
 **Issue: Test hangs or times out**
 ```yaml
 # Increase timeout
-- action: Wait for element
-  selector: "#slow-element"
-  timeout: 30000  # 30 seconds
+- browser.wait_for_element:
+    selector: "#slow-element"
+    timeout: 30000  # 30 seconds
 
 # Add explicit waits
-- action: Wait
-  timeout: 5000
+- browser.wait:
+    timeout: 5000
 ```
 
 **Issue: Variables not substituting**
@@ -678,45 +658,6 @@ url: "${base_url}/api"  # ✅ Correct
 
 # Wrong syntax
 url: "$base_url/api"    # ❌ Won't work
-```
-
-**Issue: Assertion fails unexpectedly**
-```yaml
-# Use soft assertions to see all failures
-- action: Assert
-  expression: "status_code == 200"
-  soft_assert: true
-
-# Check variable values
-- action: Assert
-  expression: "my_variable is not None"
-  message: "Debug: checking variable"
-```
-
-### Conditional Steps Issues
-
-**Issue: Condition not evaluating**
-```yaml
-# Ensure variables are defined before condition
-setup:
-  - action: "AWS get latest firmware"
-    store_version_as: "firmware_version"
-
-steps:
-  # Now firmware_version is available
-  - condition: "firmware_version >= '2.0.0.0'"
-    then:
-      - action: Take screenshot
-```
-
-**Issue: Syntax error in condition**
-```yaml
-# Use Python expressions
-- condition: "version >= '2.0.0.0'"        # ✅ String comparison
-- condition: "count > 5"                    # ✅ Numeric
-- condition: "'text' in page_content"      # ✅ String contains
-- condition: "item is not None"            # ✅ Existence check
-- condition: "status == 'ready' and count > 0"  # ✅ Multiple conditions
 ```
 
 ### Getting Help
@@ -744,31 +685,30 @@ python -m easy_bdd --help
 
 ## 🏆 Why Choose Easy BDD Framework?
 
-✅ **User-Friendly**: No programming knowledge required - just write YAML  
-✅ **Powerful**: Conditional logic, AWS integration, iframe support, soft assertions  
-✅ **Flexible**: Supports all protocols - browser, API, WebSocket, AWS, Serial, Android  
+✅ **User-Friendly**: No programming knowledge required - write YAML or use visual Test Builder  
+✅ **Powerful**: Conditional logic, AWS integration, iframe support, soft assertions, test suites  
+✅ **Flexible**: Supports all protocols - browser, API, WebSocket, AWS, Serial, Android, OvrC  
 ✅ **Maintainable**: Standard YAML format everyone can read  
 ✅ **Independent**: No external dependencies like TestRail  
 ✅ **Extensible**: Easy to add new protocols and actions  
-✅ **Modern**: Built with Playwright, boto3, and current best practices  
+✅ **Modern**: Built with Playwright, FastAPI, Vue.js, and current best practices  
 ✅ **Fast**: Async execution for 3x faster test runs  
+✅ **Visual**: Beautiful web interface for test creation and management  
 
-## 📚 Project Structure
+## 📚 Additional Resources
 
-See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for complete directory layout.
-
-```
-Automation-Framework/
-├── easy_bdd/          # Framework source code
-├── tests/cases/       # Your YAML test files  
-├── config/            # Configuration files
-├── docs/              # Complete documentation
-├── reports/           # Test results and screenshots
-└── Firmware/          # Downloaded firmware files
-```
+- **[Test Builder Guide](docs/TEST_BUILDER.md)** - Complete guide to the web application
+- **[Syntax Cheat Sheet](docs/SYNTAX_CHEATSHEET.md)** - Quick reference for all actions
+- **[Examples](docs/examples.md)** - Real-world test examples
+- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
+- **[Contributing](CONTRIBUTING.md)** - How to contribute to the project
 
 ---
 
-**Ready to get started?** Create your first YAML test file and experience the difference! 🎉
+**Ready to get started?** 
+
+1. **Quick Start**: `python frontend/start_builder.py` → http://localhost:8000
+2. **Read the Docs**: Check out `/docs` folder for comprehensive guides
+3. **Try Examples**: See `/tests/cases/` for example test files
 
 For detailed guides, see the `/docs` folder. For examples, check `/tests/cases/` directory.

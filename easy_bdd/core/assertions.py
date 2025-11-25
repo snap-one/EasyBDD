@@ -383,11 +383,15 @@ class ResponseValidator:
         """
         failures = []
 
-        # Validate status code
+        # Validate status code (support both "status" and "status_code" keys)
+        expected_status = None
         if "status" in expectations:
             expected_status = expectations["status"]
-            actual_status = response.get("status")
-
+        elif "status_code" in expectations:
+            expected_status = expectations["status_code"]
+        
+        if expected_status is not None:
+            actual_status = response.get("status") or response.get("status_code")
             if actual_status != expected_status:
                 failures.append(
                     f"Status code mismatch: expected {expected_status}, got {actual_status}"

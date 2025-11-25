@@ -1,0 +1,15 @@
+name: dxGetAbout NEW
+description: ''
+tags:
+- api.ovrc
+- base spec
+variables:
+  ovrc_server_url: wss://firmware.testing.ovrc.com:7443
+  mac: D4:6A:91:4E:F1:82
+  version: 0
+steps:
+- ovrc.send:
+    params: "{\n  \"mac\": \"${mac}\",\n  \"param_1764036385921\": \"\",\n  \"version\"\
+      : \"0\"\n}"
+    timeout: 10
+    method: dxGetAbout

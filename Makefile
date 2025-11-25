@@ -32,6 +32,10 @@ help:
 	@echo "  make run           - Run all tests"
 	@echo "  make run-tags      - Run tests with tags (make run-tags TAGS=browser,api)"
 	@echo ""
+	@echo "Test Builder:"
+	@echo "  make builder       - Start Test Builder web application"
+	@echo "  make builder-install - Install Test Builder dependencies"
+	@echo ""
 	@echo "Metrics & Analytics:"
 	@echo "  make metrics-dashboard  - Show metrics dashboard (last 7 days)"
 	@echo "  make metrics-flaky      - Identify flaky tests (last 30 days)"
@@ -142,6 +146,17 @@ benchmark:
 # Security validation
 sec-validate: security validate
 	@echo "Security validation complete!"
+
+# Test Builder Web Application
+builder-install:
+	@echo "Installing Test Builder dependencies..."
+	$(PIP) install -r frontend/requirements_builder.txt
+	@echo "Test Builder dependencies installed!"
+
+builder:
+	@echo "Starting Test Builder web application..."
+	@echo "Access at: http://localhost:8000"
+	$(PYTHON) frontend/start_builder.py
 
 # Full CI pipeline
 ci: quality test validate

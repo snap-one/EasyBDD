@@ -99,7 +99,7 @@ class VariableManager:
     def substitute_variables(
         self, text: str, additional_vars: Optional[Dict] = None
     ) -> str:
-        """Substitute ${variable} patterns in text"""
+        """Substitute ${variable} patterns in text with support for nested variables"""
         if not isinstance(text, str):
             return text
 
@@ -124,16 +124,42 @@ class VariableManager:
             return str(value)
 
         # Replace ${variable} and ${object.property} patterns
+        # Do multiple passes to handle nested variables (e.g., ${api_base_url} contains ${device_ip})
         pattern = r"\$\{([^}]+)\}"
-        result = re.sub(pattern, replace_var, text)
+        result = text
+        max_iterations = 10  # Prevent infinite loops
+        iteration = 0
+        previous_result = None
+        
+        while iteration < max_iterations:
+            previous_result = result
+            result = re.sub(pattern, replace_var, result)
+            # If no more substitutions happened, we're done
+            if result == previous_result:
+                break
+            iteration += 1
+        
         return result
 
     def substitute_recursive(
         self, data: Any, additional_vars: Optional[Dict] = None
     ) -> Any:
-        """Recursively substitute variables in data structures"""
+        """Recursively substitute variables in data structures with support for nested variables"""
         if isinstance(data, str):
-            return self.substitute_variables(data, additional_vars)
+            # For strings, do multiple passes to handle nested variables
+            result = self.substitute_variables(data, additional_vars)
+            # Additional pass to ensure nested variables are resolved
+            # (e.g., if api_base_url contains ${device_ip}, we need to substitute device_ip too)
+            max_iterations = 10
+            iteration = 0
+            previous_result = None
+            while iteration < max_iterations:
+                previous_result = result
+                result = self.substitute_variables(result, additional_vars)
+                if result == previous_result:
+                    break
+                iteration += 1
+            return result
         elif isinstance(data, dict):
             return {
                 k: self.substitute_recursive(v, additional_vars)

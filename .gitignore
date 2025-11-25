@@ -63,6 +63,30 @@ record_test.py
 # Temporary files
 *.tmp
 *.log
+*.pdf
 Firmware/
-reports/
 archive/
+
+# Frontend build artifacts
+frontend/server.log
+frontend/test_report.html
+frontend/test_report.pdf
+frontend/__pycache__/
+
+# Old/unused frontend files
+frontend/app.py
+frontend/simple_app*.py
+frontend/app_demo.py
+frontend/demo_api.py
+frontend/static/app*.js
+frontend/static/index.html
+
+# Test reports (keep structure, ignore old reports)
+reports/*.json
+reports/*.html
+reports/*.webm
+!reports/.gitkeep
+
+# Test suites (keep structure)
+test_suites/*.json
+!test_suites/.gitkeep

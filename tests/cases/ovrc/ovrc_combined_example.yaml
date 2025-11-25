@@ -1,0 +1,68 @@
+name: "OvrC Combined WebSocket and HTTP Example"
+description: "Example showing both WebSocket and HTTP API usage together"
+tags:
+  - ovrc
+  - websocket
+  - http
+  - combined
+
+variables:
+  # WebSocket configuration
+  ws_server_url: "wss://firmware.testing.ovrc.com:10444"
+  device_mac: "D4:6A:91:E5:B7:3B"
+  
+  # HTTP API configuration (if needed)
+  api_base_url: "https://api.ovrc.com"
+  auth_token: "your-token-here"
+
+steps:
+  # ========== WebSocket Operations ==========
+  
+  - action: "ovrc.connect"
+    description: "Connect to OvrC WebSocket server"
+    server_url: "${ws_server_url}"
+    device_id: "${device_mac}"
+    protocol: "firmware-protocol"
+    # Optional: Also configure HTTP API at the same time
+    api_base_url: "${api_base_url}"
+    auth_type: "bearer"
+    auth_token: "${auth_token}"
+
+  - action: "ovrc.start device updates"
+    description: "Start receiving device status updates"
+
+  - action: "ovrc.get about"
+    description: "Get device information via WebSocket"
+    store_as: "device_info"
+
+  - action: "Log"
+    description: "Display device information"
+    message: "Device Info: ${device_info}"
+
+  - action: "ovrc.get network settings"
+    description: "Get network settings via WebSocket"
+    store_as: "network_config"
+
+  # ========== HTTP API Operations ==========
+  
+  - action: "ovrc.http.get"
+    description: "Get device status via HTTP API"
+    endpoint: "/api/v1/devices/${device_mac}/status"
+    store_as: "http_status"
+
+  - action: "ovrc.http.post"
+    description: "Send command via HTTP API"
+    endpoint: "/api/v1/devices/${device_mac}/commands"
+    json_data:
+      command: "refresh"
+      parameters: {}
+    store_as: "command_response"
+
+  # ========== Cleanup ==========
+  
+  - action: "ovrc.stop device updates"
+    description: "Stop device updates"
+
+  - action: "ovrc.disconnect"
+    description: "Disconnect from OvrC services"
+

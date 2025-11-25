@@ -1,0 +1,78 @@
+name: "OvrC HTTP API Example"
+description: "Example test demonstrating OvrC HTTP API with automatic authentication"
+tags:
+  - ovrc
+  - http
+  - api
+  - example
+
+variables:
+  api_base_url: "https://api.ovrc.com"  # Replace with your actual API base URL
+  auth_token: "your-bearer-token-here"  # Replace with your actual token
+  device_mac: "D4:6A:91:E5:B7:3B"
+
+steps:
+  # Connect to OvrC HTTP API (sets up authentication)
+  - action: "ovrc.connect"
+    description: "Connect to OvrC HTTP API with authentication"
+    api_base_url: "${api_base_url}"
+    auth_type: "bearer"
+    auth_token: "${auth_token}"
+
+  # Make GET request to retrieve devices
+  - action: "ovrc.http.get"
+    description: "Get list of devices"
+    endpoint: "/api/v1/devices"
+    store_as: "devices_response"
+
+  # Make GET request for specific device
+  - action: "ovrc.http.get"
+    description: "Get specific device details"
+    endpoint: "/api/v1/devices/${device_mac}"
+    params:
+      include_status: true
+      include_settings: true
+    store_as: "device_details"
+
+  # Assert device was found
+  - action: "Assert"
+    description: "Verify device details were retrieved"
+    expression: "device_details is not None and 'error' not in device_details"
+    message: "Device details should be retrieved successfully"
+
+  # Make POST request to update device settings
+  - action: "ovrc.http.post"
+    description: "Update device configuration"
+    endpoint: "/api/v1/devices/${device_mac}/configure"
+    json_data:
+      name: "Test Device"
+      settings:
+        enabled: true
+        timeout: 30
+    store_as: "update_response"
+
+  # Make PUT request to replace device configuration
+  - action: "ovrc.http.put"
+    description: "Replace device configuration"
+    endpoint: "/api/v1/devices/${device_mac}/config"
+    json_data:
+      device_name: "Updated Device Name"
+      network:
+        ip: "192.168.1.100"
+        subnet: "255.255.255.0"
+    store_as: "put_response"
+
+  # Make PATCH request to partially update device
+  - action: "ovrc.http.patch"
+    description: "Partially update device settings"
+    endpoint: "/api/v1/devices/${device_mac}/settings"
+    json_data:
+      name: "Patched Device Name"
+    store_as: "patch_response"
+
+  # Make DELETE request (example - be careful with delete operations)
+  # - action: "ovrc.http.delete"
+  #   description: "Delete device (commented out for safety)"
+  #   endpoint: "/api/v1/devices/${device_mac}"
+  #   store_as: "delete_response"
+

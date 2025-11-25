@@ -1,0 +1,15 @@
+name: 11242025_test
+description: nothing
+tags: []
+steps:
+- browser.open:
+    url: http://binary:SnapAV704@192.168.100.8/config
+- browser.open:
+    url: http://binary:SnapAV704@192.168.100.8/main
+  description: goofin'
+- browser.wait:
+    timeout: 5
+  description: just waitin'....
+- browser.open:
+    browser: chromium
+    url: d

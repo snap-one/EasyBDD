@@ -1,0 +1,58 @@
+name: "AWS S3 - Get Latest WattBox Firmware"
+description: "Download and validate the latest WattBox VPS firmware from S3"
+tags: ["aws", "s3", "firmware", "wattbox"]
+
+# CONFIGURATION REQUIRED:
+# 1. Replace 'your-firmware-bucket' with your actual S3 bucket name
+# 2. Update folder_prefix to match your S3 folder structure
+# 3. Configure AWS credentials: aws configure
+
+variables:
+  # S3 Configuration
+  bucket_name: "your-firmware-bucket"  # ← CHANGE THIS
+  folder_prefix: "files/Vendor WATTBOX/"
+  firmware_pattern: "wattboxvps"
+  
+  # Expected minimum version
+  min_version: "2.0.0.0"
+
+steps:
+  # Get the latest firmware from S3
+  - action: "aws.get_latest"
+    bucket_name: "${bucket_name}"
+    folder_prefix: "${folder_prefix}"
+    filename_pattern: "${firmware_pattern}"
+    file_extension: ".bin"
+    version_pattern: "\\d+\\.\\d+\\.\\d+\\.\\d+"
+    download_dir: "Firmware/WattBox"
+    store_filename_as: "firmware_file"
+    store_version_as: "firmware_version"
+    store_url_as: "firmware_url"
+  
+  # Display firmware information
+  - action: "Print"
+    message: "Latest firmware file: ${firmware_file}"
+  
+  - action: "Print"
+    message: "Firmware version: ${firmware_version}"
+  
+  - action: "Print"
+    message: "Download URL: ${firmware_url}"
+  
+  # Validate firmware information
+  - action: "Assert"
+    expression: "firmware_version is not None"
+    message: "Should extract firmware version from filename"
+  
+  - action: "Assert"
+    expression: "'wattboxvps' in firmware_file.lower()"
+    message: "Firmware file should contain 'wattboxvps'"
+  
+  - action: "Assert"
+    expression: "firmware_file.endswith('.bin')"
+    message: "Firmware file should have .bin extension"
+  
+  # Validate version meets minimum requirement
+  - action: "Assert"
+    expression: "firmware_version >= min_version"
+    message: "Firmware version ${firmware_version} should be >= ${min_version}"

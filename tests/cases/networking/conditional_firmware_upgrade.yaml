@@ -10,7 +10,7 @@ variables:
 
 setup:
   # Get latest firmware from S3
-  - action: "AWS get latest firmware"
+  - action: "aws.get_latest"
     bucket_name: "${bucket_name}"
     folder_prefix: "${folder_prefix}"
     file_extension: ".bin"

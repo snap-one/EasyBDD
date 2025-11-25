@@ -227,19 +227,39 @@ class YAMLParser:
                     )
                 )
             else:
-                if "action" not in step_data:
-                    raise ValueError(f"Step {i} must have an 'action' field")
-
-                action = step_data["action"]
-
-                # Extract retry configuration if present
-                retry_config = step_data.get("retry")
-
-                parameters = {
-                    k: v
-                    for k, v in step_data.items()
-                    if k not in ["action", "condition", "if", "then", "else", "retry"]
-                }
+                # Support both old format (action: "browser.navigate") and new dot notation (browser.navigate: {})
+                if "action" in step_data:
+                    # Old format
+                    action = step_data["action"]
+                    retry_config = step_data.get("retry")
+                    parameters = {
+                        k: v
+                        for k, v in step_data.items()
+                        if k not in ["action", "condition", "if", "then", "else", "retry"]
+                    }
+                else:
+                    # New dot notation format: browser.navigate: {url: ...}
+                    # Find the action key (should be the first key that looks like an action)
+                    action = None
+                    parameters = {}
+                    retry_config = None
+                    
+                    for key, value in step_data.items():
+                        if key not in ["condition", "if", "then", "else", "retry", "description"]:
+                            # This is likely the action
+                            action = key
+                            if isinstance(value, dict):
+                                parameters = value
+                            elif value is not None:
+                                # If value is not a dict, it might be a single parameter
+                                parameters = {"value": value}
+                            break
+                    
+                    if action is None:
+                        raise ValueError(f"Step {i} must have an 'action' field or use dot notation (e.g., browser.navigate: {{url: ...}})")
+                    
+                    # Extract retry if present
+                    retry_config = step_data.get("retry")
 
                 steps.append(
                     TestStep(

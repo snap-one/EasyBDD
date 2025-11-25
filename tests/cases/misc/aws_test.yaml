@@ -1,0 +1,12 @@
+name: "Download Latest Firmware"
+steps:
+  - action: "aws.get_latest"
+    bucket_name: "firmware-703"
+    folder_prefix: "wattbox/"
+    filename_pattern: "wattboxvps"
+    file_extension: ".bin"
+    download_dir: "Firmware"
+    store_version_as: "firmware_version"
+  
+  - action: "Print"
+    message: "Testing with firmware ${firmware_version}"
