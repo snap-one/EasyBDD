@@ -95,3 +95,7 @@ test_suites/*.json
 # Test Builder settings (contains sensitive webhook URLs)
 frontend/test_builder_settings.json
 test_builder_settings.json
+
+# User-specific data (collections and environments)
+collections/
+environments/
