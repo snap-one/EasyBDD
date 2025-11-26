@@ -59,16 +59,37 @@
             display: flex;
             height: 100vh;
             overflow: hidden;
+            width: 100%;
+            max-width: 100vw;
+            box-sizing: border-box;
+        }
+        
+        /* Ensure app layout doesn't overflow */
+        @media (max-width: 768px) {
+            #app {
+                flex-direction: column;
+            }
         }
 
         /* Sidebar */
         .sidebar {
             width: 280px;
+            min-width: 200px;
+            max-width: 100%;
             background: var(--bg-card);
             border-right: 1px solid var(--border);
             display: flex;
             flex-direction: column;
             box-shadow: var(--shadow-md);
+            flex-shrink: 0;
+        }
+        
+        /* Responsive sidebar */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                max-width: 100%;
+            }
         }
 
         .sidebar-header {
@@ -284,12 +305,215 @@
         .content-area {
             flex: 1;
             overflow-y: auto;
+            overflow-x: hidden;
             padding: 2rem;
+            min-width: 0;
+            box-sizing: border-box;
+        }
+        
+        /* Responsive padding for smaller screens */
+        @media (max-width: 768px) {
+            .content-area {
+                padding: 1rem;
+            }
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1000px;
             margin: 0 auto;
+            position: relative;
+            transition: max-width 0.2s ease;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        
+        /* Ensure containers don't overflow on smaller screens */
+        @media (max-width: 1200px) {
+            .container {
+                max-width: calc(100% - 2rem);
+                padding: 0 1rem;
+            }
+        }
+
+        .container-resizable {
+            position: relative;
+        }
+
+        .container-resize-handle {
+            position: absolute;
+            right: -8px;
+            top: 0;
+            bottom: 0;
+            width: 16px;
+            cursor: ew-resize;
+            z-index: 10;
+            background: transparent;
+            transition: background 0.2s;
+        }
+
+        .container-resize-handle:hover {
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .container-resize-handle::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 2px;
+            height: 40px;
+            background: var(--border);
+            border-radius: 1px;
+        }
+
+        .container-resize-handle:hover::after {
+            background: var(--primary);
+        }
+
+        /* Chat Assistant Styles */
+        .chat-token-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .token-badge {
+            padding: 0.375rem 0.75rem;
+            border-radius: 0.375rem;
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+        }
+
+        .token-badge.token-low {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--warning);
+        }
+
+        .token-badge.token-exhausted {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+        }
+
+        .chat-messages {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .chat-welcome {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-secondary);
+        }
+
+        .chat-message {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .chat-message-user {
+            justify-content: flex-end;
+        }
+
+        .chat-message-content {
+            display: flex;
+            gap: 0.75rem;
+            max-width: 80%;
+        }
+
+        .chat-message-user .chat-message-content {
+            flex-direction: row-reverse;
+        }
+
+        .chat-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .user-avatar {
+            background: var(--primary);
+            color: white;
+        }
+
+        .assistant-avatar {
+            background: var(--secondary);
+            color: white;
+        }
+
+        .chat-text {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .chat-message-user .chat-text {
+            align-items: flex-end;
+        }
+
+        .chat-bubble {
+            padding: 0.75rem 1rem;
+            border-radius: 0.75rem;
+            word-wrap: break-word;
+        }
+
+        .chat-bubble-user {
+            background: var(--primary);
+            color: white;
+        }
+
+        .chat-bubble-assistant {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+
+        .chat-bubble code {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 0.125rem 0.375rem;
+            border-radius: 0.25rem;
+            font-size: 0.875em;
+        }
+
+        .chat-bubble-assistant code {
+            background: var(--bg-main);
+        }
+
+        .chat-loading {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-secondary);
+        }
+
+        .alert {
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .alert-danger {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: var(--danger);
+        }
+
+        .alert-warning {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: var(--warning);
         }
 
         /* Builder Split Layout */
@@ -1238,7 +1462,7 @@
             display: flex !important;
             align-items: center;
             justify-content: center;
-            z-index: 99999 !important;
+            z-index: 100000 !important;
             animation: fadeIn 0.2s;
             pointer-events: auto !important;
             visibility: visible !important;
@@ -1712,6 +1936,8 @@
             overflow-y: auto;
             border-right: 1px solid var(--border);
             padding-right: 1rem;
+            position: relative;
+            z-index: 1;
         }
 
         .results-preview-panel {
@@ -1733,6 +1959,10 @@
             background: var(--bg-card);
             transition: all 0.2s;
             cursor: pointer;
+            position: relative;
+            z-index: 2;
+            pointer-events: auto;
+            user-select: none;
         }
 
         .result-card.compact {
@@ -2849,6 +3079,193 @@
             color: var(--text-primary);
         }
 
+        /* Chat Panel */
+        .chat-panel-overlay {
+            position: fixed !important;
+            top: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            background: transparent !important;
+            z-index: 100000 !important;
+            display: flex !important;
+            justify-content: flex-end;
+            align-items: stretch;
+            pointer-events: none;
+        }
+        
+        .chat-panel-overlay > .chat-panel {
+            pointer-events: auto;
+        }
+
+
+        .chat-panel {
+            width: 450px;
+            min-width: 300px;
+            max-width: min(90vw, calc(100vw - 320px));
+            background: var(--bg-main);
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
+            animation: slideInRight 0.3s ease-out;
+            position: relative;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .chat-panel-resize-handle {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            cursor: ew-resize;
+            background: transparent;
+            z-index: 10;
+        }
+
+        .chat-panel-resize-handle:hover {
+            background: var(--primary);
+            opacity: 0.5;
+        }
+
+        .chat-panel-resize-handle.resizing {
+            background: var(--primary);
+            opacity: 0.8;
+        }
+
+        /* Adjust main content when chat panel is open */
+        .content-area {
+            transition: margin-right 0.3s ease-out, padding-right 0.3s ease-out;
+            min-width: 0;
+            overflow-x: auto;
+        }
+        
+        /* Ensure content doesn't get cut off when chat panel is open */
+        .content-area > * {
+            min-width: 0;
+            max-width: 100%;
+        }
+        
+        /* Responsive adjustments for chat panel */
+        @media (max-width: 1400px) {
+            .chat-panel {
+                max-width: min(400px, calc(100vw - 320px));
+            }
+        }
+        
+        @media (max-width: 1200px) {
+            .chat-panel {
+                max-width: min(350px, calc(100vw - 320px));
+            }
+        }
+        
+        @media (max-width: 1024px) {
+            .chat-panel {
+                max-width: min(300px, calc(100vw - 320px));
+            }
+            
+            .content-area {
+                margin-right: 0 !important;
+            }
+            
+            /* On smaller screens, chat panel should overlay instead of push */
+            .chat-panel-overlay {
+                background: rgba(0, 0, 0, 0.5) !important;
+            }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+            }
+            to {
+                transform: translateX(0);
+            }
+        }
+
+        .chat-panel-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--bg-secondary);
+        }
+
+        .chat-panel-body {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        .chat-messages {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            overflow-y: auto;
+            overflow-x: hidden;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .chat-message {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-message-user {
+            align-items: flex-end;
+        }
+
+        .chat-message-assistant {
+            align-items: flex-start;
+        }
+
+        .chat-message-content {
+            max-width: 85%;
+            padding: 0.75rem 1rem;
+            border-radius: 0.75rem;
+            word-wrap: break-word;
+            line-height: 1.5;
+        }
+
+        .chat-message-user .chat-message-content {
+            background: var(--primary);
+            color: white;
+        }
+
+        .chat-message-assistant .chat-message-content {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .chat-message-content code {
+            background: rgba(0, 0, 0, 0.1);
+            padding: 0.125rem 0.25rem;
+            border-radius: 0.25rem;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+
+        .chat-message-assistant .chat-message-content code {
+            background: rgba(0, 0, 0, 0.15);
+        }
+
+        .chat-input-container {
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .sidebar {
@@ -2951,7 +3368,15 @@
                     </button>
                     <h2 v-if="view === 'dashboard'">Dashboard</h2>
                     <h2 v-else-if="view === 'tests'">My Tests</h2>
-                    <h2 v-else-if="view === 'builder'">{{ currentTest.name || 'New Test' }}</h2>
+                    <h2 v-else-if="view === 'builder'">
+                        {{ currentTest.name || 'New Test' }}
+                        <button v-if="editingTestFromSuite" 
+                                class="btn btn-sm btn-secondary" 
+                                @click="returnToSuiteEditing()"
+                                style="margin-left: 1rem; font-size: 0.875rem;">
+                            <i class="fas fa-arrow-left"></i> Back to Suite
+                        </button>
+                    </h2>
                     <h2 v-else-if="view === 'actions'">Actions Library</h2>
                     <h2 v-else-if="view === 'templates'">Test Templates</h2>
                     <h2 v-else-if="view === 'results'">Test Results</h2>
@@ -2961,6 +3386,11 @@
                     <h2 v-else-if="view === 'docs'">Documentation</h2>
                 </div>
                 <div class="toolbar-right">
+                    <button class="btn btn-icon btn-secondary" @click.stop="toggleChatPanel" :title="showChatPanel ? 'Hide AI Assistant' : 'Show AI Assistant'" style="position: relative;" type="button">
+                        <i class="fas fa-comments"></i>
+                        <span v-if="chatTokenStatus && chatTokenStatus.tokens_remaining < 10000 && chatTokenStatus.tokens_remaining > 0" class="badge badge-warning" style="position: absolute; top: -4px; right: -4px; font-size: 0.625rem; padding: 0.125rem 0.25rem; z-index: 1;">Low</span>
+                        <span v-if="chatTokenStatus && !chatTokenStatus.has_tokens" class="badge badge-danger" style="position: absolute; top: -4px; right: -4px; font-size: 0.625rem; padding: 0.125rem 0.25rem; z-index: 1;">!</span>
+                    </button>
                     <button v-if="view === 'builder' && !isRecording" class="btn btn-secondary" @click="startRecording">
                         <i class="fas fa-circle"></i> Record Test
                     </button>
@@ -3213,7 +3643,11 @@
 
                 <!-- Tests View -->
                 <!-- Test List View -->
-                <div v-if="view === 'tests'" class="container">
+                <div v-if="view === 'tests'" class="container container-resizable" :style="{ maxWidth: containerWidth + 'px' }">
+                    <div class="container-resize-handle" 
+                         @mousedown="startResize"
+                         @dblclick="resetContainerWidth"
+                         title="Drag to resize or double-click to reset"></div>
                     <div class="card">
                         <div class="card-header">
                             <h2>{{ selectedFolder ? folders.find(f => f.path === selectedFolder)?.name || 'Tests' : 'All Tests' }}</h2>
@@ -3262,7 +3696,11 @@
                 </div>
 
                 <!-- Test Suites View -->
-                <div v-if="view === 'test-suites' && !showSuiteDetailView" class="container">
+                <div v-if="view === 'test-suites' && !showSuiteDetailView" class="container container-resizable" :style="{ maxWidth: containerWidth + 'px' }">
+                    <div class="container-resize-handle" 
+                         @mousedown="startResize"
+                         @dblclick="resetContainerWidth"
+                         title="Drag to resize or double-click to reset"></div>
                     <div class="card">
                         <div class="card-header">
                             <h2>Test Suites</h2>
@@ -3310,7 +3748,11 @@
                 </div>
 
                 <!-- Test Suite Detail View -->
-                <div v-if="view === 'test-suites' && showSuiteDetailView && selectedSuite" class="container">
+                <div v-if="view === 'test-suites' && showSuiteDetailView && selectedSuite" class="container container-resizable" :style="{ maxWidth: containerWidth + 'px' }">
+                    <div class="container-resize-handle" 
+                         @mousedown="startResize"
+                         @dblclick="resetContainerWidth"
+                         title="Drag to resize or double-click to reset"></div>
                     <div class="card">
                         <div class="card-header">
                             <div style="display: flex; align-items: center; gap: 1rem;">
@@ -3382,6 +3824,11 @@
                                             </div>
                                         </div>
                                         <div class="test-item-actions">
+                                            <button class="btn btn-icon btn-sm btn-primary"
+                                                    @click="editTestFromSuite(suiteItem.test_id)"
+                                                    title="Edit Test">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
                                             <button class="btn btn-icon btn-sm"
                                                     :class="suiteItem.enabled ? 'btn-warning' : 'btn-success'"
                                                     @click="toggleTestEnabled(suiteItem.test_id)"
@@ -3442,7 +3889,11 @@
                 </div>
 
                 <!-- Test Builder View -->
-                <div v-if="view === 'builder'" class="container">
+                <div v-if="view === 'builder'" class="container container-resizable" :style="{ maxWidth: containerWidth + 'px' }">
+                    <div class="container-resize-handle" 
+                         @mousedown="startResize"
+                         @dblclick="resetContainerWidth"
+                         title="Drag to resize or double-click to reset"></div>
                     <!-- Test Info Card -->
                     <div class="card">
                         <div class="card-header">
@@ -3726,7 +4177,11 @@
                 </div>
 
                 <!-- Actions Library View -->
-                <div v-if="view === 'actions'" class="container">
+                <div v-if="view === 'actions'" class="container container-resizable" :style="{ maxWidth: containerWidth + 'px' }">
+                    <div class="container-resize-handle" 
+                         @mousedown="startResize"
+                         @dblclick="resetContainerWidth"
+                         title="Drag to resize or double-click to reset"></div>
                     <div v-for="(actions, category) in actionsByCategory" :key="category" class="card">
                         <div class="card-header">
                             <h2>{{ category }} Actions</h2>
@@ -3744,7 +4199,11 @@
                 </div>
 
                 <!-- Templates View -->
-                <div v-if="view === 'templates'" class="container">
+                <div v-if="view === 'templates'" class="container container-resizable" :style="{ maxWidth: containerWidth + 'px' }">
+                    <div class="container-resize-handle" 
+                         @mousedown="startResize"
+                         @dblclick="resetContainerWidth"
+                         title="Drag to resize or double-click to reset"></div>
                     <!-- Test Templates (Full Test Templates) -->
                     <div class="card" style="margin-bottom: 2rem;">
                         <div class="card-header">
@@ -3769,7 +4228,11 @@
                 </div>
 
                 <!-- Variables View -->
-                <div v-if="view === 'variables'" class="container">
+                <div v-if="view === 'variables'" class="container container-resizable" :style="{ maxWidth: containerWidth + 'px' }">
+                    <div class="container-resize-handle" 
+                         @mousedown="startResize"
+                         @dblclick="resetContainerWidth"
+                         title="Drag to resize or double-click to reset"></div>
                     <div class="card" style="margin-bottom: 2rem;">
                         <div class="card-header">
                             <h2>Environments</h2>
@@ -4083,6 +4546,46 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- OpenAI Configuration Section -->
+                        <div class="settings-section" style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border);">
+                            <h3><i class="fas fa-robot"></i> OpenAI API Configuration</h3>
+                            <p class="text-muted" style="margin-bottom: 1.5rem;">
+                                Configure your OpenAI API key for the AI Assistant feature. Your API key is stored locally and never shared.
+                                <a href="https://platform.openai.com/api-keys" target="_blank" style="color: var(--primary);">
+                                    Get your API key <i class="fas fa-external-link-alt" style="font-size: 0.75rem;"></i>
+                                </a>
+                            </p>
+
+                            <div class="form-group">
+                                <label class="form-label form-label-required">OpenAI API Key</label>
+                                <input
+                                    v-model="openaiConfig.api_key"
+                                    type="password"
+                                    class="form-control"
+                                    placeholder="sk-..."
+                                    autocomplete="off"
+                                    style="font-family: monospace;"
+                                >
+                                <div class="form-help">
+                                    Your API key is encrypted and stored locally. It's used only for the AI Assistant feature.
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 1.5rem;">
+                                <button class="btn btn-primary" @click="saveOpenAIConfig">
+                                    <i class="fas fa-save"></i> Save OpenAI Configuration
+                                </button>
+                                <button class="btn btn-secondary" @click="testOpenAIConnection" :disabled="!openaiConfig.api_key">
+                                    <i class="fas fa-paper-plane"></i> Test Connection
+                                </button>
+                            </div>
+
+                            <div v-if="openaiTestResult" class="alert" :class="openaiTestResult.success ? 'alert-success' : 'alert-danger'" style="margin-top: 1rem;">
+                                <i class="fas" :class="openaiTestResult.success ? 'fa-check-circle' : 'fa-exclamation-circle'"></i>
+                                {{ openaiTestResult.message }}
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -4092,10 +4595,24 @@
                         <div class="metrics-header-left">
                             <h2><i class="fas fa-chart-line"></i> Metrics & Analytics</h2>
                             <p class="metrics-subtitle">Comprehensive insights into your test automation framework</p>
+                            <p v-if="metricsPeriod === '7'" style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Showing data for the last 7 days</p>
+                            <p v-else-if="metricsPeriod === '14'" style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Showing data for the last 2 weeks</p>
+                            <p v-else-if="metricsPeriod === '21'" style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Showing data for the last 3 weeks</p>
+                            <p v-else-if="metricsPeriod === '30'" style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Showing data for the last month</p>
+                            <p v-else-if="metricsPeriod === '90'" style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Showing data for the last quarter</p>
                         </div>
-                        <button class="btn btn-secondary" @click="loadMetrics">
-                            <i class="fas fa-sync"></i> Refresh
-                        </button>
+                        <div style="display: flex; gap: 0.75rem; align-items: center;">
+                            <select v-model="metricsPeriod" @change="loadMetrics" class="form-control" style="width: auto; min-width: 150px;">
+                                <option value="7">Last 7 Days</option>
+                                <option value="14">Last 2 Weeks</option>
+                                <option value="21">Last 3 Weeks</option>
+                                <option value="30">Last Month</option>
+                                <option value="90">Last Quarter</option>
+                            </select>
+                            <button class="btn btn-secondary" @click="loadMetrics">
+                                <i class="fas fa-sync"></i> Refresh
+                            </button>
+                        </div>
                     </div>
 
                     <div v-if="loadingMetrics" class="loading-state">
@@ -4639,9 +5156,12 @@
                                         </div>
                                         <div class="results-list">
                                             <div v-for="result in getWorkspaceResults(workspace)"
-                                                 :key="result.filename"
-                                                 :class="['result-card', 'compact', 'status-card-' + (result.statusClass || (result.status || 'unknown').toLowerCase()), { selected: selectedResult && selectedResult.filename === result.filename }]"
-                                                 @click="selectResult(result)">
+                                                 :key="getResultKey(result)"
+                                                 :class="['result-card', 'compact', 'status-card-' + (result.statusClass || (result.status || 'unknown').toLowerCase()), { selected: selectedResult && getResultKey(selectedResult) === getResultKey(result) }]"
+                                                 @click.stop.prevent="selectResult(result)"
+                                                 @mousedown.stop
+                                                 @mouseup.stop
+                                                 :title="'Click to view details: ' + getTestName(result)">
                                                 <div class="result-header compact">
                                                     <div class="result-title compact">
                                                         <span :class="'status-badge status-' + (result.statusClass || (result.status || 'unknown').toLowerCase())" style="font-size: 0.65rem; padding: 0.125rem 0.375rem;">
@@ -4662,6 +5182,14 @@
                                                         <i class="fas fa-code"></i>
                                                         <span>{{ result.return_code }}</span>
                                                     </div>
+                                                </div>
+                                                <div class="result-actions compact" style="display: flex; gap: 0.5rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border);" @click.stop>
+                                                    <button class="btn btn-icon btn-sm btn-primary" 
+                                                            @click.stop="rerunTestFromResultCard(result)" 
+                                                            title="Re-run this test"
+                                                            style="flex: 1;">
+                                                        <i class="fas fa-redo"></i> Re-run
+                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -4698,6 +5226,9 @@
                                                     <span>{{ getTestName(selectedResult) }}</span>
                                                 </h3>
                                                 <div style="display: flex; gap: 0.5rem;">
+                                                    <button class="btn btn-icon btn-primary btn-sm" @click="rerunTestFromResultCard(selectedResult)" title="Re-run this test">
+                                                        <i class="fas fa-redo"></i>
+                                                    </button>
                                                     <button class="btn btn-icon btn-success btn-sm" @click="generateReportFromJson(selectedResult.filename)" title="Generate HTML Report">
                                                         <i class="fas fa-file-code"></i>
                                                     </button>
@@ -4744,7 +5275,16 @@
 
                                         <div class="form-group">
                                             <label class="form-label">Execution Output</label>
-                                            <pre class="code-block output-block" style="max-height: 400px; overflow-y: auto; font-size: 0.875rem; padding: 0.75rem;">{{ selectedResult.output ? selectedResult.output.join('\n') : 'No output available' }}</pre>
+                                            <!-- Log View Tabs -->
+                                            <div style="display: flex; border-bottom: 1px solid var(--border); margin-bottom: 0.75rem;">
+                                                <button class="btn btn-sm" :class="logViewMode === 'basic' ? 'btn-primary' : 'btn-secondary'" @click="logViewMode = 'basic'" style="border-radius: 0; border-right: 1px solid var(--border);">
+                                                    Simple Log
+                                                </button>
+                                                <button class="btn btn-sm" :class="logViewMode === 'debug' ? 'btn-primary' : 'btn-secondary'" @click="logViewMode = 'debug'" style="border-radius: 0;">
+                                                    Debug Log
+                                                </button>
+                                            </div>
+                                            <pre class="code-block output-block" style="max-height: 400px; overflow-y: auto; font-size: 0.875rem; padding: 0.75rem;">{{ getFilteredOutput(selectedResult) }}</pre>
                                         </div>
                                     </div>
                                 </div>
@@ -4763,7 +5303,7 @@
         </div>
 
         <!-- Modal: Select Tests for Adding Step -->
-        <div v-if="showTestSelectionModal === true" :key="'test-selection-' + (pendingActionId || '')" class="modal-overlay" data-modal-type="test-selection" @click.self="showTestSelectionModal = false">
+        <div v-if="showTestSelectionModal === true" :key="'test-selection-' + (pendingActionId || '')" class="modal-overlay" data-modal-type="test-selection">
             <div class="modal modal-large" @click.stop>
                 <div class="modal-header">
                     <h3 class="modal-title">Select Tests to Add Step</h3>
@@ -4837,7 +5377,7 @@
         </div>
 
         <!-- Create/Edit Environment Modal -->
-        <div v-if="showCreateEnvironmentModal || showEditEnvironmentModal" class="modal-overlay" @click="showCreateEnvironmentModal = false; showEditEnvironmentModal = false; resetCurrentEnvironment()">
+        <div v-if="showCreateEnvironmentModal || showEditEnvironmentModal" class="modal-overlay">
             <div class="modal-content" style="max-width: 800px;" @click.stop>
                 <div class="modal-header">
                     <h3>{{ showCreateEnvironmentModal ? 'Create Environment' : 'Edit Environment' }}</h3>
@@ -4887,7 +5427,7 @@
         </div>
 
         <!-- Create/Edit Collection Modal -->
-        <div v-if="showCreateCollectionModal || showEditCollectionModal" class="modal-overlay" @click="showCreateCollectionModal = false; showEditCollectionModal = false; resetCurrentCollection()">
+        <div v-if="showCreateCollectionModal || showEditCollectionModal" class="modal-overlay">
             <div class="modal-content" style="max-width: 800px;" @click.stop>
                 <div class="modal-header">
                     <h3>{{ showCreateCollectionModal ? 'Create Collection' : 'Edit Collection' }}</h3>
@@ -4989,9 +5529,8 @@
         <div v-show="showStepModal && currentActionDef"
              :key="'step-modal-' + (editingStepIndex >= 0 ? editingStepIndex : 'new') + '-' + (currentStep.action || 'none')"
              class="modal-overlay step-editor-modal"
-             @click.self="showStepModal = false"
-             style="z-index: 99999 !important; display: flex !important; position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; background: rgba(0, 0, 0, 0.75) !important; backdrop-filter: blur(4px) !important; visibility: visible !important; opacity: 1 !important;">
-            <div class="modal modal-large" @click.stop style="position: relative !important; z-index: 100000 !important; display: flex !important; flex-direction: column !important; max-height: 90vh !important; overflow: hidden !important; height: auto !important; width: 95% !important; max-width: min(1400px, calc(100vw - 2rem)) !important; background: var(--bg-card) !important; border-radius: 1rem !important; box-shadow: var(--shadow-lg) !important; box-sizing: border-box !important;">
+             style="z-index: 100002 !important; display: flex !important; position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; background: rgba(0, 0, 0, 0.75) !important; backdrop-filter: blur(4px) !important; visibility: visible !important; opacity: 1 !important;">
+            <div class="modal modal-large" @click.stop style="position: relative !important; z-index: 100003 !important; display: flex !important; flex-direction: column !important; max-height: 90vh !important; overflow: hidden !important; height: auto !important; width: 95% !important; max-width: min(1400px, calc(100vw - 2rem)) !important; background: var(--bg-card) !important; border-radius: 1rem !important; box-shadow: var(--shadow-lg) !important; box-sizing: border-box !important;">
                 <div class="modal-header">
                     <h3 class="modal-title">{{ editingStepIndex >= 0 ? 'Edit' : 'Add' }} Step: {{ getActionLabel(currentStep.action) }}</h3>
                     <div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -5491,7 +6030,7 @@
         </div>
 
         <!-- Modal: Create Workspace -->
-        <div v-if="showFolderModal" class="modal-overlay" @click="showFolderModal = false">
+        <div v-if="showFolderModal" class="modal-overlay">
             <div class="modal-dialog" @click.stop>
                 <div class="modal-header">
                     <h3 class="modal-title">Create New Workspace</h3>
@@ -5712,7 +6251,6 @@
         <div v-if="showCreateSuiteModal || showEditSuiteModal"
              class="modal-overlay"
              data-modal-type="create-edit-suite"
-             @click.self="showCreateSuiteModal = false; showEditSuiteModal = false; resetCurrentSuite(); $nextTick(() => { if (window.forceRemoveAllModals) window.forceRemoveAllModals(); })"
              style="z-index: 99999 !important; display: flex !important; position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; background: rgba(0, 0, 0, 0.75) !important; backdrop-filter: blur(4px) !important;">
             <div class="modal-content" style="max-width: 800px;" @click.stop>
                 <div class="modal-header">
@@ -5801,7 +6339,7 @@
     </div>
 
         <!-- Execute Test Suite Modal -->
-        <div v-if="showExecuteSuiteModal" class="modal-overlay" data-modal-type="execute-suite" @click.self="showExecuteSuiteModal = false; $nextTick(() => { if (window.forceRemoveAllModals) window.forceRemoveAllModals(); })">
+        <div v-if="showExecuteSuiteModal" class="modal-overlay" data-modal-type="execute-suite">
             <div class="modal-content" style="max-width: 700px;" @click.stop>
             <div class="modal-header">
                 <h3>Execute Test Suite: {{ currentSuite.name }}</h3>
@@ -5878,10 +6416,8 @@
         <div v-if="showAddTestModal"
              class="modal-overlay"
              data-modal-type="add-test"
-             @click.self.prevent="closeAddTestModal()"
-             @keydown.esc.prevent="closeAddTestModal()"
              :key="'add-test-modal-' + showAddTestModal"
-             style="z-index: 99999 !important; display: flex !important; position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; background: rgba(0, 0, 0, 0.75) !important; backdrop-filter: blur(4px) !important;">
+             style="z-index: 100001 !important; display: flex !important; position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; background: rgba(0, 0, 0, 0.75) !important; backdrop-filter: blur(4px) !important;">
             <div class="modal-content" style="max-width: 700px;" @click.stop>
                 <div class="modal-header">
                     <h3>Add Tests to Suite</h3>
@@ -5900,22 +6436,28 @@
                             </template>
                             <template v-else-if="availableTestsForSuite && availableTestsForSuite.length > 0">
                                 <div v-for="test in availableTestsForSuite" :key="test.id" class="test-selection-item">
-                                    <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 8px; border-radius: 4px; transition: background 0.2s;"
-                                           :style="isTestInSuite(test.id) ? 'background: var(--bg-hover);' : ''"
-                                           @mouseover="$event.currentTarget.style.background = 'var(--bg-hover)'"
-                                           @mouseleave="$event.currentTarget.style.background = isTestInSuite(test.id) ? 'var(--bg-hover)' : 'transparent'">
+                                    <div style="display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 4px; transition: background 0.2s;"
+                                         :style="isTestInSuite(test.id) ? 'background: var(--bg-hover);' : ''"
+                                         @mouseover="$event.currentTarget.style.background = 'var(--bg-hover)'"
+                                         @mouseleave="$event.currentTarget.style.background = isTestInSuite(test.id) ? 'var(--bg-hover)' : 'transparent'">
                                         <input type="checkbox"
                                                :checked="isTestInSuite(test.id)"
                                                @change="toggleTestInSuite(test.id)"
-                                               style="cursor: pointer;">
-                                        <div style="flex: 1;">
+                                               style="cursor: pointer;"
+                                               @click.stop>
+                                        <div style="flex: 1; cursor: pointer;" @click="toggleTestInSuite(test.id)">
                                             <div style="font-weight: 500; color: var(--text-primary);">{{ test.name || test.id }}</div>
                                             <div style="font-size: 12px; color: var(--text-secondary);">
                                                 <span v-if="test.workspace">📁 {{ test.workspace }}</span>
                                                 <span v-if="test.step_count !== undefined"> • {{ test.step_count }} steps</span>
                                             </div>
                                         </div>
-                                    </label>
+                                        <button class="btn btn-icon btn-sm btn-primary"
+                                                @click.stop="editTestFromSuite(test.id)"
+                                                title="Edit Test">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                    </div>
                                 </div>
                             </template>
                             <template v-else>
@@ -5944,7 +6486,7 @@
         </div>
 
         <!-- Create Test From Suite Modal -->
-        <div v-if="showCreateTestFromSuiteModal" class="modal-overlay" @click.self="showCreateTestFromSuiteModal = false">
+        <div v-if="showCreateTestFromSuiteModal" class="modal-overlay" style="z-index: 100001 !important; display: flex !important; position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; background: rgba(0, 0, 0, 0.75) !important; backdrop-filter: blur(4px) !important;">
             <div class="modal-content" style="max-width: 600px;" @click.stop>
                 <div class="modal-header">
                     <h3>Create New Test for Suite</h3>
@@ -5980,11 +6522,112 @@
                 </div>
             </div>
         </div>
+
+        <!-- AI Assistant Chat Panel -->
+        <div v-if="showChatPanel" class="chat-panel-overlay" @mousedown="isResizingChatPanel = false" style="display: flex !important; position: fixed !important; top: 0 !important; right: 0 !important; bottom: 0 !important; z-index: 99998 !important;">
+            <div class="chat-panel" @click.stop :style="{ width: chatPanelWidth + 'px' }">
+                <div 
+                    class="chat-panel-resize-handle" 
+                    :class="{ resizing: isResizingChatPanel }"
+                    @mousedown.stop="startResizeChatPanel"
+                    title="Drag to resize"
+                ></div>
+            <div class="chat-panel-header">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <i class="fas fa-comments" style="color: var(--primary);"></i>
+                    <h3 style="margin: 0; font-size: 1.1rem;">AI Assistant</h3>
+                    <span v-if="chatTokenStatus && chatTokenStatus.tokens_remaining < 10000 && chatTokenStatus.tokens_remaining > 0" class="badge badge-warning" style="font-size: 0.7rem;">Low Tokens</span>
+                    <span v-if="chatTokenStatus && !chatTokenStatus.has_tokens" class="badge badge-danger" style="font-size: 0.7rem;">No Tokens</span>
+                </div>
+                <button class="btn btn-icon btn-secondary" @click="toggleChatPanel" title="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="chat-panel-body">
+                <div v-if="chatTokenStatus && !chatTokenStatus.has_tokens" class="alert alert-danger" style="margin-bottom: 1rem;">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <strong>No tokens remaining.</strong> Please check your OpenAI account billing or wait for the monthly reset.
+                </div>
+                <div v-else-if="chatTokenStatus && chatTokenStatus.tokens_remaining < 10000 && chatTokenStatus.tokens_remaining > 0" class="alert alert-warning" style="margin-bottom: 1rem;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Low tokens:</strong> {{ (chatTokenStatus.tokens_remaining || 0).toLocaleString() }} remaining
+                </div>
+                <div v-if="chatTokenStatus" class="chat-token-status" style="margin-bottom: 1rem; padding: 0.75rem; background: var(--bg-secondary); border-radius: 0.5rem; font-size: 0.875rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: var(--text-secondary);">Tokens Used:</span>
+                        <span style="font-weight: 500;">{{ (chatTokenStatus.tokens_used || 0).toLocaleString() }} / {{ (chatTokenStatus.free_tier_limit || 100000).toLocaleString() }}</span>
+                    </div>
+                    <div style="margin-top: 0.5rem;">
+                        <div style="height: 6px; background: var(--border); border-radius: 3px; overflow: hidden;">
+                            <div :style="`height: 100%; background: ${(chatTokenStatus.tokens_remaining || 0) < 10000 ? '#f59e0b' : '#3b82f6'}; width: ${Math.min(100, ((chatTokenStatus.tokens_used || 0) / (chatTokenStatus.free_tier_limit || 100000)) * 100)}%`"></div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-muted);">
+                        {{ (chatTokenStatus.tokens_remaining || 0).toLocaleString() }} remaining
+                        <span v-if="chatTokenStatus.reset_date"> • Resets {{ formatDate(chatTokenStatus.reset_date) }}</span>
+                    </div>
+                </div>
+                <div ref="chatMessagesContainer" class="chat-messages" style="flex: 1; overflow-y: auto; padding: 1rem; background: var(--bg-main); border-radius: 0.5rem; min-height: 300px; max-height: 500px;">
+                    <div v-if="chatMessages.length === 0" class="empty-state-small" style="text-align: center; padding: 2rem;">
+                        <i class="fas fa-comments" style="font-size: 2rem; color: var(--text-muted); margin-bottom: 1rem;"></i>
+                        <p style="color: var(--text-secondary);">Start a conversation with the AI Assistant</p>
+                        <p style="font-size: 0.875rem; color: var(--text-muted); margin-top: 0.5rem;">Ask questions about your tests, get help with test automation, or request explanations.</p>
+                    </div>
+                    <div v-for="(message, index) in chatMessages" :key="index" class="chat-message" :class="'chat-message-' + message.role">
+                        <div class="chat-message-content" v-html="formatChatMessage(message.content)"></div>
+                    </div>
+                    <div v-if="chatLoading" class="chat-message chat-message-assistant">
+                        <div class="chat-message-content">
+                            <i class="fas fa-spinner fa-spin"></i> Thinking...
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-input-container" style="margin-top: 1rem;">
+                    <div style="display: flex; gap: 0.5rem;">
+                        <input
+                            v-model="chatInput"
+                            @keyup.enter="sendChatMessage"
+                            type="text"
+                            class="form-control"
+                            placeholder="Type your message..."
+                            :disabled="chatLoading || (chatTokenStatus && !chatTokenStatus.has_tokens)"
+                            style="flex: 1;"
+                        >
+                        <button
+                            class="btn btn-primary"
+                            @click="sendChatMessage"
+                            :disabled="!chatInput.trim() || chatLoading || (chatTokenStatus && !chatTokenStatus.has_tokens)"
+                            title="Send message (Enter)"
+                        >
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     <!-- End of #app div -->
 
     <script>
         const { createApp } = Vue;
+        
+        // Configure axios to prevent caching for GET requests
+        // Add timestamp to all GET requests to ensure fresh data
+        if (typeof axios !== 'undefined') {
+            axios.interceptors.request.use(config => {
+                // Add cache-busting parameter to GET requests
+                // Skip if URL already has _t parameter
+                // Only add to API endpoints (not static files or other resources)
+                if ((config.method === 'get' || config.method === 'GET') && 
+                    config.url && 
+                    !config.url.includes('_t=') &&
+                    (config.url.startsWith('/api/') || config.url.includes('/api/'))) {
+                    const separator = config.url.includes('?') ? '&' : '?';
+                    config.url = `${config.url}${separator}_t=${Date.now()}`;
+                }
+                return config;
+            });
+        }
 
         // Check if VueRouter is available (from CDN) - make it optional
         let router = null;
@@ -5992,7 +6635,7 @@
             if (typeof VueRouter !== 'undefined' && VueRouter.createRouter) {
                 const { createRouter, createWebHistory } = VueRouter;
 
-                // Define routes
+                // Define routes for all pages
                 const routes = [
                     {
                         path: '/',
@@ -6000,8 +6643,18 @@
                         component: { template: '<div></div>' } // Will be handled by view logic
                     },
                     {
+                        path: '/dashboard',
+                        name: 'dashboard-alt',
+                        component: { template: '<div></div>' }
+                    },
+                    {
                         path: '/tests',
                         name: 'tests',
+                        component: { template: '<div></div>' }
+                    },
+                    {
+                        path: '/tests/new',
+                        name: 'test-new',
                         component: { template: '<div></div>' }
                     },
                     {
@@ -6022,6 +6675,36 @@
                     {
                         path: '/suites/:id',
                         name: 'suite-detail',
+                        component: { template: '<div></div>' }
+                    },
+                    {
+                        path: '/actions',
+                        name: 'actions',
+                        component: { template: '<div></div>' }
+                    },
+                    {
+                        path: '/templates',
+                        name: 'templates',
+                        component: { template: '<div></div>' }
+                    },
+                    {
+                        path: '/docs',
+                        name: 'docs',
+                        component: { template: '<div></div>' }
+                    },
+                    {
+                        path: '/variables',
+                        name: 'variables',
+                        component: { template: '<div></div>' }
+                    },
+                    {
+                        path: '/metrics',
+                        name: 'metrics',
+                        component: { template: '<div></div>' }
+                    },
+                    {
+                        path: '/settings',
+                        name: 'settings',
                         component: { template: '<div></div>' }
                     }
                 ];
@@ -6045,9 +6728,30 @@
                 const savedTestId = localStorage.getItem('testBuilder_currentTestId');
                 const savedResultsPage = parseInt(localStorage.getItem('testBuilder_resultsPage') || '1');
                 const savedWorkspace = localStorage.getItem('testBuilder_selectedWorkspace');
+                const savedContainerWidth = parseInt(localStorage.getItem('testBuilder_containerWidth') || '1000');
+                const savedChatPanelWidth = parseInt(localStorage.getItem('testBuilder_chatPanelWidth') || '450');
 
+                // Restore chat panel state from localStorage
+                const savedChatPanelState = localStorage.getItem('testBuilder_chatPanelOpen');
+                const savedChatMessages = localStorage.getItem('testBuilder_chatMessages');
+                
                 return {
                     view: savedView,
+                    containerWidth: savedContainerWidth,
+                    isResizing: false,
+                    showChatPanel: savedChatPanelState === 'true', // Restore chat panel state
+                    chatPanelWidth: savedChatPanelWidth,
+                    isResizingChatPanel: false,
+                    chatMessages: savedChatMessages ? JSON.parse(savedChatMessages) : [],
+                    chatInput: '',
+                    chatLoading: false,
+                    chatTokenStatus: {
+                        tokens_used: 0,
+                        tokens_remaining: 100000,
+                        free_tier_limit: 100000,
+                        has_tokens: true,
+                        reset_date: null
+                    },
                     tests: [],
                     folders: [],
                     selectedFolder: savedFolder ? JSON.parse(savedFolder) : null,
@@ -6190,6 +6894,7 @@
                         workspace: null,
                         description: ''
                     },
+                    editingTestFromSuite: null, // Context for editing test from suite
                     showSuiteDetailView: false,
                     selectedSuiteId: null,
                     selectedSuite: null,
@@ -6244,6 +6949,7 @@
                         }
                     },
                     loadingMetrics: false,
+                    metricsPeriod: '30', // Default to 30 days (1 month)
                     // Variables management
                     environments: [],
                     collections: [],
@@ -6258,6 +6964,11 @@
                         include_screenshots: false,
                         include_html_report: false
                     },
+                    openaiConfig: {
+                        api_key: ''
+                    },
+                    teamsTestResult: null,
+                    openaiTestResult: null,
                     teamsTestResult: null,
                     showCreateCollectionModal: false,
                     showEditCollectionModal: false,
@@ -6419,12 +7130,18 @@
 
                             const routeToViewMap = {
                                 '/': 'dashboard',
+                                '/dashboard': 'dashboard',
                                 '/tests': 'tests',
                                 '/results': 'results',
-                                '/suites': 'test-suites'
+                                '/suites': 'test-suites',
+                                '/actions': 'actions',
+                                '/templates': 'templates',
+                                '/docs': 'docs',
+                                '/variables': 'variables',
+                                '/metrics': 'metrics'
                             };
 
-                            // Handle dynamic routes
+                            // Handle dynamic routes - always fetch fresh data
                             if (to.path.startsWith('/tests/') && to.params.id) {
                                 if (to.params.id === 'new') {
                                     this.view = 'builder';
@@ -6434,19 +7151,62 @@
                                 } else {
                                     this.view = 'builder';
                                     this.currentTestId = to.params.id;
-                                    this.loadTest(to.params.id);
+                                    // Always reload test to get fresh data
+                                    this.loadTest(to.params.id).catch(err => {
+                                        console.error('Failed to load test on route change:', err);
+                                        // Redirect to tests list if test not found
+                                        if (this.$router) {
+                                            this.$router.push('/tests').catch(() => {});
+                                        }
+                                    });
                                 }
                             } else if (to.path.startsWith('/suites/') && to.params.id) {
-                                this.view = 'suite-detail';
-                                const suite = this.testSuites.find(s => s.id === to.params.id);
-                                if (suite) {
-                                    this.viewSuiteDetails(suite);
-                                }
+                                this.view = 'test-suites';
+                                // Always reload suites to get fresh data, then load suite details
+                                this.loadTestSuites().then(() => {
+                                    const suite = this.testSuites.find(s => s.id === to.params.id);
+                                    if (suite) {
+                                        // Always reload suite details to get fresh data
+                                        this.viewSuiteDetails(suite);
+                                    } else {
+                                        // Suite not found, redirect
+                                        if (this.$router) {
+                                            this.$router.push('/suites').catch(() => {});
+                                        }
+                                    }
+                                }).catch(err => {
+                                    console.error('Failed to load suites on route change:', err);
+                                    if (this.$router) {
+                                        this.$router.push('/suites').catch(() => {});
+                                    }
+                                });
                             } else if (routeToViewMap[to.path]) {
-                                this.view = routeToViewMap[to.path];
+                                const targetView = routeToViewMap[to.path];
+                                this.view = targetView;
+                                
+                                // Always load fresh data for the view when route changes
+                                if (targetView === 'dashboard') {
+                                    this.loadDashboard();
+                                } else if (targetView === 'tests') {
+                                    this.loadTests();
+                                } else if (targetView === 'results') {
+                                    this.loadResults();
+                                } else if (targetView === 'test-suites') {
+                                    this.loadTestSuites();
+                                } else if (targetView === 'actions') {
+                                    this.loadActions();
+                                } else if (targetView === 'templates') {
+                                    this.loadTemplates();
+                                } else if (targetView === 'variables') {
+                                    this.loadVariables();
+                                } else if (targetView === 'metrics') {
+                                    this.loadMetrics();
+                                } else if (targetView === 'settings') {
+                                    this.loadSettings();
+                                }
                             }
                         },
-                        immediate: false
+                        immediate: true // Run immediately to handle page refreshes
                     }
                 } : {}),
                 // Watch view changes to load actions when switching to actions view
@@ -6466,6 +7226,15 @@
                 this.showCreateSuiteModal = false;
                 this.showEditSuiteModal = false;
                 this.showExecuteSuiteModal = false;
+                // Restore chat panel state from localStorage (don't force hide)
+                const savedChatPanelState = localStorage.getItem('testBuilder_chatPanelOpen');
+                if (savedChatPanelState === 'true') {
+                    this.showChatPanel = true;
+                    // Update context when restoring chat panel
+                    this.$nextTick(() => {
+                        this.updateChatContext();
+                    });
+                }
                 // Only clear result modal if not actively viewing a result
                 if (!this.currentResult) {
                     this.showResultModal = false;
@@ -6475,6 +7244,7 @@
 
                 // Force remove any existing modals from DOM, but preserve progress and result modals if they should be shown
                 const existingOverlays = document.querySelectorAll('.modal-overlay');
+                const existingChatPanels = document.querySelectorAll('.chat-panel-overlay');
                 if (existingOverlays.length > 0) {
                     console.log(`Clearing ${existingOverlays.length} existing modal overlays on mount`);
                     existingOverlays.forEach(overlay => {
@@ -6495,18 +7265,39 @@
                         overlay.remove();
                     });
                 }
+                // Always remove chat panels on mount (but only if showChatPanel is false)
+                // BUT wait a bit to ensure Vue has rendered first
+                this.$nextTick(() => {
+                    setTimeout(() => {
+                        if (!this.showChatPanel) {
+                            const existingChatPanels = document.querySelectorAll('.chat-panel-overlay');
+                            if (existingChatPanels.length > 0) {
+                                console.log(`Removing ${existingChatPanels.length} chat panel overlays on mount (after Vue render)`);
+                                existingChatPanels.forEach(panel => panel.remove());
+                            }
+                        }
+                    }, 500);
+                });
 
                 await this.loadFolders();
                 await this.loadActions();
                 await this.loadTemplates();
 
                 // Initialize router - sync current route to view (only if router is available)
+                // This handles page refreshes by restoring state from the URL
                 if (this.$router && this.$route) {
                     const routeToViewMap = {
                         '/': 'dashboard',
+                        '/dashboard': 'dashboard',
                         '/tests': 'tests',
                         '/results': 'results',
-                        '/suites': 'test-suites'
+                        '/suites': 'test-suites',
+                        '/actions': 'actions',
+                        '/templates': 'templates',
+                        '/docs': 'docs',
+                        '/variables': 'variables',
+                        '/metrics': 'metrics',
+                        '/settings': 'settings'
                     };
 
                     if (this.$route.path.startsWith('/tests/') && this.$route.params.id) {
@@ -6518,17 +7309,62 @@
                         } else {
                             this.view = 'builder';
                             this.currentTestId = this.$route.params.id;
-                            await this.loadTest(this.$route.params.id);
+                            try {
+                                // Always reload test to get fresh data
+                                await this.loadTest(this.$route.params.id);
+                            } catch (error) {
+                                console.error('Failed to load test on mount:', error);
+                                // If test doesn't exist, redirect to tests list
+                                if (this.$router) {
+                                    this.$router.push('/tests').catch(() => {});
+                                }
+                            }
                         }
                     } else if (this.$route.path.startsWith('/suites/') && this.$route.params.id) {
-                        this.view = 'suite-detail';
-                        // Load suite details
-                        const suite = this.testSuites.find(s => s.id === this.$route.params.id);
-                        if (suite) {
-                            await this.viewSuiteDetails(suite);
+                        this.view = 'test-suites';
+                        // Always reload suites to get fresh data
+                        try {
+                            await this.loadTestSuites();
+                            const suite = this.testSuites.find(s => s.id === this.$route.params.id);
+                            if (suite) {
+                                // Always reload suite details to get fresh data
+                                await this.viewSuiteDetails(suite);
+                            } else {
+                                // Suite not found, redirect to suites list
+                                if (this.$router) {
+                                    this.$router.push('/suites').catch(() => {});
+                                }
+                            }
+                        } catch (error) {
+                            console.error('Failed to load suites on mount:', error);
+                            if (this.$router) {
+                                this.$router.push('/suites').catch(() => {});
+                            }
                         }
                     } else if (routeToViewMap[this.$route.path]) {
-                        this.view = routeToViewMap[this.$route.path];
+                        const targetView = routeToViewMap[this.$route.path];
+                        this.view = targetView;
+                        
+                        // Always load fresh data for the view on mount
+                        if (targetView === 'dashboard') {
+                            await this.loadDashboard();
+                        } else if (targetView === 'tests') {
+                            await this.loadTests();
+                        } else if (targetView === 'results') {
+                            await this.loadResults();
+                        } else if (targetView === 'test-suites') {
+                            await this.loadTestSuites();
+                        } else if (targetView === 'actions') {
+                            await this.loadActions();
+                        } else if (targetView === 'templates') {
+                            await this.loadTemplates();
+                        } else if (targetView === 'variables') {
+                            await this.loadVariables();
+                        } else if (targetView === 'metrics') {
+                            await this.loadMetrics();
+                        } else if (targetView === 'settings') {
+                            await this.loadSettings();
+                        }
                     }
                 }
 
@@ -6579,9 +7415,581 @@
                     if (newView === 'actions' && Object.keys(this.actionsByCategory).length === 0) {
                         this.loadActions();
                     }
+                    // Update chat context when view changes
+                    if (this.showChatPanel) {
+                        this.updateChatContext();
+                    }
+                },
+                selectedFolder(newVal, oldVal) {
+                    // Update chat context when folder/workspace changes
+                    if (this.showChatPanel) {
+                        this.updateChatContext();
+                    }
+                },
+                currentTestId(newVal, oldVal) {
+                    // Update chat context when test changes
+                    if (this.showChatPanel) {
+                        this.updateChatContext();
+                    }
+                },
+                chatMessages: {
+                    handler(newMessages, oldMessages) {
+                        // Persist chat messages to localStorage
+                        if (newMessages && newMessages.length > 0) {
+                            localStorage.setItem('testBuilder_chatMessages', JSON.stringify(newMessages));
+                        } else {
+                            localStorage.removeItem('testBuilder_chatMessages');
+                        }
+                    },
+                    deep: true
+                },
+                showChatPanel(newVal, oldVal) {
+                    console.log('showChatPanel watcher triggered:', oldVal, '->', newVal);
+                    
+                    // Persist chat panel state to localStorage
+                    localStorage.setItem('testBuilder_chatPanelOpen', String(newVal));
+                    
+                    if (!newVal) {
+                        // Remove manual panel when closing
+                        const manualPanel = document.querySelector('.chat-panel-overlay[data-manual]');
+                        if (manualPanel) {
+                            manualPanel.remove();
+                            console.log('Removed manual chat panel');
+                        }
+                        // Reset content margin when closing
+                        this.updateContentMargin();
+                        document.body.classList.remove('chat-panel-open');
+                    } else {
+                        // Update context when opening
+                        this.updateChatContext();
+                        // Update content margin when opening
+                        this.$nextTick(() => {
+                            this.updateContentMargin();
+                        });
+                        document.body.classList.add('chat-panel-open');
+                    }
+                    this.$nextTick(() => {
+                        const panel = document.querySelector('.chat-panel-overlay');
+                        console.log('Panel in DOM after watcher:', !!panel);
+                        if (!panel && newVal) {
+                            console.error('Panel should be visible but is not in DOM! Creating manually...');
+                            console.log('Vue showChatPanel value:', this.showChatPanel);
+                            // Force re-render first
+                            this.$forceUpdate();
+                            setTimeout(() => {
+                                const panel2 = document.querySelector('.chat-panel-overlay');
+                                console.log('Panel after forceUpdate:', !!panel2);
+                                if (!panel2) {
+                                    // Still not there, create manually
+                                    this.createChatPanelManually();
+                                }
+                            }, 100);
+                        }
+                    });
                 }
             },
             methods: {
+                async loadChatTokenStatus() {
+                    try {
+                        const response = await axios.get('/api/chat/tokens');
+                        this.chatTokenStatus = response.data;
+                    } catch (error) {
+                        console.error('Failed to load chat token status:', error);
+                        // Set default values if endpoint fails
+                        this.chatTokenStatus = {
+                            tokens_used: 0,
+                            tokens_remaining: 100000,
+                            free_tier_limit: 100000,
+                            has_tokens: true,
+                            reset_date: null
+                        };
+                    }
+                },
+                async sendChatMessage() {
+                    // Get input value from either Vue binding or manual input
+                    let messageText = this.chatInput;
+                    const manualInput = document.getElementById('manual-chat-input');
+                    if (manualInput && manualInput.value.trim() && !messageText.trim()) {
+                        messageText = manualInput.value;
+                        this.chatInput = messageText;
+                    }
+                    
+                    if (!messageText.trim() || this.chatLoading || (this.chatTokenStatus && !this.chatTokenStatus.has_tokens)) {
+                        console.log('Cannot send message:', {
+                            hasText: !!messageText.trim(),
+                            isLoading: this.chatLoading,
+                            hasTokens: this.chatTokenStatus?.has_tokens
+                        });
+                        return;
+                    }
+                    
+                    const userMessage = messageText.trim();
+                    this.chatInput = '';
+                    // Also clear manual input if it exists
+                    if (manualInput) {
+                        manualInput.value = '';
+                    }
+                    
+                    // Add user message
+                    this.chatMessages.push({
+                        role: 'user',
+                        content: userMessage
+                    });
+                    
+                    this.chatLoading = true;
+                    
+                    // Scroll to bottom
+                    this.$nextTick(() => {
+                        this.scrollChatToBottom();
+                    });
+                    
+                    try {
+                        // Build conversation history
+                        const conversationHistory = this.chatMessages
+                            .filter(msg => msg.role !== 'user' || msg.content !== userMessage)
+                            .slice(-10) // Keep last 10 messages for context
+                            .map(msg => ({
+                                role: msg.role,
+                                content: msg.content
+                            }));
+                        
+                        // Get API key from config
+                        const apiKey = this.openaiConfig.api_key || localStorage.getItem('openai_api_key');
+                        
+                        // Build context about the current environment (always get fresh context)
+                        const context = this.buildChatContext();
+                        
+                        // Update context in localStorage for persistence
+                        localStorage.setItem('testBuilder_chatContext', JSON.stringify(context));
+                        
+                        const response = await axios.post('/api/chat', {
+                            message: userMessage,
+                            conversation_history: conversationHistory,
+                            context: context
+                        }, {
+                            headers: apiKey ? {
+                                'X-OpenAI-API-Key': apiKey
+                            } : {}
+                        });
+                        
+                        // Update token status
+                        this.chatTokenStatus.tokens_used = response.data.tokens_used;
+                        this.chatTokenStatus.tokens_remaining = response.data.tokens_remaining;
+                        this.chatTokenStatus.has_tokens = response.data.tokens_remaining > 0;
+                        
+                        if (response.data.error) {
+                            // Show error message
+                            this.chatMessages.push({
+                                role: 'assistant',
+                                content: `❌ **Error:** ${response.data.error}`
+                            });
+                        } else {
+                            // Add assistant response
+                            this.chatMessages.push({
+                                role: 'assistant',
+                                content: response.data.response
+                            });
+                        }
+                        
+                        // Scroll to bottom
+                        this.$nextTick(() => {
+                            this.scrollChatToBottom();
+                        });
+                    } catch (error) {
+                        console.error('Chat error:', error);
+                        const errorMsg = error.response?.data?.detail || error.message || 'Failed to get response from AI assistant';
+                        this.chatMessages.push({
+                            role: 'assistant',
+                            content: `❌ **Error:** ${errorMsg}`
+                        });
+                        
+                        // Update token status if available
+                        if (error.response?.data?.tokens_remaining !== undefined) {
+                            this.chatTokenStatus.tokens_remaining = error.response.data.tokens_remaining;
+                            this.chatTokenStatus.has_tokens = error.response.data.tokens_remaining > 0;
+                        }
+                    } finally {
+                        this.chatLoading = false;
+                    }
+                },
+                toggleChatPanel() {
+                    console.log('toggleChatPanel called, current state:', this.showChatPanel);
+                    const newState = !this.showChatPanel;
+                    console.log('Setting showChatPanel to:', newState);
+                    
+                    // Use Vue.set or direct assignment
+                    this.showChatPanel = newState;
+                    
+                    // Persist chat panel state to localStorage
+                    localStorage.setItem('testBuilder_chatPanelOpen', String(newState));
+                    
+                    console.log('After assignment, showChatPanel is:', this.showChatPanel);
+                    
+                    // Toggle body class for content adjustment
+                    if (this.showChatPanel) {
+                        document.body.classList.add('chat-panel-open');
+                        // Update margin based on current width
+                        this.$nextTick(() => {
+                            this.updateContentMargin();
+                        });
+                    } else {
+                        document.body.classList.remove('chat-panel-open');
+                        // Update margin immediately and after Vue updates
+                        this.updateContentMargin();
+                        this.$nextTick(() => {
+                            this.updateContentMargin();
+                        });
+                    }
+                    
+                    if (this.showChatPanel) {
+                        // Load token status when opening
+                        console.log('Opening chat panel, loading token status...');
+                        this.loadChatTokenStatus();
+                        
+                        // Update context when opening
+                        this.updateChatContext();
+                        
+                        // Wait for Vue to render, then check
+                        this.$nextTick(() => {
+                            setTimeout(() => {
+                                console.log('Checking for chat panel in DOM (after delay)...');
+                                const panel = document.querySelector('.chat-panel-overlay');
+                                const panelAlt = document.querySelector('[class*="chat-panel"]');
+                                const input = document.querySelector('.chat-input-container input');
+                                console.log('Panel found (overlay):', !!panel);
+                                console.log('Panel found (any chat-panel):', !!panelAlt);
+                                console.log('Input found:', !!input);
+                                console.log('showChatPanel in Vue:', this.showChatPanel);
+                                
+                                if (panel) {
+                                    const styles = window.getComputedStyle(panel);
+                                    console.log('Panel styles - display:', styles.display, 'visibility:', styles.visibility, 'opacity:', styles.opacity);
+                                    console.log('Panel position:', styles.position, 'z-index:', styles.zIndex);
+                                } else {
+                                    console.error('Panel NOT found in DOM! Attempting to manually create it...');
+                                    // Manually create the panel as a fallback
+                                    this.createChatPanelManually();
+                                }
+                                
+                                if (input) {
+                                    setTimeout(() => input.focus(), 100);
+                                }
+                                this.scrollChatToBottom();
+                            }, 200);
+                        });
+                    } else {
+                        // Clear chat input when closing
+                        console.log('Closing chat panel');
+                        this.chatInput = '';
+                    }
+                },
+                startResizeChatPanel(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.isResizingChatPanel = true;
+                    const startX = e.clientX;
+                    const startWidth = this.chatPanelWidth;
+                    const screenWidth = window.innerWidth;
+                    const sidebarWidth = 280; // Approximate sidebar width
+                    
+                    const doResize = (e) => {
+                        if (!this.isResizingChatPanel) return;
+                        const deltaX = startX - e.clientX; // Inverted because we're resizing from the left
+                        // Calculate max width based on screen size
+                        const maxWidth = Math.min(800, screenWidth - sidebarWidth - 50); // Leave 50px margin
+                        const newWidth = Math.max(300, Math.min(maxWidth, startWidth + deltaX));
+                        this.chatPanelWidth = newWidth;
+                        this.updateContentMargin();
+                    };
+                    
+                    const stopResize = () => {
+                        this.isResizingChatPanel = false;
+                        localStorage.setItem('testBuilder_chatPanelWidth', this.chatPanelWidth.toString());
+                        document.removeEventListener('mousemove', doResize);
+                        document.removeEventListener('mouseup', stopResize);
+                        document.body.style.cursor = '';
+                    };
+                    
+                    document.addEventListener('mousemove', doResize);
+                    document.addEventListener('mouseup', stopResize);
+                    document.body.style.cursor = 'ew-resize';
+                },
+                updateContentMargin() {
+                    const contentArea = document.querySelector('.content-area');
+                    if (contentArea) {
+                        if (this.showChatPanel) {
+                            // Check screen width - on smaller screens, don't push content
+                            const screenWidth = window.innerWidth;
+                            if (screenWidth <= 1024) {
+                                // On small screens, chat panel overlays, don't push content
+                                contentArea.style.marginRight = '0';
+                            } else {
+                                // On larger screens, push content
+                                const maxWidth = Math.min(this.chatPanelWidth, screenWidth - 320); // 320px for sidebar
+                                contentArea.style.marginRight = maxWidth + 'px';
+                            }
+                        } else {
+                            // Reset margin when panel is closed
+                            contentArea.style.marginRight = '0';
+                            // Force a reflow to ensure the change takes effect
+                            contentArea.offsetHeight;
+                        }
+                    }
+                },
+                buildChatContext() {
+                    // Build context about the current environment for the AI
+                    const context = {
+                        current_view: this.view,
+                        current_test: this.currentTest ? {
+                            name: this.currentTest.name,
+                            description: this.currentTest.description,
+                            workspace: this.currentTest.workspace,
+                            folder: this.currentTestFolder || this.currentTest.workspace,
+                            test_id: this.currentTestId,
+                            step_count: this.currentTest.steps ? this.currentTest.steps.length : 0
+                        } : null,
+                        selected_result: this.selectedResult ? {
+                            test_name: this.getTestName(this.selectedResult),
+                            status: this.selectedResult.status,
+                            return_code: this.selectedResult.return_code
+                        } : null,
+                        recent_errors: this.results ? this.results
+                            .filter(r => r.status === 'failed' || r.status === 'error')
+                            .slice(0, 3)
+                            .map(r => ({
+                                test_name: this.getTestName(r),
+                                status: r.status,
+                                timestamp: r.started
+                            })) : [],
+                        workspace: this.selectedFolder || this.selectedWorkspace,
+                        current_directory: this.selectedFolder,
+                        available_workspaces: this.folders ? this.folders.map(f => ({
+                            name: f.name,
+                            path: f.path,
+                            description: f.description
+                        })) : [],
+                        available_directories: this.folders || [],
+                        test_count: this.tests ? this.tests.length : 0,
+                        current_route: this.$route ? this.$route.path : null
+                    };
+                    
+                    return context;
+                },
+                updateChatContext() {
+                    // Update chat context and store in localStorage
+                    const context = this.buildChatContext();
+                    localStorage.setItem('testBuilder_chatContext', JSON.stringify(context));
+                },
+                createChatPanelManually() {
+                    // Remove any existing manually created panel
+                    const existing = document.querySelector('.chat-panel-overlay[data-manual]');
+                    if (existing) existing.remove();
+                    
+                    // Create the panel manually
+                    const overlay = document.createElement('div');
+                    overlay.className = 'chat-panel-overlay';
+                    overlay.setAttribute('data-manual', 'true');
+                    overlay.style.cssText = 'position: fixed !important; top: 0 !important; right: 0 !important; bottom: 0 !important; z-index: 99999 !important; display: flex !important; justify-content: flex-end; align-items: stretch; pointer-events: none;';
+                    overlay.onmousedown = () => { this.isResizingChatPanel = false; };
+                    
+                    const panel = document.createElement('div');
+                    panel.className = 'chat-panel';
+                    panel.style.cssText = `width: ${this.chatPanelWidth}px; pointer-events: auto;`;
+                    panel.onclick = (e) => e.stopPropagation();
+                    
+                    // Create resize handle
+                    const resizeHandle = document.createElement('div');
+                    resizeHandle.className = 'chat-panel-resize-handle';
+                    resizeHandle.title = 'Drag to resize';
+                    resizeHandle.onmousedown = (e) => {
+                        e.stopPropagation();
+                        this.startResizeChatPanel(e);
+                    };
+                    panel.appendChild(resizeHandle);
+                    
+                    // Create header
+                    const header = document.createElement('div');
+                    header.className = 'chat-panel-header';
+                    header.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <i class="fas fa-comments" style="color: var(--primary);"></i>
+                            <h3 style="margin: 0; font-size: 1.1rem;">AI Assistant</h3>
+                        </div>
+                        <button class="btn btn-icon btn-secondary" onclick="window.vueApp.toggleChatPanel()" title="Close">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    `;
+                    panel.appendChild(header);
+                    
+                    // Create body with Vue component content
+                    const body = document.createElement('div');
+                    body.className = 'chat-panel-body';
+                    const messagesContainer = document.createElement('div');
+                    messagesContainer.className = 'chat-messages';
+                    messagesContainer.id = 'manual-chat-messages';
+                    messagesContainer.style.cssText = 'flex: 1; overflow-y: auto; padding: 1rem; background: var(--bg-main); border-radius: 0.5rem; min-height: 300px; max-height: 500px;';
+                    
+                    // Function to update messages display
+                    const updateMessages = () => {
+                        if (this.chatMessages.length === 0) {
+                            messagesContainer.innerHTML = `
+                                <div class="empty-state-small" style="text-align: center; padding: 2rem;">
+                                    <i class="fas fa-comments" style="font-size: 2rem; color: var(--text-muted); margin-bottom: 1rem;"></i>
+                                    <p style="color: var(--text-secondary);">Start a conversation with the AI Assistant</p>
+                                </div>
+                            `;
+                        } else {
+                            messagesContainer.innerHTML = this.chatMessages.map((msg, idx) => {
+                                const formatted = this.formatChatMessage(msg.content);
+                                return `<div class="chat-message chat-message-${msg.role}">
+                                    <div class="chat-message-content">${formatted}</div>
+                                </div>`;
+                            }).join('');
+                            if (this.chatLoading) {
+                                messagesContainer.innerHTML += `
+                                    <div class="chat-message chat-message-assistant">
+                                        <div class="chat-message-content">
+                                            <i class="fas fa-spinner fa-spin"></i> Thinking...
+                                        </div>
+                                    </div>
+                                `;
+                            }
+                            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                        }
+                    };
+                    
+                    // Store update function for later use
+                    this.updateManualChatMessages = updateMessages;
+                    
+                    // Watch for message changes using Vue watcher
+                    const unwatch = this.$watch('chatMessages', () => {
+                        updateMessages();
+                    }, { deep: true });
+                    
+                    // Also watch loading state
+                    this.$watch('chatLoading', () => {
+                        updateMessages();
+                    });
+                    
+                    // Initial update
+                    updateMessages();
+                    body.appendChild(messagesContainer);
+                    
+                    // Add input container
+                    const inputContainer = document.createElement('div');
+                    inputContainer.className = 'chat-input-container';
+                    inputContainer.style.cssText = 'margin-top: 1rem;';
+                    const inputDiv = document.createElement('div');
+                    inputDiv.style.cssText = 'display: flex; gap: 0.5rem;';
+                    
+                    const input = document.createElement('input');
+                    input.id = 'manual-chat-input';
+                    input.type = 'text';
+                    input.className = 'form-control';
+                    input.placeholder = 'Type your message...';
+                    input.style.cssText = 'flex: 1;';
+                    
+                    // Bind input to Vue data
+                    input.addEventListener('input', (e) => {
+                        this.chatInput = e.target.value;
+                        console.log('Input changed:', e.target.value);
+                    });
+                    
+                    // Handle Enter key
+                    input.addEventListener('keyup', (e) => {
+                        if (e.key === 'Enter' && input.value.trim()) {
+                            console.log('Enter pressed, sending message:', input.value);
+                            this.chatInput = input.value;
+                            this.sendChatMessage().then(() => {
+                                input.value = '';
+                                this.chatInput = '';
+                            }).catch(err => {
+                                console.error('Error sending message:', err);
+                            });
+                        }
+                    });
+                    
+                    const sendButton = document.createElement('button');
+                    sendButton.className = 'btn btn-primary';
+                    sendButton.title = 'Send message (Enter)';
+                    sendButton.innerHTML = '<i class="fas fa-paper-plane"></i>';
+                    sendButton.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('Send button clicked, input value:', input.value);
+                        if (input.value.trim()) {
+                            this.chatInput = input.value;
+                            this.sendChatMessage().then(() => {
+                                input.value = '';
+                                this.chatInput = '';
+                            }).catch(err => {
+                                console.error('Error sending message:', err);
+                            });
+                        } else {
+                            console.log('Input is empty, cannot send');
+                        }
+                    });
+                    
+                    inputDiv.appendChild(input);
+                    inputDiv.appendChild(sendButton);
+                    inputContainer.appendChild(inputDiv);
+                    body.appendChild(inputContainer);
+                    panel.appendChild(body);
+                    
+                    overlay.appendChild(panel);
+                    document.body.appendChild(overlay);
+                    
+                    console.log('Manually created chat panel');
+                    this.updateContentMargin();
+                    
+                    // Focus the input after a short delay
+                    setTimeout(() => {
+                        input.focus();
+                        console.log('Input focused');
+                    }, 100);
+                },
+                scrollChatToBottom() {
+                    const container = this.$refs.chatMessagesContainer;
+                    if (container) {
+                        container.scrollTop = container.scrollHeight;
+                    }
+                },
+                formatChatMessage(text) {
+                    // Simple markdown-like formatting
+                    return text
+                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                        .replace(/`(.*?)`/g, '<code>$1</code>')
+                        .replace(/\n/g, '<br>');
+                },
+                startResize(e) {
+                    this.isResizing = true;
+                    const startX = e.clientX;
+                    const startWidth = this.containerWidth;
+                    
+                    const doResize = (e) => {
+                        const deltaX = e.clientX - startX;
+                        const newWidth = Math.max(600, Math.min(2000, startWidth + deltaX));
+                        this.containerWidth = newWidth;
+                    };
+                    
+                    const stopResize = () => {
+                        this.isResizing = false;
+                        localStorage.setItem('testBuilder_containerWidth', this.containerWidth.toString());
+                        document.removeEventListener('mousemove', doResize);
+                        document.removeEventListener('mouseup', stopResize);
+                        document.body.style.cursor = '';
+                    };
+                    
+                    document.addEventListener('mousemove', doResize);
+                    document.addEventListener('mouseup', stopResize);
+                    document.body.style.cursor = 'ew-resize';
+                    e.preventDefault();
+                },
+                resetContainerWidth() {
+                    this.containerWidth = 1000;
+                    localStorage.setItem('testBuilder_containerWidth', '1000');
+                },
                 hasMissingRequiredParameters(step) {
                     // Find the action definition for this step
                     let actionDef = null;
@@ -6743,21 +8151,28 @@
                             const isChecked = this.isTestInSuite(test.id);
                             return `
                                 <div class="test-selection-item">
-                                    <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 8px; border-radius: 4px; transition: background 0.2s; ${isChecked ? 'background: var(--bg-hover);' : ''}"
-                                           onmouseover="this.style.background = 'var(--bg-hover)'"
-                                           onmouseleave="this.style.background = '${isChecked ? 'var(--bg-hover)' : 'transparent'}'">
+                                    <div style="display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 4px; transition: background 0.2s; ${isChecked ? 'background: var(--bg-hover);' : ''}"
+                                         onmouseover="this.style.background = 'var(--bg-hover)'"
+                                         onmouseleave="this.style.background = '${isChecked ? 'var(--bg-hover)' : 'transparent'}'">
                                         <input type="checkbox"
                                                ${isChecked ? 'checked' : ''}
                                                onchange="window.vueApp.toggleTestInSuite('${test.id}'); window.vueApp.createSuiteModalManually(${isCreate})"
-                                               style="cursor: pointer;">
-                                        <div style="flex: 1;">
+                                               style="cursor: pointer;"
+                                               onclick="event.stopPropagation()">
+                                        <div style="flex: 1; cursor: pointer;" onclick="window.vueApp.toggleTestInSuite('${test.id}'); window.vueApp.createSuiteModalManually(${isCreate})">
                                             <div style="font-weight: 500; color: var(--text-primary);">${test.name}</div>
                                             <div style="font-size: 12px; color: var(--text-secondary);">
                                                 ${test.workspace ? `<span>📁 ${test.workspace}</span>` : ''}
                                                 ${test.step_count ? ` <span>• ${test.step_count} steps</span>` : ''}
                                             </div>
                                         </div>
-                                    </label>
+                                        <button class="btn btn-icon btn-sm btn-primary"
+                                                onclick="event.stopPropagation(); window.vueApp.editTestFromSuite('${test.id}', ${isCreate})"
+                                                title="Edit Test"
+                                                style="flex-shrink: 0;">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                    </div>
                                 </div>
                             `;
                         }).join('');
@@ -7526,11 +8941,48 @@
                     // This could be enhanced to query a dedicated endpoint for suite execution history
                 },
                 async viewSuiteDetails(suite) {
-                    this.selectedSuite = JSON.parse(JSON.stringify(suite));
-                    this.selectedSuiteId = suite.id;
+                    // Always reload suite from server to get fresh data
+                    try {
+                        const response = await axios.get(`/api/test-suites/${suite.id}`);
+                        const freshSuite = response.data;
+                        this.selectedSuite = JSON.parse(JSON.stringify(freshSuite));
+                        this.selectedSuiteId = freshSuite.id;
+                    } catch (error) {
+                        console.error('Failed to reload suite, using provided suite:', error);
+                        // Fallback to provided suite if reload fails
+                        this.selectedSuite = JSON.parse(JSON.stringify(suite));
+                        this.selectedSuiteId = suite.id;
+                    }
+                    
+                    // Always reload fresh data
                     await this.loadAvailableTestsForSuite();
                     await this.loadSuiteExecutionHistory(suite.id);
+                    
+                    // IMPORTANT: Keep view as 'test-suites' and set showSuiteDetailView to true
+                    // The template checks for: view === 'test-suites' && showSuiteDetailView
+                    this.view = 'test-suites';
                     this.showSuiteDetailView = true;
+                    console.log('[viewSuiteDetails] View state set - view:', this.view, 'showSuiteDetailView:', this.showSuiteDetailView);
+                    
+                    // Update router URL
+                    if (this.$router) {
+                        const route = `/suites/${suite.id}`;
+                        if (this.$route.path !== route) {
+                            this.$router.push(route).catch(() => {});
+                        }
+                    }
+                    
+                    // Force Vue to update
+                    await this.$nextTick();
+                    this.$forceUpdate();
+                    
+                    // Update router URL
+                    if (this.$router) {
+                        const route = `/suites/${suite.id}`;
+                        if (this.$route.path !== route) {
+                            this.$router.push(route).catch(() => {});
+                        }
+                    }
                 },
                 async filterByFolder(folder) {
                     this.selectedFolder = folder;
@@ -7635,11 +9087,112 @@
                         }
                         this.saveViewState();
                     } catch (error) {
-                        console.error('Failed to load test:', error);
-                        alert('Failed to load test');
+                        console.error('[loadTest] Failed to load test:', error);
+                        console.error('[loadTest] Error response:', error.response);
+                        console.error('[loadTest] Error details:', error.response?.data);
+                        
+                        // Extract error message
+                        let errorMessage = 'Failed to load test';
+                        if (error.response) {
+                            // Server responded with error
+                            if (error.response.status === 404) {
+                                errorMessage = `Test not found: ${testId}\n\nThe test file may have been deleted or moved.`;
+                            } else if (error.response.status === 500) {
+                                const detail = error.response.data?.detail || error.response.data?.message || 'Unknown server error';
+                                errorMessage = `Error loading test: ${detail}\n\nThis might be due to:\n- Invalid YAML syntax\n- Missing required fields\n- File permission issues`;
+                            } else {
+                                errorMessage = `Error loading test (${error.response.status}): ${error.response.data?.detail || error.response.data?.message || 'Unknown error'}`;
+                            }
+                        } else if (error.request) {
+                            // Request was made but no response received
+                            errorMessage = `Network error: Unable to connect to server. Please check if the server is running.`;
+                        } else {
+                            // Something else happened
+                            errorMessage = `Error: ${error.message || 'Unknown error occurred'}`;
+                        }
+                        
+                        alert(errorMessage);
+                        
+                        // Re-throw to allow callers to handle it
+                        throw error;
+                    }
+                },
+                async editTestFromSuite(testId, returnToSuite = false) {
+                    // Store suite context if we're editing from a suite
+                    if (returnToSuite || this.selectedSuite || this.showCreateSuiteModal || this.showEditSuiteModal) {
+                        this.editingTestFromSuite = {
+                            testId: testId,
+                            suiteId: this.selectedSuite?.id,
+                            returnToView: this.view,
+                            showCreateSuiteModal: this.showCreateSuiteModal,
+                            showEditSuiteModal: this.showEditSuiteModal,
+                            showAddTestModal: this.showAddTestModal
+                        };
+                    }
+                    
+                    // Close suite modals temporarily
+                    const wasCreatingSuite = this.showCreateSuiteModal;
+                    const wasEditingSuite = this.showEditSuiteModal;
+                    const wasAddingTest = this.showAddTestModal;
+                    this.showCreateSuiteModal = false;
+                    this.showEditSuiteModal = false;
+                    this.showAddTestModal = false;
+                    
+                    // Load the test for editing
+                    await this.loadTest(testId);
+                    
+                    // Show a notification that they can return to suite editing
+                    if (returnToSuite || wasCreatingSuite || wasEditingSuite || wasAddingTest) {
+                        console.log('[editTestFromSuite] Test loaded. User can edit and save, then return to suite editing.');
+                    }
+                },
+                async returnToSuiteEditing() {
+                    if (this.editingTestFromSuite) {
+                        const context = this.editingTestFromSuite;
+                        
+                        // Reload tests to get latest data
+                        await this.loadTests();
+                        
+                        // Return to the suite view
+                        if (context.suiteId) {
+                            await this.loadTestSuites();
+                            const suite = this.testSuites.find(s => s.id === context.suiteId);
+                            if (suite) {
+                                this.viewSuiteDetails(suite);
+                            } else {
+                                this.view = 'test-suites';
+                            }
+                        } else {
+                            this.view = context.returnToView || 'test-suites';
+                        }
+                        
+                        // Reopen the appropriate modal
+                        await this.$nextTick();
+                        if (context.showCreateSuiteModal) {
+                            this.showCreateSuiteModal = true;
+                            await this.$nextTick();
+                            this.openCreateSuiteModal();
+                        } else if (context.showEditSuiteModal) {
+                            const suite = this.testSuites.find(s => s.id === context.suiteId);
+                            if (suite) {
+                                this.editTestSuite(suite);
+                            }
+                        } else if (context.showAddTestModal) {
+                            this.showAddTestModal = true;
+                            await this.$nextTick();
+                            this.openAddTestModal();
+                        }
+                        
+                        // Clear the context
+                        this.editingTestFromSuite = null;
                     }
                 },
                 createNewTest() {
+                    // Close any suite-related modals
+                    this.showCreateTestFromSuiteModal = false;
+                    this.showAddTestModal = false;
+                    this.showTestSelectionModal = false;
+                    
                     if (this.view !== 'builder') {
                         this.viewHistory.push(this.view);
                     }
@@ -7663,7 +9216,10 @@
                     this.view = 'builder';
                     // Update router if available
                     if (this.$router) {
-                        this.$router.push('/tests/new').catch(() => {});
+                        // Only update route if it's different to avoid unnecessary navigation
+                        if (this.$route.path !== '/tests/new') {
+                            this.$router.push('/tests/new').catch(() => {});
+                        }
                     }
                     // Clear saved test ID when creating new test
                     try {
@@ -8010,18 +9566,39 @@
                     console.log('Saving test:', this.currentTest);
                     console.log('Test steps:', JSON.stringify(this.currentTest.steps, null, 2));
 
+                    // Check if we're editing from a suite
+                    const editingFromSuite = this.editingTestFromSuite !== null;
+
                     try {
                         if (this.currentTestId) {
                             console.log('Updating existing test:', this.currentTestId);
                             await axios.put(`/api/tests/${this.currentTestId}`, this.currentTest);
-                            alert('✅ Test updated successfully!');
+                            if (editingFromSuite) {
+                                // If editing from suite, offer to return
+                                const returnToSuite = confirm('✅ Test updated successfully!\n\nReturn to suite editing?');
+                                if (returnToSuite) {
+                                    await this.returnToSuiteEditing();
+                                    return;
+                                }
+                            } else {
+                                alert('✅ Test updated successfully!');
+                            }
                         } else {
                             const url = this.currentTestFolder ? `/api/tests?folder=${this.currentTestFolder}` : '/api/tests';
                             console.log('Creating new test at:', url);
                             const response = await axios.post(url, this.currentTest);
                             console.log('Server response:', response.data);
                             this.currentTestId = response.data.test_id;
-                            alert(`✅ Test "${this.currentTest.name}" created successfully!\\n\\nTest ID: ${this.currentTestId}\\n\\nYou can continue editing or create a new test.`);
+                            if (editingFromSuite) {
+                                // If editing from suite, offer to return
+                                const returnToSuite = confirm(`✅ Test "${this.currentTest.name}" created successfully!\n\nTest ID: ${this.currentTestId}\n\nReturn to suite editing?`);
+                                if (returnToSuite) {
+                                    await this.returnToSuiteEditing();
+                                    return;
+                                }
+                            } else {
+                                alert(`✅ Test "${this.currentTest.name}" created successfully!\\n\\nTest ID: ${this.currentTestId}\\n\\nYou can continue editing or create a new test.`);
+                            }
                         }
                         await this.loadTests();
                     } catch (error) {
@@ -8272,6 +9849,11 @@
                         alert('Failed to run test: ' + (error.response?.data?.detail || error.message));
                         this.showProgressModal = false;
                     }
+                },
+                async rerunTestFromResultCard(result) {
+                    // Set the result as selected so rerunTestFromResult can use it
+                    this.selectedResult = result;
+                    await this.rerunTestFromResult();
                 },
                 async rerunTestFromResult() {
                     // Use selectedResult if available (from split view), otherwise currentResult (from modal)
@@ -8644,18 +10226,58 @@
                         manualModal.remove();
                     }
 
-                    // If we're in the builder view, directly open the step editor for the current test
-                    if (this.view === 'builder' && this.currentTest) {
-                        console.log('[selectAction] Opening step editor for builder view');
+                    // If we're in the builder view with a current test, directly open the step editor
+                    if (this.view === 'builder' && this.currentTest && this.currentTestId) {
+                        console.log('[selectAction] Opening step editor for existing test in builder view');
                         await this.openStepEditorForAction(actionId);
                     } else {
-                        // Otherwise, show test selection modal (for adding to multiple tests)
-                        console.log('[selectAction] Showing test selection modal');
-                        this.addActionStep(actionId);
+                        // If we're in actions library view or builder view without a test, create a new test
+                        console.log('[selectAction] Creating new test and opening step editor');
+                        console.log('[selectAction] Current view:', this.view, 'currentTest:', this.currentTest, 'currentTestId:', this.currentTestId);
+                        
+                        // Create a new test first
+                        this.createNewTest();
+                        // Wait for Vue to update and ensure test is created
+                        await this.$nextTick();
+                        await this.$nextTick(); // Extra tick to ensure view is updated
+                        
+                        // Ensure we have a current test object
+                        if (!this.currentTest) {
+                            this.currentTest = {
+                                name: '',
+                                description: '',
+                                tags: [],
+                                variables: {},
+                                browser_config: {},
+                                setup: [],
+                                steps: [],
+                                cleanup: []
+                            };
+                        }
+                        
+                        // Ensure we're in builder view
+                        if (this.view !== 'builder') {
+                            this.view = 'builder';
+                            await this.$nextTick();
+                        }
+                        
+                        // Ensure suite modals are closed before opening step editor
+                        this.showCreateTestFromSuiteModal = false;
+                        this.showAddTestModal = false;
+                        this.showTestSelectionModal = false;
+                        
+                        // Then open the step editor with the action
+                        console.log('[selectAction] Opening step editor for new test');
+                        await this.openStepEditorForAction(actionId);
                     }
                 },
                 async openStepEditorForAction(actionId) {
                     try {
+                        // Ensure suite modals are closed
+                        this.showCreateTestFromSuiteModal = false;
+                        this.showAddTestModal = false;
+                        this.showTestSelectionModal = false;
+                        
                         // Load tests if this is a test.run action
                         if (actionId === 'test.run' && !this.tests.length) {
                             await this.loadTests();
@@ -8848,6 +10470,17 @@
                         this.showStepModal = true;
                         // Force Vue to update and render
                         this.$forceUpdate();
+                        // Wait for Vue to render the modal
+                        await this.$nextTick();
+                        // Ensure modal is visible
+                        setTimeout(() => {
+                            const modal = document.querySelector('.modal-overlay.step-editor-modal, [data-modal-type="step-editor"]');
+                            if (modal) {
+                                modal.style.display = 'flex';
+                                modal.style.visibility = 'visible';
+                                modal.style.opacity = '1';
+                            }
+                        }, 100);
                         await this.$nextTick();
                         await this.$nextTick(); // Reduced from 3 ticks to 2 for faster response
                         // Reduced wait time for faster modal appearance
@@ -10444,7 +12077,7 @@ Would you like to enter a selector manually?
                         console.log('Results response:', response.data);
 
                         // Normalize results to ensure consistent status values
-                        this.results = response.data.results.map(result => {
+                        const normalizedResults = response.data.results.map(result => {
                             const originalStatus = (result.status || 'unknown').toString();
                             const statusLower = originalStatus.toLowerCase();
                             // Map "passed" to "completed" for CSS class compatibility, but keep original for display
@@ -10455,6 +12088,26 @@ Would you like to enter a selector manually?
                                 statusClass: statusForClass // Use this for CSS classes
                             };
                         });
+                        
+                        // Deduplicate results by unique key (filename + build_id/timestamp)
+                        const seenKeys = new Set();
+                        const deduplicatedResults = [];
+                        normalizedResults.forEach(result => {
+                            const key = this.getResultKey(result);
+                            if (seenKeys.has(key)) {
+                                console.warn('[DEDUP] Duplicate result detected, skipping:', {
+                                    key: key,
+                                    filename: result.filename,
+                                    build_id: result.build_id,
+                                    timestamp: result.timestamp
+                                });
+                                return;
+                            }
+                            seenKeys.add(key);
+                            deduplicatedResults.push(result);
+                        });
+                        this.results = deduplicatedResults;
+                        console.log(`[RESULTS] Loaded ${this.results.length} unique results (${normalizedResults.length} total, ${normalizedResults.length - this.results.length} duplicates removed)`);
 
                         // Update pagination info
                         if (response.data.pagination) {
@@ -10561,16 +12214,21 @@ Would you like to enter a selector manually?
                     const finished = data.finished || data.end_time || data.timestamp || testInfo?.finished || null;
 
                     let outputLines = [];
-                    if (Array.isArray(data.output)) {
-                        outputLines = data.output;
-                    } else if (typeof data.execution_log === 'string') {
+                    // Prioritize execution_log as it contains the complete log
+                    if (typeof data.execution_log === 'string' && data.execution_log.trim()) {
                         outputLines = data.execution_log.split(/\r?\n/);
-                    } else if (typeof data.log === 'string') {
-                        outputLines = data.log.split(/\r?\n/);
-                    } else if (testInfo?.execution_log) {
+                    } else if (testInfo?.execution_log && typeof testInfo.execution_log === 'string') {
                         outputLines = testInfo.execution_log.split(/\r?\n/);
+                    } else if (Array.isArray(data.output) && data.output.length > 0) {
+                        // Fallback to output array
+                        outputLines = data.output;
+                    } else if (typeof data.log === 'string' && data.log.trim()) {
+                        outputLines = data.log.split(/\r?\n/);
+                    } else if (testInfo?.output && Array.isArray(testInfo.output)) {
+                        outputLines = testInfo.output;
                     }
-                    outputLines = outputLines.filter(line => line !== undefined && line !== null);
+                    // Ensure we have valid output lines
+                    outputLines = outputLines.filter(line => line !== undefined && line !== null && line !== '');
                     if (outputLines.length === 0) {
                         outputLines = ['No execution log available.'];
                     }
@@ -10600,6 +12258,39 @@ Would you like to enter a selector manually?
                     // Remove common timestamp patterns (e.g., _20240101_123456, -1234567890)
                     const cleanName = nameWithoutExt.replace(/[_-]\d{8,}/g, '').replace(/[_-]build\d+/gi, '');
                     return cleanName || filename || 'Unknown Test';
+                },
+                getResultKey(result) {
+                    // Create a unique key combining filename with build_id or timestamp
+                    // This ensures each result has a unique key even if filename is the same
+                    if (!result) {
+                        console.error('getResultKey called with null/undefined result');
+                        return 'unknown_' + Date.now();
+                    }
+                    
+                    const filename = result.filename || 'unknown';
+                    const buildId = result.build_id || result.buildNumber || '';
+                    const timestamp = result.timestamp || result.started || result.finished || '';
+                    
+                    // Prefer build_id as it's most unique
+                    if (buildId) {
+                        return `${filename}_${String(buildId)}`;
+                    }
+                    // Use timestamp if available
+                    if (timestamp) {
+                        return `${filename}_${String(timestamp)}`;
+                    }
+                    // Fallback: use filename + a hash of the result object
+                    try {
+                        const resultStr = JSON.stringify(result);
+                        const hash = resultStr.split('').reduce((a, b) => {
+                            a = ((a << 5) - a) + b.charCodeAt(0);
+                            return a & a;
+                        }, 0);
+                        return `${filename}_${Math.abs(hash)}`;
+                    } catch (e) {
+                        // Last resort: filename + timestamp
+                        return `${filename}_${Date.now()}`;
+                    }
                 },
                 getBuildNumber(result) {
                     // Use build_id if available (unique identifier)
@@ -10646,16 +12337,110 @@ Would you like to enter a selector manually?
                         return dateString;
                     }
                 },
+                getFilteredOutput(result) {
+                    if (!result || !result.output) {
+                        return 'No output available';
+                    }
+                    
+                    const outputLines = Array.isArray(result.output) ? result.output : result.output.split('\n');
+                    
+                    if (this.logViewMode === 'debug') {
+                        // Show all output for debug view
+                        return outputLines.join('\n');
+                    } else {
+                        // Filter for basic/simple view - exclude verbose debug lines
+                        const verbosePatterns = [
+                            /^\s+📋/,  // Request/Response Headers
+                            /^\s+📤/,  // Request Body
+                            /^\s+📡/,  // Status
+                            /^\s+📦/,  // Response Body
+                            /^\s+🔑/,  // Token/auth info
+                            /^\s+🔄/,  // Retry/auth refresh
+                            /^\s+💾/,  // Storage info
+                            /^\s+⚠️/,  // Warnings
+                            /^\s+🔍/,  // Debug/search
+                            /^\s+\{/,  // JSON objects (indented)
+                            /^\s+\[/,  // JSON arrays (indented)
+                            /Response Headers:/i,
+                            /Request Headers:/i,
+                            /Query Params:/i,
+                            /Request Body \(JSON\):/i,
+                            /Response Body \(JSON\):/i,
+                            /Response Body:/i,
+                            /Request Body:/i,
+                        ];
+                        
+                        const simplePatterns = [
+                            /^Step\s+\d+[\/:]/i,  // "Step 1/5:" or "Step 1:"
+                            /^→\s+/,  // "→"
+                            /^Executing test/i,
+                            /^Test Results:/i,
+                            /^Execution time:/i,
+                            /^Generated \d+/i,
+                            /^Running \d+/i,
+                            /^===/,
+                            /^✅|^❌|^PASSED|^FAILED/i,
+                            /completed successfully/i,
+                            /STEP.*FAILED/i,
+                        ];
+                        
+                        const filtered = outputLines.filter(line => {
+                            const trimmed = line.trim();
+                            if (!trimmed) return false; // Skip empty lines in simple view
+                            
+                            // Check if it's verbose/debug content
+                            const isVerbose = verbosePatterns.some(pattern => pattern.test(line));
+                            if (isVerbose) return false;
+                            
+                            // Check if it's a simple/status line
+                            const isSimple = simplePatterns.some(pattern => pattern.test(line));
+                            if (isSimple) {
+                                // For API lines, extract just the basic info
+                                if (/API\s+(GET|POST|PUT|PATCH|DELETE):/i.test(line)) {
+                                    const match = line.match(/(.+?API\s+(?:GET|POST|PUT|PATCH|DELETE):\s+[^\s(]+)/i);
+                                    return match !== null;
+                                }
+                                return true;
+                            }
+                            
+                            return false;
+                        });
+                        
+                        return filtered.join('\n') || 'No simple log content available';
+                    }
+                },
                 selectResult(result) {
-                    this.selectedResult = result;
-                    // Load full result details if not already loaded
-                    if (!result.output || (Array.isArray(result.output) && result.output.length === 0)) {
-                        this.viewResult(result.filename);
+                    console.log('[SELECT] selectResult called with:', {
+                        filename: result?.filename,
+                        build_id: result?.build_id,
+                        test_path: result?.test_path,
+                        key: result ? this.getResultKey(result) : 'null'
+                    });
+                    if (!result) {
+                        console.error('[SELECT] selectResult called with null/undefined result');
+                        return;
+                    }
+                    try {
+                        this.selectedResult = result;
+                        console.log('[SELECT] selectedResult set, loading details...');
+                        // Load full result details if not already loaded
+                        if (!result.output || (Array.isArray(result.output) && result.output.length === 0)) {
+                            this.viewResult(result.filename);
+                        } else {
+                            console.log('[SELECT] Result already has output, skipping load');
+                        }
+                    } catch (error) {
+                        console.error('[SELECT] Error in selectResult:', error);
                     }
                 },
                 async viewResult(filename) {
                     // Find the result in the current results array
+                    // Try to match by filename first, then by unique key
                     let result = this.results.find(r => r.filename === filename);
+                    if (!result && filename) {
+                        // Fallback: try to find by matching key pattern
+                        result = this.results.find(r => r.filename && r.filename.includes(filename.split('_')[0]));
+                    }
                     try {
                         console.log('Viewing result:', filename);
                         const response = await axios.get(`/api/results/${filename}`);
@@ -11691,7 +13476,17 @@ Would you like to enter a selector manually?
                             notify_on_success: false,
                             include_screenshots: false,
                             include_html_report: false
-                        };
+                        }
+                        // Load OpenAI config from localStorage
+                        const savedOpenAIKey = localStorage.getItem('openai_api_key');
+                        if (savedOpenAIKey) {
+                            this.openaiConfig.api_key = savedOpenAIKey;
+                        }
+                    }
+                    // Always try to load OpenAI key from localStorage (even if Teams config loaded successfully)
+                    const savedOpenAIKey = localStorage.getItem('openai_api_key');
+                    if (savedOpenAIKey) {
+                        this.openaiConfig.api_key = savedOpenAIKey;
                     }
                 },
                 async saveTeamsConfig() {
@@ -11716,6 +13511,77 @@ Would you like to enter a selector manually?
                         this.teamsTestResult = {
                             success: false,
                             message: 'Failed to save Teams configuration: ' + (error.response?.data?.detail || error.message)
+                        };
+                    }
+                },
+                async saveOpenAIConfig() {
+                    try {
+                        // Save to localStorage
+                        if (this.openaiConfig.api_key) {
+                            localStorage.setItem('openai_api_key', this.openaiConfig.api_key);
+                            this.openaiTestResult = {
+                                success: true,
+                                message: '✅ OpenAI API key saved successfully!'
+                            };
+                            // Clear result after 3 seconds
+                            setTimeout(() => {
+                                this.openaiTestResult = null;
+                            }, 3000);
+                        } else {
+                            // Remove from localStorage if empty
+                            localStorage.removeItem('openai_api_key');
+                            this.openaiTestResult = {
+                                success: true,
+                                message: '✅ OpenAI API key removed.'
+                            };
+                            setTimeout(() => {
+                                this.openaiTestResult = null;
+                            }, 3000);
+                        }
+                    } catch (error) {
+                        console.error('Failed to save OpenAI config:', error);
+                        this.openaiTestResult = {
+                            success: false,
+                            message: 'Failed to save OpenAI API key: ' + (error.message || 'Unknown error')
+                        };
+                    }
+                },
+                async testOpenAIConnection() {
+                    if (!this.openaiConfig.api_key) {
+                        this.openaiTestResult = {
+                            success: false,
+                            message: 'Please enter an API key first.'
+                        };
+                        return;
+                    }
+
+                    try {
+                        // Test by making a simple chat request
+                        const response = await axios.post('/api/chat', {
+                            message: 'Hello',
+                            conversation_history: []
+                        }, {
+                            headers: {
+                                'X-OpenAI-API-Key': this.openaiConfig.api_key
+                            }
+                        });
+
+                        if (response.data.error) {
+                            this.openaiTestResult = {
+                                success: false,
+                                message: '❌ Connection failed: ' + response.data.error
+                            };
+                        } else {
+                            this.openaiTestResult = {
+                                success: true,
+                                message: '✅ Connection successful! OpenAI API key is valid.'
+                            };
+                        }
+                    } catch (error) {
+                        const errorMsg = error.response?.data?.detail || error.message || 'Unknown error';
+                        this.openaiTestResult = {
+                            success: false,
+                            message: '❌ Connection failed: ' + errorMsg
                         };
                     }
                 },
@@ -12559,23 +14425,35 @@ Would you like to enter a selector manually?
                     }
                     this.view = newView;
 
-                    // Update router
-                    const routeMap = {
-                        'dashboard': '/',
-                        'tests': '/tests',
-                        'builder': params.id ? `/tests/${params.id}` : '/tests/new',
-                        'results': '/results',
-                        'test-suites': '/suites',
-                        'suite-detail': params.id ? `/suites/${params.id}` : '/suites'
-                    };
-
-                    if (routeMap[newView]) {
-                        this.$router.push(routeMap[newView]).catch(err => {
-                            // Ignore navigation duplicated errors
-                            if (err.name !== 'NavigationDuplicated') {
-                                console.error('Navigation error:', err);
+                    // Update router URL to match the view
+                    if (this.$router) {
+                        const viewToRouteMap = {
+                            'dashboard': '/',
+                            'tests': '/tests',
+                            'builder': params.id ? `/tests/${params.id}` : '/tests/new',
+                            'results': '/results',
+                            'test-suites': '/suites',
+                            'suite-detail': params.id ? `/suites/${params.id}` : '/suites',
+                            'actions': '/actions',
+                            'templates': '/templates',
+                            'docs': '/docs',
+                            'variables': '/variables',
+                            'metrics': '/metrics',
+                            'settings': '/settings'
+                        };
+                        
+                        const route = viewToRouteMap[newView];
+                        if (route) {
+                            // Only update route if it's different to avoid unnecessary navigation
+                            if (this.$route.path !== route) {
+                                this.$router.push(route).catch(err => {
+                                    // Ignore navigation duplicated errors
+                                    if (err.name !== 'NavigationDuplicated') {
+                                        console.error('Navigation error:', err);
+                                    }
+                                });
                             }
-                        });
+                        }
                     }
 
                     // Save view to localStorage
@@ -13028,7 +14906,11 @@ Would you like to enter a selector manually?
                 async loadMetrics() {
                     this.loadingMetrics = true;
                     try {
-                        const response = await axios.get('/api/metrics/comprehensive');
+                        const response = await axios.get('/api/metrics/comprehensive', {
+                            params: {
+                                period: this.metricsPeriod
+                            }
+                        });
                         this.metrics = response.data;
                     } catch (error) {
                         console.error('Failed to load metrics:', error);
@@ -13590,59 +15472,33 @@ Would you like to enter a selector manually?
         };
 
         console.log('✅ Vue app mounted and available at window.vueApp');
+        
+        // Test if toggleChatPanel is accessible
+        if (mountedApp && typeof mountedApp.toggleChatPanel === 'function') {
+            console.log('✅ toggleChatPanel method is available');
+        } else {
+            console.error('❌ toggleChatPanel method not found on Vue app');
+        }
+        
+        // Add a test click handler to verify button exists
+        setTimeout(() => {
+            const chatButton = document.querySelector('button[title*="AI Assistant"]');
+            if (chatButton) {
+                console.log('✅ AI Assistant button found in DOM');
+                // Test direct click
+                chatButton.addEventListener('click', function(e) {
+                    console.log('Button clicked directly (test handler)');
+                }, { once: true });
+            } else {
+                console.error('❌ AI Assistant button not found in DOM');
+            }
+        }, 1000);
         console.log('✅ Global function available: window.closeAllModals()');
 
-        // Add direct DOM event listeners as fallback for modal close buttons
-        document.addEventListener('click', function(e) {
-            // Check if clicked element is a modal close button
-            if (e.target.closest('.modal-overlay .btn-icon[title*="Close"], .modal-overlay .btn-secondary')) {
-                const overlay = e.target.closest('.modal-overlay');
-                if (overlay) {
-                    console.log('Direct DOM click detected on close button, removing overlay');
-                    overlay.style.display = 'none';
-                    overlay.remove();
-                    // Also update Vue state
-                    if (window.vueApp) {
-                        window.vueApp.showAddTestModal = false;
-                        window.vueApp.showCreateSuiteModal = false;
-                        window.vueApp.showEditSuiteModal = false;
-                        window.vueApp.showExecuteSuiteModal = false;
-                    }
-                }
-            }
-            // Check if clicked on modal overlay background
-            if (e.target.classList.contains('modal-overlay')) {
-                console.log('Direct DOM click detected on overlay background, removing');
-                e.target.style.display = 'none';
-                e.target.remove();
-                if (window.vueApp) {
-                    window.vueApp.showAddTestModal = false;
-                    window.vueApp.showCreateSuiteModal = false;
-                    window.vueApp.showEditSuiteModal = false;
-                    window.vueApp.showExecuteSuiteModal = false;
-                }
-            }
-        });
-
-        // ESC key handler
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape' || e.keyCode === 27) {
-                const overlays = document.querySelectorAll('.modal-overlay');
-                if (overlays.length > 0) {
-                    console.log('ESC key pressed, removing all overlays');
-                    overlays.forEach(overlay => {
-                        overlay.style.display = 'none';
-                        overlay.remove();
-                    });
-                    if (window.vueApp) {
-                        window.vueApp.showAddTestModal = false;
-                        window.vueApp.showCreateSuiteModal = false;
-                        window.vueApp.showEditSuiteModal = false;
-                        window.vueApp.showExecuteSuiteModal = false;
-                    }
-                }
-            }
-        });
+        // REMOVED: Direct DOM event listeners for closing modals
+        // Modals can now only be closed via Cancel button or X button
+        // This prevents accidental closing when clicking outside or pressing ESC
+        // Users must explicitly click Cancel or X to close modals with text inputs
     </script>
 </body>
 </html>

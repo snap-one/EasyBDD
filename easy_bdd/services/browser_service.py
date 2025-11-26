@@ -160,7 +160,17 @@ class BrowserService:
     def _get_browser_config(self, key: str, default=None):
         """Get browser-specific configuration value"""
         full_key = f"browser.{key}"
-        return self._get_config_value(self.config, full_key, default)
+        value = self._get_config_value(self.config, full_key, default)
+        
+        # Also check test variables if not found in config (for slow_mo, etc.)
+        if value is None or value == default:
+            if hasattr(self.config, "get_variable"):
+                # Check test variables directly
+                test_var_value = self.config.get_variable(key, None)
+                if test_var_value is not None:
+                    return test_var_value
+        
+        return value
 
     def set_mcp_mode(self, enabled: bool = True):
         """Enable or disable MCP mode for recording"""
@@ -192,6 +202,39 @@ class BrowserService:
         self, url: str, browser: str = None, use_playwright: bool = None
     ) -> None:
         """Open browser and navigate to URL"""
+        # If browser is already open, just navigate to the new URL
+        if self.playwright_page and PLAYWRIGHT_AVAILABLE:
+            try:
+                print(f"      Browser already open, navigating to: '{url}'")
+                self.playwright_page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                # Record action for MCP
+                self.mcp_bridge.record_action("navigate", url=url, browser=browser)
+                return
+            except Exception as e:
+                print(f"      Navigation failed, will open new browser: {e}")
+                # If navigation fails, close existing browser and open new one
+                if self.playwright_browser:
+                    try:
+                        self.playwright_browser.close()
+                    except:
+                        pass
+                self.playwright_browser = None
+                self.playwright_page = None
+                self.playwright_context = None
+        elif self.selenium_driver and SELENIUM_AVAILABLE:
+            try:
+                print(f"      Browser already open, navigating to: '{url}'")
+                self.selenium_driver.get(url)
+                return
+            except Exception as e:
+                print(f"      Navigation failed, will open new browser: {e}")
+                # If navigation fails, close existing browser and open new one
+                try:
+                    self.selenium_driver.quit()
+                except:
+                    pass
+                self.selenium_driver = None
+
         # Get browser preference from config
         if browser is None:
             if hasattr(self.config, "get_variable"):
@@ -217,10 +260,26 @@ class BrowserService:
 
     def _open_playwright_browser(self, url: str, browser: str) -> None:
         """Open browser using Playwright with enhanced MCP integration"""
-        if self.playwright_browser:
-            self.playwright_browser.close()
+        # If browser is already open, just navigate
+        if self.playwright_browser and self.playwright_page:
+            try:
+                self.playwright_page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                return
+            except Exception as e:
+                print(f"      Navigation failed, closing existing browser: {e}")
+                # Close existing browser and create new one
+                try:
+                    self.playwright_browser.close()
+                except:
+                    pass
+                self.playwright_browser = None
+                self.playwright_page = None
+                self.playwright_context = None
+                self.playwright_playwright = None
 
-        self.playwright_playwright = sync_playwright().start()
+        # Create new Playwright instance only if needed
+        if self.playwright_playwright is None:
+            self.playwright_playwright = sync_playwright().start()
 
         # Browser launch options
         launch_options = {
@@ -252,9 +311,25 @@ class BrowserService:
         if browser_args:
             launch_options["args"].extend(browser_args)
 
+        # Add slow_mo option from config (applies to all browser actions)
+        slow_mo = self._get_browser_config("slow_mo", None)
+        if slow_mo is not None:
+            # Convert to int if it's a string
+            if isinstance(slow_mo, str):
+                try:
+                    slow_mo = int(slow_mo)
+                except ValueError:
+                    slow_mo = None
+            if slow_mo is not None and slow_mo >= 0:  # Allow 0 to disable
+                launch_options["slow_mo"] = slow_mo
+                print(f"      ⏱️  Browser slow_mo set to {slow_mo}ms")
+        # Fallback to MCP mode default if not configured
+        elif self.mcp_bridge.mcp_mode:
+            launch_options["slow_mo"] = 50  # Slow down for better observation
+            print(f"      ⏱️  Browser slow_mo set to 50ms (MCP mode default)")
+        
         # Add debugging options for MCP mode
         if self.mcp_bridge.mcp_mode:
-            launch_options["slow_mo"] = 50  # Slow down for better observation
             launch_options["devtools"] = not self._get_browser_config("headless", False)
 
         browser_type = getattr(
@@ -263,10 +338,21 @@ class BrowserService:
         self.playwright_browser = browser_type.launch(**launch_options)
 
         # Create context with enhanced options
+        # Get window size from config, or use a reasonable default (1280x720) instead of 1920x1080
+        default_width = 1280
+        default_height = 720
+        window_size = self._get_browser_config("window_size", [default_width, default_height])
+        if isinstance(window_size, list) and len(window_size) >= 2:
+            viewport_width = window_size[0]
+            viewport_height = window_size[1]
+        else:
+            viewport_width = default_width
+            viewport_height = default_height
+        
         context_options = {
             "viewport": {
-                "width": self._get_browser_config("window_size", [1920, 1080])[0],
-                "height": self._get_browser_config("window_size", [1920, 1080])[1],
+                "width": viewport_width,
+                "height": viewport_height,
             },
             "ignore_https_errors": self._get_browser_config(
                 "ignore_https_errors", True
@@ -1112,6 +1198,234 @@ class BrowserService:
         # Record action for MCP
         self.mcp_bridge.record_action("verify_element", selector=selector)
 
+    def assert_text_contains(self, selector: str, text: str, timeout: int = 10000) -> None:
+        """Assert that an element's text contains the expected value"""
+        if self.playwright_page:
+            try:
+                from playwright.sync_api import expect
+                # If selector already has :has-text(), use it directly
+                # Otherwise, try to find any element matching selector that contains the text
+                if ":has-text(" in selector:
+                    locator = self.playwright_page.locator(selector)
+                else:
+                    # Try to find the element that contains the text
+                    # First wait for at least one element matching the selector to be visible
+                    locator = self.playwright_page.locator(selector).first
+                    # Wait for element to be visible first
+                    locator.wait_for(state="visible", timeout=timeout)
+                    # Then check all matching elements to find one with the text
+                    all_elements = self.playwright_page.locator(selector).all()
+                    found = False
+                    for elem in all_elements:
+                        try:
+                            elem_text = elem.text_content() or ""
+                            if text in elem_text:
+                                found = True
+                                locator = elem
+                                break
+                        except:
+                            continue
+                    if not found:
+                        # Fall back to expect which will wait and retry
+                        locator = self.playwright_page.locator(selector)
+                
+                expect(locator).to_contain_text(text, timeout=timeout)
+                print(f"      ✓ Asserted element '{selector}' contains text '{text}'")
+            except Exception as e:
+                actual_text = ""
+                try:
+                    # Try to get text from the first matching element
+                    first_locator = self.playwright_page.locator(selector).first
+                    if first_locator.count() > 0:
+                        actual_text = first_locator.text_content() or ""
+                    # If that's empty, try all elements
+                    if not actual_text:
+                        all_elements = self.playwright_page.locator(selector).all()
+                        texts = []
+                        for elem in all_elements[:5]:  # Check first 5 elements
+                            try:
+                                txt = elem.text_content() or ""
+                                if txt:
+                                    texts.append(txt)
+                            except:
+                                pass
+                        if texts:
+                            actual_text = f"[Found {len(texts)} elements with text: {', '.join(texts[:3])}]"
+                except:
+                    pass
+                raise AssertionError(f"Element '{selector}' text does not contain '{text}'. Actual: '{actual_text}'")
+        elif self.selenium_driver:
+            try:
+                from selenium.webdriver.support import expected_conditions as EC
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.common.by import By
+                element = WebDriverWait(self.selenium_driver, timeout // 1000).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                actual_text = element.text
+                if text not in actual_text:
+                    raise AssertionError(f"Element '{selector}' text does not contain '{text}'. Actual: '{actual_text}'")
+                print(f"      ✓ Asserted element '{selector}' contains text '{text}'")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' text assertion failed: {e}")
+        else:
+            raise RuntimeError("No browser session active")
+
+    def assert_text_equals(self, selector: str, text: str, timeout: int = 10000) -> None:
+        """Assert that an element's text exactly matches the expected value"""
+        if self.playwright_page:
+            try:
+                from playwright.sync_api import expect
+                locator = self.playwright_page.locator(selector)
+                expect(locator).to_have_text(text, timeout=timeout)
+                print(f"      ✓ Asserted element '{selector}' text equals '{text}'")
+            except Exception as e:
+                actual_text = ""
+                try:
+                    actual_text = locator.text_content() or ""
+                except:
+                    pass
+                raise AssertionError(f"Element '{selector}' text does not equal '{text}'. Actual: '{actual_text}'")
+        elif self.selenium_driver:
+            try:
+                from selenium.webdriver.support import expected_conditions as EC
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.common.by import By
+                element = WebDriverWait(self.selenium_driver, timeout // 1000).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                actual_text = element.text.strip()
+                if actual_text != text:
+                    raise AssertionError(f"Element '{selector}' text does not equal '{text}'. Actual: '{actual_text}'")
+                print(f"      ✓ Asserted element '{selector}' text equals '{text}'")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' text assertion failed: {e}")
+        else:
+            raise RuntimeError("No browser session active")
+
+    def assert_element_visible(self, selector: str, timeout: int = 10000) -> None:
+        """Assert that an element is visible on the page"""
+        if self.playwright_page:
+            try:
+                from playwright.sync_api import expect
+                locator = self.playwright_page.locator(selector)
+                expect(locator).to_be_visible(timeout=timeout)
+                print(f"      ✓ Asserted element '{selector}' is visible")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' is not visible: {e}")
+        elif self.selenium_driver:
+            try:
+                from selenium.webdriver.support import expected_conditions as EC
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.common.by import By
+                WebDriverWait(self.selenium_driver, timeout // 1000).until(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                print(f"      ✓ Asserted element '{selector}' is visible")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' is not visible: {e}")
+        else:
+            raise RuntimeError("No browser session active")
+
+    def assert_element_not_visible(self, selector: str, timeout: int = 10000) -> None:
+        """Assert that an element is not visible on the page"""
+        if self.playwright_page:
+            try:
+                from playwright.sync_api import expect
+                locator = self.playwright_page.locator(selector)
+                expect(locator).to_be_hidden(timeout=timeout)
+                print(f"      ✓ Asserted element '{selector}' is not visible")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' is visible (expected hidden): {e}")
+        elif self.selenium_driver:
+            try:
+                from selenium.webdriver.support import expected_conditions as EC
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.common.by import By
+                WebDriverWait(self.selenium_driver, timeout // 1000).until(
+                    EC.invisibility_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                print(f"      ✓ Asserted element '{selector}' is not visible")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' is visible (expected hidden): {e}")
+        else:
+            raise RuntimeError("No browser session active")
+
+    def assert_element_enabled(self, selector: str, timeout: int = 10000) -> None:
+        """Assert that an element is enabled and interactive"""
+        if self.playwright_page:
+            try:
+                from playwright.sync_api import expect
+                locator = self.playwright_page.locator(selector)
+                expect(locator).to_be_enabled(timeout=timeout)
+                print(f"      ✓ Asserted element '{selector}' is enabled")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' is not enabled: {e}")
+        elif self.selenium_driver:
+            try:
+                from selenium.webdriver.support import expected_conditions as EC
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.common.by import By
+                element = WebDriverWait(self.selenium_driver, timeout // 1000).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                )
+                if not element.is_enabled():
+                    raise AssertionError(f"Element '{selector}' is not enabled")
+                print(f"      ✓ Asserted element '{selector}' is enabled")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' is not enabled: {e}")
+        else:
+            raise RuntimeError("No browser session active")
+
+    def assert_element_disabled(self, selector: str, timeout: int = 10000) -> None:
+        """Assert that an element is disabled"""
+        if self.playwright_page:
+            try:
+                from playwright.sync_api import expect
+                locator = self.playwright_page.locator(selector)
+                expect(locator).to_be_disabled(timeout=timeout)
+                print(f"      ✓ Asserted element '{selector}' is disabled")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' is not disabled: {e}")
+        elif self.selenium_driver:
+            try:
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.common.by import By
+                element = WebDriverWait(self.selenium_driver, timeout // 1000).until(
+                    lambda d: d.find_element(By.CSS_SELECTOR, selector)
+                )
+                if element.is_enabled():
+                    raise AssertionError(f"Element '{selector}' is enabled (expected disabled)")
+                print(f"      ✓ Asserted element '{selector}' is disabled")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' is not disabled: {e}")
+        else:
+            raise RuntimeError("No browser session active")
+
+    def assert_element_count(self, selector: str, count: int, timeout: int = 10000) -> None:
+        """Assert that the number of elements matching the selector equals the expected count"""
+        if self.playwright_page:
+            try:
+                locator = self.playwright_page.locator(selector)
+                actual_count = locator.count()
+                if actual_count != count:
+                    raise AssertionError(f"Element count mismatch for '{selector}'. Expected: {count}, Actual: {actual_count}")
+                print(f"      ✓ Asserted element '{selector}' count equals {count}")
+            except Exception as e:
+                raise AssertionError(f"Element count assertion failed for '{selector}': {e}")
+        elif self.selenium_driver:
+            try:
+                from selenium.webdriver.common.by import By
+                elements = self.selenium_driver.find_elements(By.CSS_SELECTOR, selector)
+                actual_count = len(elements)
+                if actual_count != count:
+                    raise AssertionError(f"Element count mismatch for '{selector}'. Expected: {count}, Actual: {actual_count}")
+                print(f"      ✓ Asserted element '{selector}' count equals {count}")
+            except Exception as e:
+                raise AssertionError(f"Element count assertion failed for '{selector}': {e}")
+        else:
+            raise RuntimeError("No browser session active")
+
     def refresh_browser(self) -> None:
         """Refresh the current page"""
         if self.playwright_page:
@@ -1125,6 +1439,124 @@ class BrowserService:
 
         # Record action for MCP
         self.mcp_bridge.record_action("refresh")
+
+    def show_step_indicator(self, step_number: int, total_steps: int, step_action: str, step_description: str = "") -> None:
+        """Display a step indicator overlay in the browser showing current step
+        
+        This appears in the browser window (the page being tested), in the top-right corner.
+        It shows which step is currently executing during UI tests.
+        """
+        if self.playwright_page:
+            try:
+                # Wait a moment for page to be ready if it just navigated
+                import time
+                time.sleep(0.1)
+                
+                import json
+                # Escape strings for JavaScript
+                step_action_js = json.dumps(step_action)
+                step_description_js = json.dumps(step_description) if step_description else "''"
+                
+                # Create or update step indicator overlay
+                script = f"""
+                (function() {{
+                    // Remove existing indicator
+                    const existing = document.getElementById('__easybdd_step_indicator__');
+                    if (existing) existing.remove();
+                    
+                    // Create indicator overlay
+                    const indicator = document.createElement('div');
+                    indicator.id = '__easybdd_step_indicator__';
+                    indicator.style.cssText = `
+                        position: fixed;
+                        top: 20px;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+                        color: white;
+                        padding: 16px 24px;
+                        border-radius: 12px;
+                        box-shadow: 0 8px 24px rgba(59, 130, 246, 0.6);
+                        z-index: 999999;
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        font-size: 14px;
+                        line-height: 1.6;
+                        min-width: 280px;
+                        max-width: 500px;
+                        pointer-events: none;
+                        animation: slideIn 0.3s ease-out;
+                        opacity: 0.95;
+                    `;
+                    
+                    // Add animation
+                    const style = document.createElement('style');
+                    style.textContent = `
+                        @keyframes slideIn {{
+                            from {{
+                                transform: translateX(-50%) translateY(-20px);
+                                opacity: 0;
+                            }}
+                            to {{
+                                transform: translateX(-50%) translateY(0);
+                                opacity: 0.95;
+                            }}
+                        }}
+                    `;
+                    document.head.appendChild(style);
+                    
+                    // Build content
+                    const stepInfo = document.createElement('div');
+                    stepInfo.style.cssText = 'font-weight: 600; font-size: 16px; margin-bottom: 8px;';
+                    stepInfo.textContent = 'Step {step_number}/{total_steps}';
+                    
+                    const actionInfo = document.createElement('div');
+                    actionInfo.style.cssText = 'font-size: 13px; opacity: 0.95; margin-bottom: 4px;';
+                    actionInfo.textContent = {step_action_js};
+                    
+                    indicator.appendChild(stepInfo);
+                    indicator.appendChild(actionInfo);
+                    
+                    {f'''
+                    if ({step_description_js}) {{
+                        const descInfo = document.createElement('div');
+                        descInfo.style.cssText = 'font-size: 12px; opacity: 0.85; margin-top: 4px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2); word-break: break-word;';
+                        descInfo.textContent = {step_description_js};
+                        indicator.appendChild(descInfo);
+                    }}
+                    ''' if step_description else ''}
+                    
+                    document.body.appendChild(indicator);
+                }})();
+                """
+                # Check if page is ready before injecting
+                try:
+                    # Wait for page to be ready
+                    self.playwright_page.wait_for_load_state("domcontentloaded", timeout=2000)
+                except:
+                    pass  # Continue even if page isn't fully loaded
+                
+                self.playwright_page.evaluate(script)
+                print(f"      📍 Step indicator displayed: Step {step_number}/{total_steps} - {step_action}")
+            except Exception as e:
+                # Log error for debugging
+                print(f"      ⚠️  Could not display step indicator: {e}")
+
+    def hide_step_indicator(self) -> None:
+        """Hide the step indicator overlay"""
+        if self.playwright_page:
+            try:
+                script = """
+                (function() {
+                    const indicator = document.getElementById('__easybdd_step_indicator__');
+                    if (indicator) {
+                        indicator.style.animation = 'slideOut 0.3s ease-out';
+                        setTimeout(() => indicator.remove(), 300);
+                    }
+                })();
+                """
+                self.playwright_page.evaluate(script)
+            except Exception:
+                pass
 
     # ===== PLAYWRIGHT NATIVE API INTEGRATION =====
 

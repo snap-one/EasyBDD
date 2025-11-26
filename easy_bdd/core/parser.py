@@ -104,9 +104,23 @@ class YAMLParser:
         file_path = Path(file_path)
 
         if not file_path.exists():
+            error_info = self._create_test_error_info(
+                file_path=file_path,
+                error_type="FileNotFoundError",
+                error_message=f"Test file not found: {file_path}",
+                error_details={"absolute_path": str(file_path.absolute())}
+            )
+            self._handle_test_load_error(error_info)
             raise FileNotFoundError(f"Test file not found: {file_path}")
 
         if file_path.suffix.lower() not in self.supported_extensions:
+            error_info = self._create_test_error_info(
+                file_path=file_path,
+                error_type="ValueError",
+                error_message=f"Unsupported file extension: {file_path.suffix}",
+                error_details={"supported_extensions": list(self.supported_extensions)}
+            )
+            self._handle_test_load_error(error_info)
             raise ValueError(f"Unsupported file extension: {file_path.suffix}")
 
         try:
@@ -118,12 +132,125 @@ class YAMLParser:
                 else:
                     data = yaml.safe_load(f)
         except (yaml.YAMLError, json.JSONDecodeError) as e:
+            error_info = self._create_test_error_info(
+                file_path=file_path,
+                error_type=type(e).__name__,
+                error_message=f"Invalid file format in {file_path}: {e}",
+                error_details={"error": str(e), "line": getattr(e, "line", None), "column": getattr(e, "column", None)}
+            )
+            self._handle_test_load_error(error_info)
             raise ValueError(f"Invalid file format in {file_path}: {e}")
 
         if not isinstance(data, dict):
+            error_info = self._create_test_error_info(
+                file_path=file_path,
+                error_type="ValueError",
+                error_message=f"YAML file must contain a dictionary: {file_path}",
+                error_details={"data_type": type(data).__name__}
+            )
+            self._handle_test_load_error(error_info)
             raise ValueError(f"YAML file must contain a dictionary: {file_path}")
 
-        return self._parse_test_definition(data, file_path)
+        try:
+            return self._parse_test_definition(data, file_path)
+        except Exception as e:
+            error_info = self._create_test_error_info(
+                file_path=file_path,
+                error_type=type(e).__name__,
+                error_message=f"Failed to parse test definition: {e}",
+                error_details={"error": str(e)}
+            )
+            self._handle_test_load_error(error_info)
+            raise
+    
+    def _create_test_error_info(
+        self, file_path: Path, error_type: str, error_message: str, error_details: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Create structured error information for test loading failures"""
+        file_path = Path(file_path)
+        return {
+            "file_path": str(file_path),
+            "absolute_path": str(file_path.absolute()),
+            "relative_path": str(file_path.relative_to(Path.cwd())) if file_path.is_relative_to(Path.cwd()) else str(file_path),
+            "file_name": file_path.name,
+            "error_type": error_type,
+            "error_message": error_message,
+            "error_details": error_details or {},
+            "can_edit": file_path.exists() and file_path.is_file(),
+        }
+    
+    def _handle_test_load_error(self, error_info: Dict[str, Any]) -> None:
+        """Handle test loading errors with helpful messages and edit options"""
+        file_path = Path(error_info["file_path"])
+        print(f"\n{'='*80}")
+        print(f"❌ FAILED TO LOAD TEST")
+        print(f"{'='*80}")
+        print(f"📁 File: {error_info['file_path']}")
+        print(f"   Absolute: {error_info['absolute_path']}")
+        if error_info.get('relative_path') != error_info['file_path']:
+            print(f"   Relative: {error_info['relative_path']}")
+        print(f"🔴 Error Type: {error_info['error_type']}")
+        print(f"💬 Message: {error_info['error_message']}")
+        
+        if error_info.get('error_details'):
+            print(f"📋 Details:")
+            for key, value in error_info['error_details'].items():
+                print(f"   {key}: {value}")
+        
+        if error_info['can_edit']:
+            print(f"\n✏️  To edit this file, run:")
+            print(f"   python -m easy_bdd edit-test \"{error_info['file_path']}\"")
+            print(f"   Or manually open: {error_info['absolute_path']}")
+            
+            # Try to detect and suggest editor commands
+            editor_commands = self._get_editor_commands(file_path)
+            if editor_commands:
+                print(f"\n   Quick edit commands:")
+                for cmd_name, cmd in editor_commands.items():
+                    print(f"   {cmd_name}: {cmd}")
+        else:
+            print(f"\n⚠️  File does not exist or is not accessible")
+        
+        print(f"{'='*80}\n")
+    
+    def _get_editor_commands(self, file_path: Path) -> Dict[str, str]:
+        """Get platform-specific editor commands for opening a file"""
+        commands = {}
+        file_path_str = str(file_path.absolute())
+        
+        system = platform.system().lower()
+        
+        if system == "darwin":  # macOS
+            commands["Open in default editor"] = f"open {file_path_str}"
+            commands["Open in VS Code"] = f"code {file_path_str}"
+            commands["Open in TextEdit"] = f"open -a TextEdit {file_path_str}"
+        elif system == "linux":
+            # Try common editors
+            editors = ["code", "vim", "nano", "gedit", "kate"]
+            for editor in editors:
+                if self._command_exists(editor):
+                    commands[f"Open in {editor}"] = f"{editor} {file_path_str}"
+                    break
+            if not commands:
+                commands["Open in default editor"] = f"xdg-open {file_path_str}"
+        elif system == "windows":
+            commands["Open in default editor"] = f"start {file_path_str}"
+            commands["Open in VS Code"] = f"code {file_path_str}"
+            commands["Open in Notepad"] = f"notepad {file_path_str}"
+        
+        return commands
+    
+    def _command_exists(self, command: str) -> bool:
+        """Check if a command exists in PATH"""
+        try:
+            subprocess.run(
+                ["which", command] if platform.system() != "Windows" else ["where", command],
+                capture_output=True,
+                check=True
+            )
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
 
     def parse_directory(self, directory_path: Path) -> List[TestDefinition]:
         """Parse all YAML files in a directory"""
@@ -145,7 +272,8 @@ class YAMLParser:
                 test = self.parse_file(file_path)
                 tests.append(test)
             except Exception as e:
-                print(f"Warning: Failed to parse {file_path}: {e}")
+                # Error handling is done in parse_file, just log a summary here
+                print(f"⚠️  Skipping {file_path.name} due to parsing error")
 
         return tests
 

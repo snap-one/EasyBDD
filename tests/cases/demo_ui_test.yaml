@@ -1,0 +1,87 @@
+name: "Demo UI Test - Public Website"
+description: "Simple UI test demonstrating browser automation on a public website"
+tags: ["demo", "ui", "browser", "public"]
+
+variables:
+  base_url: "https://example.com"
+  httpbin_url: "https://httpbin.org"
+
+steps:
+  - action: browser.open
+    url: "${base_url}"
+    description: "Navigate to example.com homepage"
+  
+  - action: wait
+    time: 2
+    description: "Wait for page to load"
+  
+  - action: browser.take_screenshot
+    name: "example_homepage"
+    description: "Capture homepage screenshot"
+  
+  - action: test.assert_text_contains
+    selector: "h1"
+    text: "Example Domain"
+    description: "Verify page title is present"
+  
+  - action: browser.open
+    url: "${httpbin_url}/html"
+    description: "Navigate to httpbin HTML page"
+  
+  - action: wait
+    time: 2
+    description: "Wait for page to load"
+  
+  - action: test.assert_text_contains
+    selector: "h1"
+    text: "Herman Melville"
+    description: "Verify HTML content is displayed"
+  
+  - action: browser.take_screenshot
+    name: "httpbin_html"
+    description: "Capture httpbin HTML page"
+  
+  - action: browser.open
+    url: "${httpbin_url}/forms/post"
+    description: "Navigate to httpbin form page"
+  
+  - action: wait
+    time: 2
+    description: "Wait for form to load"
+  
+  - action: browser.fill
+    field: "input[name='custname']"
+    value: "Demo User"
+    description: "Fill customer name field"
+  
+  - action: browser.fill
+    field: "input[name='custtel']"
+    value: "555-1234"
+    description: "Fill phone number field"
+  
+  - action: browser.fill
+    field: "input[name='custemail']"
+    value: "demo@example.com"
+    description: "Fill email field"
+  
+  - action: browser.take_screenshot
+    name: "form_filled"
+    description: "Capture filled form"
+  
+  - action: browser.click
+    selector: "input[type='submit']"
+    description: "Submit the form"
+  
+  - action: wait
+    time: 3
+    description: "Wait for form submission"
+  
+  - action: test.assert_text_contains
+    selector: "body"
+    text: "custname"
+    description: "Verify form data was submitted"
+  
+  - action: browser.take_screenshot
+    name: "form_submitted"
+    description: "Capture form submission result"
+

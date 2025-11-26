@@ -1857,9 +1857,9 @@ ACTION_DEFINITIONS: Dict[str, Dict[str, Any]] = {
                 "type": "select",
                 "required": False,
                 "label": "Shell Type",
-                "options": ["auto", "bash", "sh", "zsh", "cmd", "powershell"],
+                "options": ["auto", "bash", "sh", "zsh", "fish", "tcsh", "csh", "dash", "ksh", "cmd", "batch", "powershell", "pwsh"],
                 "default": "auto",
-                "help": "Shell to use (auto detects based on OS)",
+                "help": "Shell to use (auto detects based on OS). Windows: cmd, powershell, pwsh. Unix: bash, sh, zsh, fish, tcsh, csh, dash, ksh",
             },
             "working_directory": {
                 "type": "text",

@@ -1,0 +1,37 @@
+name: '1234'
+description: ''
+tags: []
+variables:
+  slow_mo: 5000
+steps:
+- browser.open:
+    url: https://app.ovrc.com
+- log:
+    message: Recorder initialized
+- browser.click:
+    selector: input[name="username"]
+- browser.click:
+    selector: input[name="password"]
+- browser.fill:
+    field: input[name="username"]
+    value: jpdsauto@gmail.com
+- browser.fill:
+    field: input[name="password"]
+    value: Snapone704!
+- browser.click:
+    selector: '#button__login'
+- log:
+    message: Recorder initialized
+- browser.open:
+  url: https://app.ovrc.com/#/customers
+- wait:
+  time: 3
+  description: Wait for table to load
+- test.assert_text_contains:
+  selector: td.MuiTableCell-sizeMedium:has-text("jpdsauto@gmail.com")
+  text: jpdsauto@gmail.com
+  timeout: 30000
+- test.assert_text_contains:
+  selector: td.MuiTableCell-sizeMedium:has-text("+1 866-424-4489")
+  text: +1 866-424-4489
+  timeout: 30000

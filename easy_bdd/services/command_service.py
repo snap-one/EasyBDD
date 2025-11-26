@@ -20,6 +20,7 @@ class CommandService:
     def __init__(self, config=None):
         self.config = config
         self.os_type = platform.system().lower()
+        self._shell_cache = {}  # Cache for found shell executables
 
     def execute_ssh_command(
         self,
@@ -114,34 +115,31 @@ class CommandService:
 
             # Determine shell based on OS if auto
             if shell == "auto":
-                if self.os_type == "windows":
-                    shell = "cmd"
-                else:
-                    shell = "bash"
+                shell = self._detect_default_shell()
 
             # Build command based on shell type
-            if shell == "cmd":
-                # Windows CMD
+            if shell == "cmd" or shell == "batch":
+                # Windows CMD / Batch
                 cmd = ["cmd", "/c", command]
                 use_shell = False
-            elif shell == "powershell":
-                # Windows PowerShell
-                cmd = ["powershell", "-Command", command]
-                use_shell = False
-            elif shell in ["bash", "sh", "zsh"]:
-                # Unix shells - find the shell executable
-                shell_path = None
-                # Try common paths first
-                for possible_path in [f"/bin/{shell}", f"/usr/bin/{shell}"]:
-                    if os.path.exists(possible_path):
-                        shell_path = possible_path
-                        break
-
-                # If not found in common paths, try PATH
+            elif shell == "powershell" or shell == "pwsh":
+                # Windows PowerShell or PowerShell Core
+                # Try PowerShell Core first (cross-platform), then Windows PowerShell
+                shell_path = self._find_shell_executable("pwsh")
                 if not shell_path:
-                    shell_path = shutil.which(shell)
-
-                # Use found path or fallback to shell name (should be in PATH)
+                    shell_path = self._find_shell_executable("powershell")
+                
+                if shell_path:
+                    # PowerShell Core uses -Command, Windows PowerShell uses -Command
+                    cmd = [shell_path, "-NoProfile", "-NonInteractive", "-Command", command]
+                else:
+                    # Fallback to powershell (should be in PATH on Windows)
+                    cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", command]
+                use_shell = False
+            elif shell in ["bash", "sh", "zsh", "fish", "tcsh", "csh", "dash", "ksh"]:
+                # Unix shells - find the shell executable
+                shell_path = self._find_shell_executable(shell)
+                
                 if shell_path:
                     cmd = [shell_path, "-c", command]
                 else:
@@ -216,6 +214,73 @@ class CommandService:
         return self.execute_shell_command(
             command, shell="cmd", working_directory=working_directory, timeout=timeout
         )
+    
+    def _detect_default_shell(self) -> str:
+        """Detect the default shell for the current platform"""
+        if self.os_type == "windows":
+            # On Windows, prefer PowerShell if available, otherwise CMD
+            if self._find_shell_executable("pwsh") or self._find_shell_executable("powershell"):
+                return "powershell"
+            return "cmd"
+        else:
+            # On Unix-like systems, check SHELL environment variable
+            default_shell = os.environ.get("SHELL", "")
+            if default_shell:
+                # Extract shell name from path (e.g., /bin/bash -> bash)
+                shell_name = os.path.basename(default_shell)
+                # Remove leading dot if present (e.g., .zsh -> zsh)
+                if shell_name.startswith("."):
+                    shell_name = shell_name[1:]
+                # Check if it's a supported shell
+                if shell_name in ["bash", "sh", "zsh", "fish", "tcsh", "csh", "dash", "ksh"]:
+                    return shell_name
+            # Fallback to bash (most common on Linux/Mac)
+            return "bash"
+    
+    def _find_shell_executable(self, shell_name: str) -> Optional[str]:
+        """Find the path to a shell executable, with caching"""
+        # Check cache first
+        if shell_name in self._shell_cache:
+            return self._shell_cache[shell_name]
+        
+        shell_path = None
+        
+        # Try common paths first (platform-specific)
+        if self.os_type == "windows":
+            if shell_name in ["powershell", "pwsh"]:
+                # PowerShell paths
+                possible_paths = [
+                    "C:\\Program Files\\PowerShell\\7\\pwsh.exe",  # PowerShell Core
+                    "C:\\Program Files (x86)\\PowerShell\\7\\pwsh.exe",
+                    "C:\\Program Files\\PowerShell\\6\\pwsh.exe",
+                    "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",  # Windows PowerShell
+                ]
+                for path in possible_paths:
+                    if os.path.exists(path):
+                        shell_path = path
+                        break
+            elif shell_name in ["cmd", "batch"]:
+                # CMD is always available on Windows
+                shell_path = "C:\\Windows\\System32\\cmd.exe"
+        else:
+            # Unix-like systems
+            possible_paths = [
+                f"/bin/{shell_name}",
+                f"/usr/bin/{shell_name}",
+                f"/usr/local/bin/{shell_name}",
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    shell_path = path
+                    break
+        
+        # If not found in common paths, try PATH
+        if not shell_path:
+            shell_path = shutil.which(shell_name)
+        
+        # Cache the result (even if None, to avoid repeated lookups)
+        self._shell_cache[shell_name] = shell_path
+        return shell_path
 
     def execute_python_code(
         self,

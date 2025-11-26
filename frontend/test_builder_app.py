@@ -28,11 +28,17 @@ from fastapi import (
     BackgroundTasks,
     FastAPI,
     HTTPException,
+    Request,
     WebSocket,
     WebSocketDisconnect,
+    status,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel, Field
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -1610,11 +1616,19 @@ async def get_hardware_stats_endpoint():
 
 
 @app.get("/api/metrics/comprehensive")
-async def get_comprehensive_metrics():
-    """Get comprehensive metrics for the metrics page"""
+async def get_comprehensive_metrics(period: str = "30"):
+    """Get comprehensive metrics for the metrics page
+    
+    Args:
+        period: Time period in days. Options: "7", "14", "21", "30", "90" (default: "30")
+    """
     try:
         from collections import defaultdict
-        from datetime import timedelta
+        from datetime import timedelta, datetime
+        
+        # Parse period and calculate cutoff date
+        period_days = int(period) if period.isdigit() else 30
+        cutoff_date = datetime.now() - timedelta(days=period_days)
 
         # Load all test results
         results = []
@@ -1682,6 +1696,48 @@ async def get_comprehensive_metrics():
                     print(f"Error processing result file {result_file}: {e}")
                     continue
 
+        # Filter results by time period
+        filtered_results = []
+        for r in results:
+            if r.get("timestamp"):
+                try:
+                    # Parse timestamp (handle various formats)
+                    timestamp_str = r["timestamp"]
+                    if isinstance(timestamp_str, str):
+                        # Try ISO format first
+                        try:
+                            result_date = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+                        except:
+                            # Try other formats
+                            try:
+                                result_date = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+                            except:
+                                try:
+                                    result_date = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S")
+                                except:
+                                    # If parsing fails, include the result (better to show than hide)
+                                    filtered_results.append(r)
+                                    continue
+                    else:
+                        filtered_results.append(r)
+                        continue
+                    
+                    # Convert to naive datetime for comparison if needed
+                    if result_date.tzinfo:
+                        result_date = result_date.replace(tzinfo=None)
+                    cutoff_date_naive = cutoff_date.replace(tzinfo=None) if cutoff_date.tzinfo else cutoff_date
+                    
+                    # Include results within the time period
+                    if result_date >= cutoff_date_naive:
+                        filtered_results.append(r)
+                except Exception as e:
+                    # If timestamp parsing fails, include the result anyway
+                    print(f"Error parsing timestamp {r.get('timestamp')}: {e}")
+                    filtered_results.append(r)
+        
+        # Use filtered results for metrics calculation
+        results = filtered_results
+        
         # Sort results by timestamp
         results_with_timestamp = [r for r in results if r.get("timestamp")]
         results_with_timestamp.sort(key=lambda x: x["timestamp"], reverse=True)
@@ -1841,15 +1897,9 @@ async def get_comprehensive_metrics():
             suite_stats["most_active_suites"] = suite_activity[:10]
 
         # 3. Execution Trends
-        # Execution time trends (last 30 days)
-        thirty_days_ago = datetime.now() - timedelta(days=30)
-        recent_results = [
-            r
-            for r in results_with_timestamp
-            if r.get("timestamp")
-            and datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00"))
-            > thirty_days_ago
-        ]
+        # Execution time trends (use filtered results which are already within the period)
+        # Since results are already filtered by period, we can use all results_with_timestamp
+        recent_results = results_with_timestamp
 
         # Group by date
         execution_time_by_date = defaultdict(list)
@@ -2146,8 +2196,8 @@ async def get_comprehensive_metrics():
             },
             "suite_statistics": suite_stats,
             "execution_trends": {
-                "time_trends": execution_trends[-30:],  # Last 30 days
-                "failure_rate_trends": failure_rate_trends[-30:],
+                "time_trends": execution_trends[-period_days:] if period_days <= 30 else execution_trends,
+                "failure_rate_trends": failure_rate_trends[-period_days:] if period_days <= 30 else failure_rate_trends,
                 "peak_hours": peak_hours,
                 "slowest_tests": slowest_tests[:10],
             },
@@ -2246,6 +2296,9 @@ async def list_test_results(
     """List all test execution results with pagination and workspace filtering"""
     results = []
 
+    # Track seen results to prevent duplicates
+    seen_result_keys = set()
+    
     for result_file in reports_directory.glob("*.json"):
         try:
             with open(result_file, "r") as f:
@@ -2295,11 +2348,21 @@ async def list_test_results(
                 or result_data.get("started")
                 or result_data.get("timestamp", "")
             )
+            
+            # Create unique key for deduplication
+            build_id = result_data.get("build_id", "")
+            result_key = f"{result_file.name}_{build_id}_{timestamp}" if build_id or timestamp else result_file.name
+            
+            # Skip if we've already seen this result
+            if result_key in seen_result_keys:
+                print(f"[DEBUG] Skipping duplicate result: {result_key}")
+                continue
+            seen_result_keys.add(result_key)
 
             results.append(
                 {
                     "filename": result_file.name,
-                    "build_id": result_data.get("build_id"),  # Include unique build ID
+                    "build_id": build_id,  # Include unique build ID
                     "test_id": test_info.get(
                         "name", result_data.get("test_file", "unknown")
                     )
@@ -3934,6 +3997,10 @@ async def run_recorder(session_id: str, url: str, headless: bool):
 
             # Navigate to URL
             await page.goto(url, wait_until="domcontentloaded")
+            
+            # Record the initial browser.open step
+            record_action(session_id, "browser.open", {"url": url})
+            print(f"[EasyBDD Recorder] Initial navigation recorded: {url}")
 
             # Set up action recording function first
             async def record_action_wrapper(action_type: str, params: Dict[str, Any]):
@@ -4134,49 +4201,168 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                         window.__easybdd_recorder__.recordingBadge = null;
                     }
 
+                    // Check if a selector value looks dynamically generated
+                    function isDynamicSelector(value) {
+                        if (!value || typeof value !== 'string') return false;
+                        
+                        // Patterns that indicate dynamic/generated values
+                        const dynamicPatterns = [
+                            /^[a-f0-9]{8,}$/i,           // Hex IDs (UUIDs, hashes)
+                            /^[a-z0-9]{32,}$/i,         // Long alphanumeric strings
+                            /[0-9]{10,}/,               // Long numeric sequences (timestamps)
+                            /^[a-z]+[0-9]+$/i,          // Pattern like "element123" (auto-increment)
+                            /^[a-z]+-[0-9]+$/i,         // Pattern like "element-123"
+                            /^[a-z]+_[0-9]+$/i,         // Pattern like "element_123"
+                            /^[a-z]+-[a-f0-9]{8,}$/i,   // Pattern like "element-abc12345"
+                            /^[a-z]+_[a-f0-9]{8,}$/i,   // Pattern like "element_abc12345"
+                            /^[a-z]+-[a-z]+-[0-9]+$/i,  // Pattern like "react-component-123"
+                            /^[a-z]+-[a-z]+-[a-f0-9]+$/i, // Pattern like "react-component-abc123"
+                            /^[a-z]+-[a-z]+-[a-z]+-[0-9]+$/i, // Pattern like "mui-component-base-123"
+                            /__[a-z0-9]+__/i,            // Double underscores (often generated)
+                            /^[a-z]+-[0-9]+-[0-9]+$/i,  // Multiple numbers
+                            /^[a-z]+-[a-z]+-[0-9]+-[0-9]+$/i, // Multiple numbers with dashes
+                        ];
+                        
+                        return dynamicPatterns.some(pattern => pattern.test(value));
+                    }
+
+                    // Get stable class names (exclude dynamic ones)
+                    function getStableClasses(element) {
+                        if (!element.className || typeof element.className !== 'string') return [];
+                        
+                        const classes = element.className.trim().split(/\\s+/).filter(c => {
+                            if (!c || c.length === 0) return false;
+                            if (c.startsWith('__recorder')) return false;
+                            // Exclude dynamic-looking classes
+                            if (isDynamicSelector(c)) return false;
+                            // Prefer semantic class names (longer, descriptive)
+                            // Avoid very short classes that might be generated
+                            if (c.length < 3) return false;
+                            return true;
+                        });
+                        
+                        // Sort by length (longer = more descriptive/stable) and alphabetically
+                        return classes.sort((a, b) => {
+                            if (b.length !== a.length) return b.length - a.length;
+                            return a.localeCompare(b);
+                        });
+                    }
+
                     function getSelector(element) {
                         if (!element || !element.tagName) return '';
 
-                        // Priority 1: ID selector (most reliable)
-                        if (element.id) {
-                            return '#' + element.id;
-                        }
-
-                        // Priority 2: Name attribute (for form elements)
-                        if (element.name) {
-                            return element.tagName.toLowerCase() + '[name="' + element.name + '"]';
-                        }
-
-                        // Priority 3: Data-testid or data-cy (common test attributes)
+                        // Priority 1: Data-testid or data-cy (most stable, explicitly for testing)
                         if (element.getAttribute('data-testid')) {
-                            return '[data-testid="' + element.getAttribute('data-testid') + '"]';
+                            const testId = element.getAttribute('data-testid');
+                            if (!isDynamicSelector(testId)) {
+                                return '[data-testid="' + testId + '"]';
+                            }
                         }
                         if (element.getAttribute('data-cy')) {
-                            return '[data-cy="' + element.getAttribute('data-cy') + '"]';
-                        }
-
-                        // Priority 4: Class name (first meaningful class)
-                        if (element.className && typeof element.className === 'string') {
-                            const classes = element.className.trim().split(/\\s+/).filter(c =>
-                                c && !c.startsWith('__recorder') && c.length > 0
-                            );
-                            if (classes.length > 0) {
-                                return element.tagName.toLowerCase() + '.' + classes[0];
+                            const dataCy = element.getAttribute('data-cy');
+                            if (!isDynamicSelector(dataCy)) {
+                                return '[data-cy="' + dataCy + '"]';
                             }
                         }
 
-                        // Priority 5: Role attribute
-                        if (element.getAttribute('role')) {
-                            return element.tagName.toLowerCase() + '[role="' + element.getAttribute('role') + '"]';
+                        // Priority 2: Name attribute (for form elements - usually stable)
+                        if (element.name && !isDynamicSelector(element.name)) {
+                            return element.tagName.toLowerCase() + '[name="' + element.name + '"]';
                         }
 
-                        // Priority 6: Text content (for buttons, links)
+                        // Priority 3: ID selector (only if not dynamic)
+                        if (element.id && !isDynamicSelector(element.id)) {
+                            return '#' + element.id;
+                        }
+
+                        // Priority 4: Role attribute with name (very stable)
+                        const role = element.getAttribute('role');
+                        const ariaLabel = element.getAttribute('aria-label');
+                        const ariaLabelledBy = element.getAttribute('aria-labelledby');
+                        if (role && (ariaLabel || ariaLabelledBy)) {
+                            if (ariaLabel && !isDynamicSelector(ariaLabel)) {
+                                return element.tagName.toLowerCase() + '[role="' + role + '"][aria-label="' + ariaLabel + '"]';
+                            }
+                        }
+                        if (role && !isDynamicSelector(role)) {
+                            return element.tagName.toLowerCase() + '[role="' + role + '"]';
+                        }
+
+                        // Priority 5: Stable class names (exclude dynamic ones)
+                        const stableClasses = getStableClasses(element);
+                        if (stableClasses.length > 0) {
+                            // Use the most descriptive (longest) stable class
+                            const bestClass = stableClasses[0];
+                            return element.tagName.toLowerCase() + '.' + bestClass;
+                        }
+
+                        // Priority 6: Text content (for buttons, links - very stable)
                         const text = element.textContent?.trim();
-                        if (text && text.length < 50 && (element.tagName === 'BUTTON' || element.tagName === 'A')) {
+                        if (text && text.length > 0 && text.length < 50 && 
+                            (element.tagName === 'BUTTON' || element.tagName === 'A' || element.tagName === 'LABEL')) {
+                            // Use role-based selector with text if available
+                            if (role) {
+                                return element.tagName.toLowerCase() + '[role="' + role + '"]:has-text("' + text.substring(0, 30) + '")';
+                            }
                             return element.tagName.toLowerCase() + ':has-text("' + text.substring(0, 30) + '")';
                         }
 
-                        // Priority 7: Tag with parent context
+                        // Priority 7: Type attribute (for inputs)
+                        if (element.type && element.tagName === 'INPUT') {
+                            const typeSelector = 'input[type="' + element.type + '"]';
+                            // Try to combine with name if available and stable
+                            if (element.name && !isDynamicSelector(element.name)) {
+                                return typeSelector + '[name="' + element.name + '"]';
+                            }
+                            // Try to combine with placeholder if available
+                            const placeholder = element.getAttribute('placeholder');
+                            if (placeholder && !isDynamicSelector(placeholder)) {
+                                return typeSelector + '[placeholder="' + placeholder + '"]';
+                            }
+                        }
+
+                        // Priority 8: Placeholder attribute (for inputs)
+                        const placeholder = element.getAttribute('placeholder');
+                        if (placeholder && !isDynamicSelector(placeholder) && 
+                            (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA')) {
+                            return element.tagName.toLowerCase() + '[placeholder="' + placeholder + '"]';
+                        }
+
+                        // Priority 9: Tag with stable parent context
+                        if (element.parentElement) {
+                            const parent = element.parentElement;
+                            // Try to find a stable parent selector
+                            let parentSelector = null;
+                            
+                            // Check parent ID (if stable)
+                            if (parent.id && !isDynamicSelector(parent.id)) {
+                                parentSelector = '#' + parent.id;
+                            }
+                            // Check parent data-testid
+                            else if (parent.getAttribute('data-testid')) {
+                                const parentTestId = parent.getAttribute('data-testid');
+                                if (!isDynamicSelector(parentTestId)) {
+                                    parentSelector = '[data-testid="' + parentTestId + '"]';
+                                }
+                            }
+                            // Check parent stable classes
+                            else {
+                                const parentClasses = getStableClasses(parent);
+                                if (parentClasses.length > 0) {
+                                    parentSelector = parent.tagName.toLowerCase() + '.' + parentClasses[0];
+                                }
+                            }
+                            
+                            if (parentSelector) {
+                                const siblings = Array.from(parent.children);
+                                const index = siblings.indexOf(element);
+                                if (index >= 0) {
+                                    return parentSelector + ' > ' + element.tagName.toLowerCase() + ':nth-child(' + (index + 1) + ')';
+                                }
+                            }
+                        }
+
+                        // Priority 10: Tag with nth-child as last resort (less stable but better than nothing)
                         if (element.parentElement) {
                             const parentTag = element.parentElement.tagName.toLowerCase();
                             const siblings = Array.from(element.parentElement.children);
@@ -4220,7 +4406,8 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                             console.log('[EasyBDD Recorder] ✅ window.recordAction is a function');
                             // Test call
                             try {
-                                await window.recordAction('test.action', {test: 'initialization'});
+                                // Test call - don't record this as an actual action
+                                await window.recordAction('log', {message: 'Recorder initialized'});
                                 console.log('[EasyBDD Recorder] ✅ Test recordAction call succeeded');
                             } catch (error) {
                                 console.error('[EasyBDD Recorder] ❌ Test recordAction call failed:', error);
@@ -4298,43 +4485,235 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                     return menu;
                 }
 
-                // Handle assertion action
+                    // Create text input modal
+                    function createTextInputModal(title, placeholder, defaultValue, callback) {
+                        // Remove any existing modal
+                        const existing = document.getElementById('__recorder_text_modal__');
+                        if (existing) existing.remove();
+
+                        const overlay = document.createElement('div');
+                        overlay.id = '__recorder_text_modal__';
+                        overlay.style.cssText = `
+                            position: fixed;
+                            top: 0;
+                            left: 0;
+                            right: 0;
+                            bottom: 0;
+                            background: rgba(0, 0, 0, 0.5);
+                            z-index: 1000001;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                        `;
+
+                        const modal = document.createElement('div');
+                        modal.style.cssText = `
+                            background: white;
+                            padding: 24px;
+                            border-radius: 8px;
+                            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+                            min-width: 400px;
+                            max-width: 600px;
+                        `;
+
+                        modal.innerHTML = `
+                            <h3 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 600;">${title}</h3>
+                            <input type="text" id="__recorder_text_input__" 
+                                   placeholder="${placeholder}" 
+                                   value="${defaultValue || ''}"
+                                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; margin-bottom: 16px; box-sizing: border-box;">
+                            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                                <button id="__recorder_text_cancel__" 
+                                        style="padding: 8px 16px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer;">
+                                    Cancel
+                                </button>
+                                <button id="__recorder_text_ok__" 
+                                        style="padding: 8px 16px; border: none; background: #3b82f6; color: white; border-radius: 4px; cursor: pointer;">
+                                    OK
+                                </button>
+                            </div>
+                        `;
+
+                        overlay.appendChild(modal);
+                        document.body.appendChild(overlay);
+
+                        const input = document.getElementById('__recorder_text_input__');
+                        const okBtn = document.getElementById('__recorder_text_ok__');
+                        const cancelBtn = document.getElementById('__recorder_text_cancel__');
+
+                        // Focus input
+                        setTimeout(() => input.focus(), 100);
+
+                        // Handle OK
+                        okBtn.onclick = () => {
+                            const value = input.value.trim();
+                            overlay.remove();
+                            if (value) {
+                                callback(value);
+                            }
+                        };
+
+                        // Handle Cancel
+                        cancelBtn.onclick = () => {
+                            overlay.remove();
+                        };
+
+                        // Handle Enter key
+                        input.onkeydown = (e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                okBtn.click();
+                            } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                cancelBtn.click();
+                            }
+                        };
+
+                        // Close on overlay click
+                        overlay.onclick = (e) => {
+                            if (e.target === overlay) {
+                                cancelBtn.click();
+                            }
+                        };
+                    }
+
+                    // Handle assertion action
                 async function handleAssertAction(action) {
-                    const selector = getSelector(window.__easybdd_recorder__.contextTarget);
-                    let params = { selector: selector };
-
-                    if (action === 'assert_text_contains' || action === 'assert_text_equals') {
-                        const text = prompt('Enter expected text:', window.__easybdd_recorder__.contextTarget.textContent.trim());
-                        if (!text) {
-                            hideContextMenu();
-                            return;
-                        }
-                        params.text = text;
-                    } else if (action === 'assert_count') {
-                        const count = prompt('Enter expected count:', '1');
-                        if (!count) {
-                            hideContextMenu();
-                            return;
-                        }
-                        params.count = parseInt(count);
-                    }
-
-                    // Map action to Easy BDD action name
-                    const actionMap = {
-                        'assert_visible': 'test.assert_element_visible',
-                        'assert_not_visible': 'test.assert_element_not_visible',
-                        'assert_enabled': 'test.assert_element_enabled',
-                        'assert_disabled': 'test.assert_element_disabled',
-                        'assert_text_contains': 'test.assert_text_contains',
-                        'assert_text_equals': 'test.assert_text_equals',
-                        'assert_count': 'test.assert_element_count'
-                    };
-
-                    if (window.recordAction) {
-                        await window.recordAction(actionMap[action], params);
-                    }
-
                     hideContextMenu();
+
+                    // All assert actions need element selection first
+                    const needsElementSelection = [
+                        'assert_visible', 'assert_not_visible', 
+                        'assert_enabled', 'assert_disabled',
+                        'assert_text_contains', 'assert_text_equals',
+                        'assert_count'
+                    ];
+
+                    if (needsElementSelection.includes(action)) {
+                        // Show instruction message
+                        const instruction = document.createElement('div');
+                        instruction.id = '__recorder_element_selection_instruction__';
+                        instruction.style.cssText = `
+                            position: fixed;
+                            top: 20px;
+                            left: 50%;
+                            transform: translateX(-50%);
+                            background: #3b82f6;
+                            color: white;
+                            padding: 12px 24px;
+                            border-radius: 6px;
+                            z-index: 1000002;
+                            font-size: 14px;
+                            font-weight: 500;
+                            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                            pointer-events: none;
+                        `;
+                        instruction.textContent = 'Click on the element to assert...';
+                        document.body.appendChild(instruction);
+
+                        // Set up one-time click handler for element selection
+                        const elementSelectionHandler = async (e) => {
+                            // Prevent default click behavior (navigation, form submission, etc.)
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+
+                            // Remove instruction
+                            if (instruction.parentNode) {
+                                instruction.remove();
+                            }
+
+                            // Remove this handler
+                            document.removeEventListener('click', elementSelectionHandler, true);
+
+                            // Get selector from clicked element
+                            const selector = getSelector(e.target);
+                            if (!selector) {
+                                console.warn('[EasyBDD Recorder] No selector generated for element');
+                                return;
+                            }
+
+                            // Handle text asserts - show modal with pre-filled text
+                            if (action === 'assert_text_contains' || action === 'assert_text_equals') {
+                                // Get text from the clicked element
+                                const elementText = e.target.textContent?.trim() || 
+                                                   e.target.innerText?.trim() || 
+                                                   e.target.value?.trim() || 
+                                                   e.target.getAttribute('aria-label') || 
+                                                   e.target.getAttribute('placeholder') || 
+                                                   '';
+                                
+                                createTextInputModal(
+                                    action === 'assert_text_contains' ? 'Assert Text Contains' : 'Assert Text Equals',
+                                    'Enter expected text...',
+                                    elementText,
+                                    async (text) => {
+                                        const params = { 
+                                            selector: selector,
+                                            text: text
+                                        };
+
+                                        const actionMap = {
+                                            'assert_text_contains': 'test.assert_text_contains',
+                                            'assert_text_equals': 'test.assert_text_equals'
+                                        };
+
+                                        if (window.recordAction) {
+                                            await window.recordAction(actionMap[action], params);
+                                            console.log('[EasyBDD Recorder] Assert text action recorded:', actionMap[action], params);
+                                        }
+                                    }
+                                );
+                                return;
+                            }
+
+                            // Handle count assert - show modal
+                            if (action === 'assert_count') {
+                                createTextInputModal(
+                                    'Assert Element Count',
+                                    'Enter expected count...',
+                                    '1',
+                                    async (countStr) => {
+                                        const count = parseInt(countStr);
+                                        if (isNaN(count)) {
+                                            console.warn('[EasyBDD Recorder] Invalid count:', countStr);
+                                            return;
+                                        }
+
+                                        const params = { 
+                                            selector: selector,
+                                            count: count
+                                        };
+
+                                        if (window.recordAction) {
+                                            await window.recordAction('test.assert_element_count', params);
+                                            console.log('[EasyBDD Recorder] Assert count action recorded:', params);
+                                        }
+                                    }
+                                );
+                                return;
+                            }
+
+                            // Handle visibility/enabled asserts - record directly
+                            const actionMap = {
+                                'assert_visible': 'test.assert_element_visible',
+                                'assert_not_visible': 'test.assert_element_not_visible',
+                                'assert_enabled': 'test.assert_element_enabled',
+                                'assert_disabled': 'test.assert_element_disabled'
+                            };
+
+                            const params = { selector: selector };
+
+                            if (window.recordAction) {
+                                await window.recordAction(actionMap[action], params);
+                                console.log('[EasyBDD Recorder] Assert action recorded:', actionMap[action], params);
+                            }
+                        };
+
+                        // Add click handler (one-time)
+                        document.addEventListener('click', elementSelectionHandler, true);
+                        return;
+                    }
                 }
 
                 function hideContextMenu() {
@@ -4366,7 +4745,14 @@ async def run_recorder(session_id: str, url: str, headless: bool):
 
                 // Track clicks (but not on context menu or recorder UI)
                 document.addEventListener('click', async (e) => {
-                    if (e.target.closest('#__recorder_context_menu__') ||
+                    // Skip if we're in element selection mode (for asserts)
+                    if (document.getElementById('__recorder_element_selection_instruction__')) {
+                        return; // Let the element selection handler take care of it
+                    }
+
+                    // Skip if clicking on modal or text input
+                    if (e.target.closest('#__recorder_text_modal__') ||
+                        e.target.closest('#__recorder_context_menu__') ||
                         e.target.classList.contains('__recorder_highlight__') ||
                         e.target.classList.contains('__recorder_locator__') ||
                         e.target.classList.contains('__recorder_badge__')) {
@@ -4443,11 +4829,11 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                             }
 
                             try {
-                                await window.recordAction('browser.type', {
-                                    selector: selector,
-                                    text: finalValue
+                                await window.recordAction('browser.fill', {
+                                    field: selector,
+                                    value: finalValue
                                 });
-                                console.log('[EasyBDD Recorder] Type action recorded:', selector, 'text:', finalValue);
+                                console.log('[EasyBDD Recorder] Fill action recorded:', selector, 'value:', finalValue);
 
                                 // Update last recorded values
                                 lastRecordedValue = finalValue;
@@ -4459,13 +4845,9 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                     }
                 }, true);
 
-                // Track form submissions
-                document.addEventListener('submit', async (e) => {
-                    const selector = getSelector(e.target);
-                    if (window.recordAction && selector) {
-                        await window.recordAction('browser.submit', {selector: selector});
-                    }
-                }, true);
+                // Track form submissions - Note: Form submission is typically handled by clicking submit buttons
+                // We don't need to record form.submit events separately as clicking the submit button is already recorded
+                // If you need to explicitly submit a form, use browser.click on the submit button
 
                 // Track select changes
                 document.addEventListener('change', async (e) => {
@@ -4935,6 +5317,32 @@ async def test_teams_connection(request: TeamsTestRequest):
         }
 
 
+@app.get("/api/chat/tokens")
+async def get_token_status():
+    """Get current token usage status"""
+    has_tokens, tokens_used, tokens_remaining = check_token_limit()
+    return {
+        "tokens_used": tokens_used,
+        "tokens_remaining": tokens_remaining,
+        "free_tier_limit": chat_token_tracker["free_tier_limit"],
+        "reset_date": chat_token_tracker["reset_date"],
+        "has_tokens": has_tokens
+    }
+
+
+@app.get("/api/chat/tokens")
+async def get_token_status():
+    """Get current token usage status"""
+    has_tokens, tokens_used, tokens_remaining = check_token_limit()
+    return {
+        "tokens_used": tokens_used,
+        "tokens_remaining": tokens_remaining,
+        "free_tier_limit": chat_token_tracker["free_tier_limit"],
+        "reset_date": chat_token_tracker["reset_date"],
+        "has_tokens": has_tokens
+    }
+
+
 # Catch-all route for client-side routing (must be last)
 @app.get("/{full_path:path}")
 async def serve_frontend(full_path: str):
@@ -4954,6 +5362,526 @@ async def serve_frontend(full_path: str):
     if html_path.exists():
         return FileResponse(html_path)
     return HTMLResponse("<h1>Test Builder</h1><p>Frontend not found</p>")
+
+
+# ==================== CHAT ASSISTANT ====================
+
+# Token tracking for free tier (in-memory, resets on server restart)
+chat_token_tracker = {
+    "tokens_used": 0,
+    "free_tier_limit": 100000,  # 100k tokens per month (adjustable)
+    "reset_date": datetime.now().replace(day=1).isoformat(),  # Reset on 1st of month
+}
+
+# Try to import OpenAI for chat assistant
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
+
+class ChatMessage(BaseModel):
+    """Chat message request"""
+    message: str
+    conversation_history: Optional[List[Dict[str, str]]] = []
+    context: Optional[Dict[str, Any]] = None
+
+
+class ChatResponse(BaseModel):
+    """Chat response"""
+    response: str
+    tokens_used: int
+    tokens_remaining: int
+    error: Optional[str] = None
+
+
+def check_token_limit():
+    """Check if tokens are available and return status"""
+    # Check if we need to reset (new month)
+    current_date = datetime.now()
+    reset_date = datetime.fromisoformat(chat_token_tracker["reset_date"])
+    
+    if current_date.month != reset_date.month or current_date.year != reset_date.year:
+        # New month, reset tokens
+        chat_token_tracker["tokens_used"] = 0
+        chat_token_tracker["reset_date"] = current_date.replace(day=1).isoformat()
+    
+    tokens_used = chat_token_tracker["tokens_used"]
+    limit = chat_token_tracker["free_tier_limit"]
+    remaining = max(0, limit - tokens_used)
+    
+    return tokens_used < limit, tokens_used, remaining
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token estimation (1 token ≈ 4 characters)"""
+    return len(text) // 4
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat_assistant(
+    message: ChatMessage,
+    request: Request
+):
+    """
+    Chat assistant endpoint with free tier token tracking.
+    
+    Returns error when free tier tokens are exhausted.
+    """
+    if not OPENAI_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Chat assistant not available. Install openai package: pip install openai"
+        )
+    
+    # Check API key - try from request header first, then environment variable
+    api_key = None
+    
+    # Try to get from request header (if passed from frontend)
+    api_key = request.headers.get("X-OpenAI-API-Key")
+    
+    # Fallback to environment variable
+    if not api_key:
+        api_key = os.environ.get("OPENAI_API_KEY")
+    
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured. Please configure it in Settings."
+        )
+    
+    # Check token limit
+    has_tokens, tokens_used, tokens_remaining = check_token_limit()
+    if not has_tokens:
+        return ChatResponse(
+            response="",
+            tokens_used=tokens_used,
+            tokens_remaining=0,
+            error="Free tier token limit exceeded. You've used all available tokens for this month. Please upgrade or wait for the monthly reset."
+        )
+    
+    try:
+        client = OpenAI(api_key=api_key)
+        
+        # Build system message with context
+        system_content = "You are a helpful assistant for the Easy BDD testing framework. Help users create, debug, and understand test cases. Be concise and practical."
+        
+        # Add context if provided
+        if message.context:
+            context_info = []
+            if message.context.get("current_view"):
+                context_info.append(f"Current view: {message.context['current_view']}")
+            if message.context.get("current_test"):
+                test = message.context["current_test"]
+                context_info.append(f"Currently editing test: {test.get('name', 'Unknown')} ({test.get('step_count', 0)} steps)")
+            if message.context.get("selected_result"):
+                result = message.context["selected_result"]
+                context_info.append(f"Viewing test result: {result.get('test_name', 'Unknown')} - Status: {result.get('status', 'unknown')}")
+            if message.context.get("recent_errors") and len(message.context["recent_errors"]) > 0:
+                errors = message.context["recent_errors"]
+                context_info.append(f"Recent failures: {len(errors)} test(s) failed recently")
+            if message.context.get("workspace"):
+                context_info.append(f"Current workspace: {message.context['workspace']}")
+            if message.context.get("test_count"):
+                context_info.append(f"Total tests: {message.context['test_count']}")
+            
+            if context_info:
+                system_content += "\n\nCurrent context:\n" + "\n".join(f"- {info}" for info in context_info)
+                system_content += "\n\nUse this context to provide more relevant and helpful responses. If the user is asking about a specific test or error, refer to the context information."
+        
+        # Build conversation history
+        messages = [
+            {
+                "role": "system",
+                "content": system_content
+            }
+        ]
+        
+        # Add conversation history
+        if message.conversation_history:
+            messages.extend(message.conversation_history)
+        
+        # Add current message
+        messages.append({
+            "role": "user",
+            "content": message.message
+        })
+        
+        # Estimate tokens for request
+        request_tokens = estimate_tokens(message.message)
+        for msg in message.conversation_history:
+            request_tokens += estimate_tokens(msg.get("content", ""))
+        
+        # Check if request would exceed limit
+        if tokens_used + request_tokens > chat_token_tracker["free_tier_limit"]:
+            return ChatResponse(
+                response="",
+                tokens_used=tokens_used,
+                tokens_remaining=tokens_remaining,
+                error=f"Request would exceed free tier limit. You have {tokens_remaining} tokens remaining, but this request needs approximately {request_tokens} tokens."
+            )
+        
+        # Make API call with proper error handling
+        try:
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",  # Free tier compatible model
+                messages=messages,
+                max_tokens=500,  # Limit response size
+                temperature=0.7,
+            )
+        except Exception as api_error:
+            # Re-raise to be caught by outer exception handler
+            raise api_error
+        
+        assistant_response = response.choices[0].message.content
+        
+        # Estimate tokens used (request + response)
+        response_tokens = estimate_tokens(assistant_response)
+        total_tokens_used = request_tokens + response_tokens
+        
+        # Update token tracker
+        chat_token_tracker["tokens_used"] += total_tokens_used
+        
+        # Check if we're now over limit
+        if chat_token_tracker["tokens_used"] >= chat_token_tracker["free_tier_limit"]:
+            chat_token_tracker["tokens_used"] = chat_token_tracker["free_tier_limit"]
+        
+        return ChatResponse(
+            response=assistant_response,
+            tokens_used=chat_token_tracker["tokens_used"],
+            tokens_remaining=max(0, chat_token_tracker["free_tier_limit"] - chat_token_tracker["tokens_used"]),
+            error=None
+        )
+        
+    except Exception as e:
+        error_msg = str(e)
+        error_type = type(e).__name__
+        
+        # Log the full error for debugging
+        print(f"[Chat Assistant] Error type: {error_type}, Message: {error_msg}")
+        if hasattr(e, '__dict__'):
+            print(f"[Chat Assistant] Error details: {e.__dict__}")
+        
+        # Check for OpenAI API specific errors
+        if OPENAI_AVAILABLE:
+            try:
+                from openai import APIError, AuthenticationError, RateLimitError, APIConnectionError, APITimeoutError
+                
+                # Check for specific OpenAI exception types
+                if isinstance(e, AuthenticationError):
+                    return ChatResponse(
+                        response="",
+                        tokens_used=tokens_used,
+                        tokens_remaining=tokens_remaining,
+                        error="Invalid OpenAI API key. Please check your API key in Settings and ensure it's correct."
+                    )
+                elif isinstance(e, RateLimitError):
+                    # Check if it's a quota issue or rate limit
+                    error_lower = error_msg.lower()
+                    if "quota" in error_lower or "insufficient_quota" in error_lower or "insufficient_quota" in str(e).lower():
+                        return ChatResponse(
+                            response="",
+                            tokens_used=tokens_used,
+                            tokens_remaining=tokens_remaining,
+                            error="OpenAI account has no credits remaining. Please:\n1. Check your OpenAI account at https://platform.openai.com/account/billing\n2. Add payment method if needed\n3. Check if you have available credits\n\nNote: Free tier credits may have been exhausted. You may need to add billing information."
+                        )
+                    else:
+                        return ChatResponse(
+                            response="",
+                            tokens_used=tokens_used,
+                            tokens_remaining=tokens_remaining,
+                            error="Rate limit exceeded. Please wait a moment and try again."
+                        )
+                elif isinstance(e, APIError):
+                    # Check status code and response body for API errors
+                    status_code = getattr(e, 'status_code', None)
+                    response_body = getattr(e, 'response', None)
+                    
+                    if status_code == 401:
+                        return ChatResponse(
+                            response="",
+                            tokens_used=tokens_used,
+                            tokens_remaining=tokens_remaining,
+                            error="Invalid OpenAI API key. Please check your API key in Settings."
+                        )
+                    elif status_code == 402:
+                        return ChatResponse(
+                            response="",
+                            tokens_used=tokens_used,
+                            tokens_remaining=tokens_remaining,
+                            error="OpenAI account requires payment. Please add a payment method at https://platform.openai.com/account/billing"
+                        )
+                    elif status_code == 429:
+                        error_lower = error_msg.lower()
+                        if "quota" in error_lower or "insufficient_quota" in error_lower:
+                            return ChatResponse(
+                                response="",
+                                tokens_used=tokens_used,
+                                tokens_remaining=tokens_remaining,
+                                error="OpenAI account has no credits remaining. Please:\n1. Visit https://platform.openai.com/account/billing\n2. Add payment method if needed\n3. Check your usage and credits\n\nFree tier credits may have been exhausted."
+                            )
+                        else:
+                            return ChatResponse(
+                                response="",
+                                tokens_used=tokens_used,
+                                tokens_remaining=tokens_remaining,
+                                error="Rate limit exceeded. Please wait a moment and try again."
+                            )
+                    elif status_code == 500 or status_code == 503:
+                        return ChatResponse(
+                            response="",
+                            tokens_used=tokens_used,
+                            tokens_remaining=tokens_remaining,
+                            error=f"OpenAI service error (status {status_code}). Please try again later."
+                        )
+                elif isinstance(e, APIConnectionError):
+                    return ChatResponse(
+                        response="",
+                        tokens_used=tokens_used,
+                        tokens_remaining=tokens_remaining,
+                        error="Connection to OpenAI failed. Please check your internet connection and try again."
+                    )
+                elif isinstance(e, APITimeoutError):
+                    return ChatResponse(
+                        response="",
+                        tokens_used=tokens_used,
+                        tokens_remaining=tokens_remaining,
+                        error="Request to OpenAI timed out. Please try again."
+                    )
+            except ImportError:
+                pass  # OpenAI not available, fall through to generic handling
+        
+        # Check error message for specific patterns (fallback)
+        error_lower = error_msg.lower()
+        
+        # Only show quota error if it's explicitly about quota
+        if "insufficient_quota" in error_lower or ("quota" in error_lower and ("exceeded" in error_lower or "insufficient" in error_lower)):
+            return ChatResponse(
+                response="",
+                tokens_used=tokens_used,
+                tokens_remaining=tokens_remaining,
+                error="OpenAI account has no credits remaining. Please:\n1. Visit https://platform.openai.com/account/billing\n2. Add payment method if needed\n3. Check your usage and available credits\n\nNote: Free tier credits may have been exhausted."
+            )
+        elif "invalid" in error_lower and ("api" in error_lower or "key" in error_lower) or "authentication" in error_lower or "unauthorized" in error_lower:
+            return ChatResponse(
+                response="",
+                tokens_used=tokens_used,
+                tokens_remaining=tokens_remaining,
+                error="Invalid OpenAI API key. Please check your API key in Settings."
+            )
+        elif "rate_limit" in error_lower or ("rate limit" in error_lower and "quota" not in error_lower):
+            return ChatResponse(
+                response="",
+                tokens_used=tokens_used,
+                tokens_remaining=tokens_remaining,
+                error="Rate limit exceeded. Please wait a moment and try again."
+            )
+        
+        # Generic error - show the actual error message
+        return ChatResponse(
+            response="",
+            tokens_used=tokens_used,
+            tokens_remaining=tokens_remaining,
+            error=f"OpenAI API error: {error_msg}\n\nPlease check:\n1. Your API key is correct\n2. Your account has credits at https://platform.openai.com/account/billing\n3. Your account billing is set up"
+        )
+
+
+# ==================== TEST ENDPOINTS FOR ERROR PAGES ====================
+
+@app.get("/api/test-error-500")
+async def test_error_500():
+    """Test endpoint to trigger 500 error page"""
+    raise Exception("This is a test error for the 500 error page")
+
+
+@app.get("/api/test-error-503")
+async def test_error_503():
+    """Test endpoint to trigger 503 error page"""
+    raise HTTPException(status_code=503, detail="Service temporarily unavailable for testing")
+
+
+@app.get("/api/test-error-502")
+async def test_error_502():
+    """Test endpoint to trigger 502 error page"""
+    raise HTTPException(status_code=502, detail="Bad gateway error for testing")
+
+
+@app.get("/api/test-error-504")
+async def test_error_504():
+    """Test endpoint to trigger 504 error page"""
+    raise HTTPException(status_code=504, detail="Gateway timeout error for testing")
+
+
+@app.get("/api/test-error-403")
+async def test_error_403():
+    """Test endpoint to trigger 403 error page"""
+    raise HTTPException(status_code=403, detail="Forbidden - test endpoint")
+
+
+@app.get("/api/test-error-401")
+async def test_error_401():
+    """Test endpoint to trigger 401 error page"""
+    raise HTTPException(status_code=401, detail="Unauthorized - test endpoint")
+
+
+# ==================== ERROR HANDLERS ====================
+
+def get_error_page_html(error_code: int, error_title: str, error_message: str, error_details: str = None) -> str:
+    """Generate error page HTML"""
+    # Read the error page template
+    error_template_path = Path(__file__).parent / "static" / "error_pages.html"
+    
+    try:
+        with open(error_template_path, "r", encoding="utf-8") as f:
+            template = f.read()
+    except FileNotFoundError:
+        # Fallback simple error page if template not found
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>{error_code} - Easy BDD</title>
+            <style>
+                body {{ font-family: sans-serif; background: #0f172a; color: #f1f5f9; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }}
+                .error {{ text-align: center; }}
+                h1 {{ font-size: 4rem; margin: 0; }}
+                a {{ color: #3b82f6; text-decoration: none; }}
+            </style>
+        </head>
+        <body>
+            <div class="error">
+                <h1>{error_code}</h1>
+                <h2>{error_title}</h2>
+                <p>{error_message}</p>
+                <a href="/">Go Home</a>
+            </div>
+        </body>
+        </html>
+        """
+    
+    # Icon mapping
+    icon_map = {
+        404: '<i class="fas fa-search"></i>',
+        500: '<i class="fas fa-exclamation-triangle"></i>',
+        503: '<i class="fas fa-server"></i>',
+        403: '<i class="fas fa-lock"></i>',
+        401: '<i class="fas fa-key"></i>',
+        400: '<i class="fas fa-exclamation-circle"></i>',
+        502: '<i class="fas fa-network-wired"></i>',
+        504: '<i class="fas fa-clock"></i>',
+    }
+    icon_html = icon_map.get(error_code, '<i class="fas fa-times-circle"></i>')
+    
+    # Replace template variables
+    html = template.replace("{{ error_code }}", str(error_code))
+    html = html.replace("{{ error_title }}", error_title)
+    html = html.replace("{{ error_message }}", error_message)
+    
+    # Replace icon section
+    import re
+    icon_pattern = r'<div class="error-icon">.*?</div>'
+    html = re.sub(icon_pattern, f'<div class="error-icon">{icon_html}</div>', html, flags=re.DOTALL)
+    
+    # Handle error details
+    if error_details:
+        # Remove the conditional and replace with actual content
+        details_html = f'''
+            <div class="error-details">
+                <div class="error-details-title">Error Details</div>
+                <div class="error-details-content">{error_details}</div>
+            </div>
+        '''
+        html = re.sub(r'{% if error_details %}.*?{% endif %}', details_html, html, flags=re.DOTALL)
+    else:
+        # Remove error details section if no details
+        html = re.sub(r'{% if error_details %}.*?{% endif %}', '', html, flags=re.DOTALL)
+    
+    return html
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle HTTP exceptions"""
+    error_code = exc.status_code
+    error_messages = {
+        404: ("Page Not Found", "The page you're looking for doesn't exist or has been moved."),
+        403: ("Forbidden", "You don't have permission to access this resource."),
+        401: ("Unauthorized", "Authentication required. Please log in."),
+        400: ("Bad Request", "The request was invalid or malformed."),
+        402: ("Payment Required", "Payment is required to access this resource."),
+        405: ("Method Not Allowed", "The HTTP method is not allowed for this endpoint."),
+        406: ("Not Acceptable", "The server cannot produce a response matching the acceptable values."),
+        408: ("Request Timeout", "The request took too long to process."),
+        409: ("Conflict", "The request conflicts with the current state of the resource."),
+        410: ("Gone", "The requested resource is no longer available."),
+        411: ("Length Required", "The request requires a Content-Length header."),
+        412: ("Precondition Failed", "A precondition in the request failed."),
+        413: ("Payload Too Large", "The request payload is too large."),
+        414: ("URI Too Long", "The request URI is too long."),
+        415: ("Unsupported Media Type", "The media type is not supported."),
+        416: ("Range Not Satisfiable", "The requested range cannot be satisfied."),
+        417: ("Expectation Failed", "The expectation given in the request could not be met."),
+        418: ("I'm a teapot", "The server is a teapot and cannot brew coffee."),
+        422: ("Unprocessable Entity", "The request was well-formed but contains semantic errors."),
+        423: ("Locked", "The resource is locked."),
+        424: ("Failed Dependency", "The request failed due to a dependency."),
+        426: ("Upgrade Required", "The client should switch to a different protocol."),
+        428: ("Precondition Required", "The request requires a precondition."),
+        429: ("Too Many Requests", "Too many requests have been sent in a given time."),
+        431: ("Request Header Fields Too Large", "The request header fields are too large."),
+        451: ("Unavailable For Legal Reasons", "The resource is unavailable for legal reasons."),
+        500: ("Internal Server Error", "An unexpected error occurred on the server."),
+        501: ("Not Implemented", "The server does not support the functionality required."),
+        502: ("Bad Gateway", "The server received an invalid response from an upstream server."),
+        503: ("Service Unavailable", "The service is temporarily unavailable. Please try again later."),
+        504: ("Gateway Timeout", "The server did not receive a timely response from an upstream server."),
+        505: ("HTTP Version Not Supported", "The HTTP version is not supported."),
+        506: ("Variant Also Negotiates", "The server has an internal configuration error."),
+        507: ("Insufficient Storage", "The server is unable to store the representation."),
+        508: ("Loop Detected", "The server detected an infinite loop."),
+        510: ("Not Extended", "Further extensions to the request are required."),
+        511: ("Network Authentication Required", "Network authentication is required."),
+    }
+    
+    error_title, error_message = error_messages.get(
+        error_code, 
+        (f"Error {error_code}", "An error occurred while processing your request.")
+    )
+    
+    html_content = get_error_page_html(error_code, error_title, error_message)
+    return HTMLResponse(content=html_content, status_code=error_code)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle request validation errors"""
+    error_details = str(exc)
+    html_content = get_error_page_html(
+        400,
+        "Bad Request",
+        "The request contains invalid data. Please check your input and try again.",
+        error_details
+    )
+    return HTMLResponse(content=html_content, status_code=400)
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle all other exceptions"""
+    import traceback
+    
+    error_details = None
+    if app.debug or os.getenv("DEBUG", "false").lower() == "true":
+        error_details = traceback.format_exc()
+    
+    html_content = get_error_page_html(
+        500,
+        "Internal Server Error",
+        "An unexpected error occurred. Please try again later or contact support if the problem persists.",
+        error_details
+    )
+    return HTMLResponse(content=html_content, status_code=500)
 
 
 if __name__ == "__main__":

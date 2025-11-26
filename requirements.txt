@@ -1,0 +1,45 @@
+# Easy BDD Framework - Main Requirements
+# Generated from pyproject.toml dependencies
+
+# Core Testing Framework
+pytest>=7.0.0
+pytest-bdd>=7.0.0
+pytest-html>=3.0.0
+pytest-xdist>=3.0.0
+
+# HTTP & Web
+requests>=2.25.0
+aiohttp>=3.8.0
+websocket-client>=1.0.0
+websockets>=11.0.0
+
+# Browser Automation
+selenium>=4.0.0
+playwright>=1.20.0
+
+# Data Processing
+pyyaml>=6.0
+jinja2>=3.0.0
+jsonschema>=4.0.0
+pandas>=1.3.0
+openpyxl>=3.0.0
+
+# Cloud Services
+boto3>=1.20.0
+
+# System & Network
+paramiko>=2.8.0
+pyserial>=3.5
+
+# Testing & Reporting
+allure-pytest>=2.9.0
+
+# Framework Core
+pydantic>=1.8.0
+loguru>=0.7.0
+python-dotenv>=1.0.0
+
+# Optional: AI Features
+# Install with: pip install -e ".[ai]"
+# openai>=1.0.0
+

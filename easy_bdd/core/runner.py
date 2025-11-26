@@ -66,10 +66,27 @@ class TestRunner:
     ) -> TestResult:
         """Run tests from the specified path"""
         # Parse test definitions
-        if test_path.is_file():
-            tests = [self.parser.parse_file(test_path)]
-        else:
-            tests = self.parser.parse_directory(test_path)
+        try:
+            if test_path.is_file():
+                tests = [self.parser.parse_file(test_path)]
+            else:
+                tests = self.parser.parse_directory(test_path)
+        except Exception as e:
+            print(f"\n❌ Failed to load test(s) from {test_path}")
+            print(f"   Error: {e}")
+            print(f"\n💡 To edit the test file, run:")
+            if test_path.is_file():
+                print(f"   python -m easy_bdd edit-test \"{test_path}\"")
+            else:
+                print(f"   python -m easy_bdd edit-test \"<test_file_path>\"")
+            return TestResult(
+                success=False,
+                total_tests=0,
+                passed=0,
+                failed=0,
+                skipped=0,
+                execution_time=0.0,
+            )
 
         if not tests:
             print(f"No tests found in {test_path}")
@@ -569,6 +586,8 @@ class TestRunner:
 
             # Execute main test steps
             print(f"    === Main Test Phase ===")
+            total_steps = len(test.steps)
+            
             for i, step in enumerate(test.steps, 1):
                 step_description = self._get_step_description(step)
                 print(f"    Step {i}/{len(test.steps)}: {step.action}")
@@ -580,6 +599,24 @@ class TestRunner:
 
                 if service_type not in services:
                     services[service_type] = self._create_service(service_type)
+
+                # Show step indicator in browser if browser service is available
+                # Check both "browser" service and if current service is browser
+                browser_service = services.get("browser")
+                if not browser_service and service_type == "browser":
+                    browser_service = services.get(service_type)
+                
+                if browser_service and hasattr(browser_service, "show_step_indicator"):
+                    try:
+                        browser_service.show_step_indicator(
+                            step_number=i,
+                            total_steps=total_steps,
+                            step_action=step.action,
+                            step_description=step_description
+                        )
+                    except Exception as e:
+                        # Log error for debugging but don't fail the test
+                        print(f"      ⚠️  Could not show step indicator: {e}")
 
                 # Execute the step
                 try:
@@ -726,8 +763,15 @@ class TestRunner:
                 except Exception as cleanup_error:
                     print(f"    ⚠️  Cleanup phase error: {cleanup_error}")
 
-            # Clean up services first (browser needs to close to save video)
+            # Hide step indicator before closing browser
             browser_service = services.get("browser")
+            if browser_service and hasattr(browser_service, "hide_step_indicator"):
+                try:
+                    browser_service.hide_step_indicator()
+                except Exception:
+                    pass
+
+            # Clean up services first (browser needs to close to save video)
             for service in services.values():
                 if hasattr(service, "close"):
                     try:
@@ -1030,7 +1074,7 @@ class TestRunner:
             # Command execution actions
             # Handle both dot notation (command.ssh) and normalized format (command ssh)
             # Check if action starts with "command" and contains a command type
-            command_types = ["ssh", "shell", "bash", "powershell", "batch", "python"]
+            command_types = ["ssh", "shell", "bash", "sh", "zsh", "fish", "tcsh", "csh", "dash", "ksh", "powershell", "pwsh", "cmd", "batch", "python"]
             if action_lower.startswith("command") and any(
                 cmd_type in action_lower for cmd_type in command_types
             ):
@@ -1694,6 +1738,162 @@ class TestRunner:
 
             elif "start device updates" in action_lower:
                 success = loop.run_until_complete(ovrc_service.start_device_updates())
+                store_as = params.get("store_as", "")
+                if store_as and success:
+                    # Wait for and extract system resources from device updates
+                    import time
+                    max_wait = 30  # Wait up to 30 seconds for system resources
+                    wait_interval = 0.5
+                    waited = 0
+                    system_resources = None
+                    best_resources = None
+                    best_update = None
+                    
+                    print(f"      ⏳ Waiting for system resource data (up to {max_wait}s)...")
+                    
+                    # Check all available updates, not just the latest
+                    while waited < max_wait:
+                        # Get the latest update
+                        latest_update = ovrc_service.get_latest_device_update()
+                        if latest_update:
+                            # Extract system resources from the update
+                            extracted = self._extract_system_resources(latest_update)
+                            
+                            # Keep track of the best extraction (most resources found)
+                            if extracted:
+                                if not best_resources or (
+                                    extracted.get("resources_found", False) and 
+                                    len(extracted.get("resources", {})) > len(best_resources.get("resources", {}))
+                                ):
+                                    best_resources = extracted
+                                    best_update = latest_update
+                                
+                                # If we found resources, we can break early
+                                if extracted.get("resources_found"):
+                                    system_resources = extracted
+                                    print(f"      ✅ System resources found after {int(waited)}s")
+                                    break
+                        
+                        # Also check all device updates (not just latest) for resources
+                        if hasattr(ovrc_service, 'device_updates') and ovrc_service.device_updates:
+                            for update in ovrc_service.device_updates[-5:]:  # Check last 5 updates
+                                extracted = self._extract_system_resources(update)
+                                if extracted and extracted.get("resources_found"):
+                                    if not best_resources or len(extracted.get("resources", {})) > len(best_resources.get("resources", {})):
+                                        best_resources = extracted
+                                        best_update = update
+                                    if not system_resources:
+                                        system_resources = extracted
+                                        print(f"      ✅ System resources found in previous update after {int(waited)}s")
+                                        break
+                        
+                        if system_resources:
+                            break
+                        
+                        time.sleep(wait_interval)
+                        waited += wait_interval
+                        if waited % 5 == 0:
+                            print(f"      ⏳ Still waiting for system resources... ({int(waited)}s/{max_wait}s)")
+                    
+                    # Use best resources found, or system_resources if we found them
+                    final_resources = system_resources or best_resources
+                    
+                    if final_resources:
+                        variables[store_as] = final_resources
+                        print(f"      💾 Stored system resources as: {store_as}")
+                        
+                        resources = final_resources.get("resources", {})
+                        if resources:
+                            print(f"      📊 System Resources Detected:")
+                            if "cpu" in resources:
+                                cpu_info = resources["cpu"]
+                                if isinstance(cpu_info, dict):
+                                    # Show usage_percent prominently
+                                    if "usage_percent" in cpu_info:
+                                        usage = cpu_info["usage_percent"]
+                                        print(f"         CPU Usage: {usage:.2f}%")
+                                    # Show other CPU fields
+                                    other_fields = {k: v for k, v in cpu_info.items() if k not in ["source", "usage_percent"]}
+                                    if other_fields:
+                                        cpu_str = ", ".join([f"{k}: {v}" for k, v in other_fields.items()])
+                                        print(f"         CPU Other: {cpu_str}")
+                                else:
+                                    print(f"         CPU: {cpu_info}")
+                            if "memory" in resources:
+                                mem_info = resources["memory"]
+                                if isinstance(mem_info, dict):
+                                    # Show usage_percent prominently
+                                    if "usage_percent" in mem_info:
+                                        usage = mem_info["usage_percent"]
+                                        print(f"         Memory Usage: {usage:.2f}%")
+                                    # Show memory sizes
+                                    if "total" in mem_info:
+                                        total = mem_info["total"]
+                                        total_gb = total / (1024**3) if total > 1024 else total / 1024
+                                        unit = "GB" if total > 1024 else "MB"
+                                        print(f"         Memory Total: {total_gb:.2f} {unit}")
+                                    if "used" in mem_info:
+                                        used = mem_info["used"]
+                                        used_gb = used / (1024**3) if used > 1024 else used / 1024
+                                        unit = "GB" if used > 1024 else "MB"
+                                        print(f"         Memory Used: {used_gb:.2f} {unit}")
+                                    # Show other memory fields
+                                    other_fields = {k: v for k, v in mem_info.items() if k not in ["source", "usage_percent", "total", "used", "free"]}
+                                    if other_fields:
+                                        mem_str = ", ".join([f"{k}: {v}" for k, v in other_fields.items()])
+                                        print(f"         Memory Other: {mem_str}")
+                                else:
+                                    print(f"         Memory: {mem_info}")
+                            if "disk" in resources:
+                                disk_info = resources["disk"]
+                                if isinstance(disk_info, dict):
+                                    if "usage_percent" in disk_info:
+                                        usage = disk_info["usage_percent"]
+                                        print(f"         Disk Usage: {usage:.2f}%")
+                                    disk_str = ", ".join([f"{k}: {v}" for k, v in disk_info.items() if k not in ["source", "usage_percent"]])
+                                    if disk_str:
+                                        print(f"         Disk: {disk_str}")
+                                else:
+                                    print(f"         Disk: {disk_info}")
+                            if "network" in resources:
+                                net_info = resources["network"]
+                                if isinstance(net_info, dict):
+                                    net_str = ", ".join([f"{k}: {v}" for k, v in net_info.items() if k != "source"])
+                                    print(f"         Network: {net_str}")
+                                else:
+                                    print(f"         Network: {net_info}")
+                        else:
+                            print(f"      ⚠️  Device updates started, but no system resources detected yet")
+                            print(f"      ℹ️  Resources may arrive in subsequent updates")
+                    else:
+                        # Store what we have even if resources aren't fully extracted
+                        latest_update = ovrc_service.get_latest_device_update()
+                        if latest_update:
+                            # Still try to extract, even if not found
+                            extracted = self._extract_system_resources(latest_update)
+                            if extracted:
+                                variables[store_as] = extracted
+                                print(f"      💾 Stored device update as: {store_as}")
+                                if not extracted.get("resources_found"):
+                                    print(f"      ⚠️  System resources not detected in current update")
+                                    print(f"      ℹ️  Will continue monitoring for resource data in future updates")
+                            else:
+                                variables[store_as] = {
+                                    "raw_update": latest_update,
+                                    "status": "updates_started",
+                                    "device_online": ovrc_service.is_device_online(),
+                                    "resources_found": False
+                                }
+                                print(f"      💾 Stored device update as: {store_as}")
+                                print(f"      ⚠️  System resources not detected, but updates are active")
+                        else:
+                            variables[store_as] = {
+                                "status": "updates_started",
+                                "device_online": ovrc_service.is_device_online(),
+                                "resources_found": False
+                            }
+                            print(f"      💾 Device updates started. System resources will be pulled automatically.")
+                            print(f"      ℹ️  Waiting for device updates to arrive...")
                 return success
 
             elif "stop device updates" in action_lower:
@@ -2191,13 +2391,28 @@ class TestRunner:
 
                 return exit_code == 0
 
-            # Handle shell command
+            # Handle shell command (generic shell - supports all shell types)
             # Support both "command.shell" and "command shell" formats
+            # Also handle specific shell types: sh, zsh, fish, tcsh, csh, dash, ksh
             elif (
                 "command" in action_lower
-                and "shell" in action_lower
+                and ("shell" in action_lower or any(shell_type in action_lower for shell_type in ["sh", "zsh", "fish", "tcsh", "csh", "dash", "ksh"]))
                 and "bash" not in action_lower
+                and "powershell" not in action_lower
+                and "batch" not in action_lower
+                and "python" not in action_lower
+                and "ssh" not in action_lower
             ):
+                # Extract shell type from action if specified (e.g., command.zsh, command.fish)
+                shell_type = "auto"
+                for shell_name in ["sh", "zsh", "fish", "tcsh", "csh", "dash", "ksh"]:
+                    if shell_name in action_lower:
+                        shell_type = shell_name
+                        break
+                
+                # If not found in action, use parameter or default to auto
+                if shell_type == "auto":
+                    shell_type = params.get("shell", "auto")
                 command = params.get("command", "")
                 if not command:
                     raise ValueError("Shell command requires 'command' parameter")
@@ -2911,6 +3126,60 @@ class TestRunner:
 
             elif hasattr(service, "navigate_forward") and "navigate forward" in action:
                 service.navigate_forward()
+                return True
+
+            # ===== TEST ASSERTIONS =====
+            # Handle test.assert actions (e.g., test.assert_text_contains, test.assert_element_visible)
+            elif action == "test.assert_text_contains" or (hasattr(service, "assert_text_contains") and "assert" in action and "text" in action and "contains" in action):
+                selector = self._get_param(step_params, "selector", "")
+                text = self._get_param(step_params, "text", "")
+                timeout = self._get_param(step_params, "timeout", 10000)
+                print(f"      Asserting element '{selector}' contains text '{text}'")
+                service.assert_text_contains(selector, text, timeout=timeout)
+                return True
+
+            elif action == "test.assert_text_equals" or (hasattr(service, "assert_text_equals") and "assert" in action and "text" in action and "equals" in action):
+                selector = self._get_param(step_params, "selector", "")
+                text = self._get_param(step_params, "text", "")
+                timeout = self._get_param(step_params, "timeout", 10000)
+                print(f"      Asserting element '{selector}' text equals '{text}'")
+                service.assert_text_equals(selector, text, timeout=timeout)
+                return True
+
+            elif action == "test.assert_element_visible" or (hasattr(service, "assert_element_visible") and "assert" in action and "element" in action and "visible" in action and "not" not in action):
+                selector = self._get_param(step_params, "selector", "")
+                timeout = self._get_param(step_params, "timeout", 10000)
+                print(f"      Asserting element '{selector}' is visible")
+                service.assert_element_visible(selector, timeout=timeout)
+                return True
+
+            elif action == "test.assert_element_not_visible" or (hasattr(service, "assert_element_not_visible") and "assert" in action and "element" in action and "not" in action and "visible" in action):
+                selector = self._get_param(step_params, "selector", "")
+                timeout = self._get_param(step_params, "timeout", 10000)
+                print(f"      Asserting element '{selector}' is not visible")
+                service.assert_element_not_visible(selector, timeout=timeout)
+                return True
+
+            elif action == "test.assert_element_enabled" or (hasattr(service, "assert_element_enabled") and "assert" in action and "element" in action and "enabled" in action):
+                selector = self._get_param(step_params, "selector", "")
+                timeout = self._get_param(step_params, "timeout", 10000)
+                print(f"      Asserting element '{selector}' is enabled")
+                service.assert_element_enabled(selector, timeout=timeout)
+                return True
+
+            elif action == "test.assert_element_disabled" or (hasattr(service, "assert_element_disabled") and "assert" in action and "element" in action and "disabled" in action):
+                selector = self._get_param(step_params, "selector", "")
+                timeout = self._get_param(step_params, "timeout", 10000)
+                print(f"      Asserting element '{selector}' is disabled")
+                service.assert_element_disabled(selector, timeout=timeout)
+                return True
+
+            elif action == "test.assert_element_count" or (hasattr(service, "assert_element_count") and "assert" in action and "element" in action and "count" in action):
+                selector = self._get_param(step_params, "selector", "")
+                count = self._get_param(step_params, "count", 1)
+                timeout = self._get_param(step_params, "timeout", 10000)
+                print(f"      Asserting element '{selector}' count equals {count}")
+                service.assert_element_count(selector, count, timeout=timeout)
                 return True
 
             elif "wait" in action:
@@ -4189,6 +4458,246 @@ class TestRunner:
 
             print(f"      Traceback: {traceback.format_exc()}")
             return False
+    
+    def _extract_system_resources(self, device_update: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Extract system resources from device update in an OS-agnostic way.
+        
+        Handles different data structures from various operating systems:
+        - Linux: /proc/stat, /proc/meminfo style data
+        - Windows: WMI-style data
+        - Embedded: Custom structures
+        - OvrC: Nested params structures
+        
+        Args:
+            device_update: Device update dictionary from OvrC
+            
+        Returns:
+            Dictionary with extracted system resources
+        """
+        if not device_update:
+            return {"resources_found": False}
+        
+        # Extract params from the update (contains the actual device data)
+        update_params = device_update.get("params", {})
+        if not update_params:
+            # Try direct access if params doesn't exist
+            update_params = device_update
+        
+        # Debug: Log the structure if verbose
+        import os
+        if os.getenv("DEBUG_RESOURCES", "false").lower() == "true":
+            import json
+            print(f"      🔍 Debug: Device update structure (first level keys): {list(update_params.keys())[:10]}")
+            print(f"      🔍 Debug: Full update (truncated): {json.dumps(update_params, indent=2)[:500]}")
+        
+        resources = {}
+        found_resources = False
+        
+        # Recursive function to search for resource data
+        def find_resource_data(data, path="", depth=0, max_depth=10):
+            """Recursively search for CPU, memory, disk, network data"""
+            if depth > max_depth:
+                return {}
+            
+            found = {}
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if value is None:
+                        continue
+                    
+                    current_path = f"{path}.{key}" if path else key
+                    key_lower = str(key).lower()
+                    
+                    # CPU detection - multiple patterns for different OSes
+                    cpu_patterns = ["cpu", "processor", "load", "usage", "utilization", 
+                                   "cpuusage", "cpuload", "cpu_usage", "cpu_load",
+                                   "processorusage", "processorload", "cpuloadavg", "cpu_load_avg",
+                                   "cpupercent", "cpu_percent", "cpuutil", "cpu_util"]
+                    if any(pattern in key_lower for pattern in cpu_patterns):
+                        if isinstance(value, (int, float)):
+                            # Update existing CPU or create new
+                            if "cpu" not in found:
+                                found["cpu"] = {}
+                            # Store the value - we'll calculate percentage later if needed
+                            if "usage" in key_lower or "utilization" in key_lower or "percent" in key_lower:
+                                found["cpu"]["usage_percent"] = float(value)
+                            elif "load" in key_lower:
+                                found["cpu"]["load"] = float(value)
+                            else:
+                                # Default to usage_percent
+                                found["cpu"]["usage_percent"] = float(value)
+                            found["cpu"]["source"] = current_path
+                            found_resources = True
+                        elif isinstance(value, dict):
+                            # Nested CPU data - merge with existing
+                            if "cpu" not in found:
+                                found["cpu"] = {}
+                            cpu_data = {}
+                            for k, v in value.items():
+                                if isinstance(v, (int, float)):
+                                    cpu_data[k] = float(v)
+                            if cpu_data:
+                                found["cpu"].update(cpu_data)
+                                found["cpu"]["source"] = current_path
+                                found_resources = True
+                    
+                    # Memory detection - multiple patterns
+                    mem_patterns = ["memory", "mem", "ram", "physicalmemory", "physical_memory",
+                                   "totalmemory", "total_memory", "usedmemory", "used_memory",
+                                   "freememory", "free_memory", "availablememory", "available_memory",
+                                   "memtotal", "memfree", "memavailable", "memused"]
+                    if any(pattern in key_lower for pattern in mem_patterns):
+                        if isinstance(value, (int, float)):
+                            # Single value - merge with existing memory data
+                            if "memory" not in found:
+                                found["memory"] = {}
+                            if "free" in key_lower or "available" in key_lower:
+                                found["memory"]["free"] = int(value)
+                            elif "used" in key_lower or "usage" in key_lower:
+                                found["memory"]["used"] = int(value)
+                            else:
+                                found["memory"]["total"] = int(value)
+                            found["memory"]["source"] = current_path
+                            found_resources = True
+                        elif isinstance(value, dict):
+                            # Nested memory data - merge with existing
+                            if "memory" not in found:
+                                found["memory"] = {}
+                            mem_data = {}
+                            for k, v in value.items():
+                                if isinstance(v, (int, float)):
+                                    mem_data[k] = int(v) if "total" in k.lower() or "free" in k.lower() or "used" in k.lower() else float(v)
+                            if mem_data:
+                                found["memory"].update(mem_data)
+                                found["memory"]["source"] = current_path
+                                found_resources = True
+                    
+                    # Disk detection
+                    disk_patterns = ["disk", "storage", "filesystem", "file_system", "volume",
+                                    "diskusage", "disk_usage", "storageusage", "storage_usage"]
+                    if any(pattern in key_lower for pattern in disk_patterns):
+                        if isinstance(value, dict):
+                            disk_data = {}
+                            for k, v in value.items():
+                                if isinstance(v, (int, float)):
+                                    disk_data[k] = int(v) if "size" in k.lower() or "free" in k.lower() or "used" in k.lower() else float(v)
+                            if disk_data:
+                                found["disk"] = {**disk_data, "source": current_path}
+                                found_resources = True
+                    
+                    # Network detection
+                    network_patterns = ["network", "net", "interface", "ethernet", "wifi", "wireless",
+                                       "networkusage", "network_usage", "bandwidth", "throughput"]
+                    if any(pattern in key_lower for pattern in network_patterns):
+                        if isinstance(value, dict):
+                            net_data = {}
+                            for k, v in value.items():
+                                if isinstance(v, (int, float)):
+                                    net_data[k] = int(v)
+                            if net_data:
+                                found["network"] = {**net_data, "source": current_path}
+                                found_resources = True
+                    
+                    # Recursively search nested structures
+                    if isinstance(value, (dict, list)):
+                        nested = find_resource_data(value, current_path, depth + 1, max_depth)
+                        found.update(nested)
+            
+            elif isinstance(data, list):
+                for i, item in enumerate(data):
+                    if isinstance(item, (dict, list)):
+                        nested = find_resource_data(item, f"{path}[{i}]", depth + 1, max_depth)
+                        found.update(nested)
+            
+            return found
+        
+        # Search for resources
+        extracted = find_resource_data(update_params)
+        
+        # Organize found resources and calculate percentages
+        if extracted:
+            for key, value in extracted.items():
+                if key in ["cpu", "memory", "disk", "network"]:
+                    resources[key] = value
+        
+        # Calculate percentages from raw values if needed
+        # CPU: If we have usage but it's 0-1 range, convert to 0-100
+        if "cpu" in resources:
+            cpu_data = resources["cpu"]
+            if isinstance(cpu_data, dict):
+                # Check if we have usage_percent
+                if "usage_percent" in cpu_data:
+                    usage = cpu_data["usage_percent"]
+                    # If value is between 0-1, assume it's a fraction and convert to percentage
+                    if 0 <= usage <= 1:
+                        cpu_data["usage_percent"] = usage * 100
+                    # If value is already > 1, assume it's already a percentage
+                # If we have load but no usage_percent, try to convert
+                elif "load" in cpu_data:
+                    load = cpu_data["load"]
+                    if isinstance(load, (int, float)):
+                        if 0 <= load <= 1:
+                            cpu_data["usage_percent"] = load * 100
+                        else:
+                            cpu_data["usage_percent"] = float(load)
+        
+        # Memory: Calculate percentage from used/total if we have both
+        if "memory" in resources:
+            mem_data = resources["memory"]
+            if isinstance(mem_data, dict):
+                total = mem_data.get("total") or mem_data.get("total_memory") or mem_data.get("memtotal")
+                used = mem_data.get("used") or mem_data.get("used_memory") or mem_data.get("memused")
+                free = mem_data.get("free") or mem_data.get("free_memory") or mem_data.get("memfree") or mem_data.get("available") or mem_data.get("available_memory") or mem_data.get("memavailable")
+                
+                # Calculate used if we have total and free
+                if total and free and not used:
+                    used = total - free
+                    mem_data["used"] = used
+                
+                # Calculate percentage if we have total and used
+                if total and used and total > 0:
+                    usage_percent = (used / total) * 100
+                    mem_data["usage_percent"] = round(usage_percent, 2)
+                # If we have usage_percent but it's 0-1 range, convert
+                elif "usage_percent" in mem_data:
+                    usage = mem_data["usage_percent"]
+                    if 0 <= usage <= 1:
+                        mem_data["usage_percent"] = usage * 100
+        
+        # Disk: Calculate percentage from used/total if we have both
+        if "disk" in resources:
+            disk_data = resources["disk"]
+            if isinstance(disk_data, dict):
+                total = disk_data.get("total") or disk_data.get("total_size") or disk_data.get("size")
+                used = disk_data.get("used") or disk_data.get("used_size")
+                free = disk_data.get("free") or disk_data.get("free_size") or disk_data.get("available")
+                
+                # Calculate used if we have total and free
+                if total and free and not used:
+                    used = total - free
+                    disk_data["used"] = used
+                
+                # Calculate percentage if we have total and used
+                if total and used and total > 0:
+                    usage_percent = (used / total) * 100
+                    disk_data["usage_percent"] = round(usage_percent, 2)
+                # If we have usage_percent but it's 0-1 range, convert
+                elif "usage_percent" in disk_data:
+                    usage = disk_data["usage_percent"]
+                    if 0 <= usage <= 1:
+                        disk_data["usage_percent"] = usage * 100
+        
+        # Also store the raw update for reference
+        result = {
+            "resources": resources,
+            "resources_found": found_resources or bool(resources),
+            "raw_update": device_update,
+            "device_online": True,
+            "timestamp": device_update.get("timestamp") or device_update.get("_received_at")
+        }
+        
+        return result
 
     def _replace_variables(self, data, variables: dict):
         """Replace ${variable} placeholders in data"""

@@ -25,12 +25,28 @@ A powerful, user-friendly YAML-based BDD testing framework that supports multipl
 - **♻️ Reusable Test Steps** - Use any test as a step in other tests with `test.run` action for modular test composition
 - **🗑️ Safe Deletions** - Confirmation dialogs for deleting variables and steps
 - **📊 Metrics & Analytics Dashboard** - Comprehensive metrics page with test health, execution trends, coverage analysis, and resource insights
+- **📅 Time Period Filtering** - Filter metrics by 7 days, 2 weeks, 3 weeks, 1 month, or 1 quarter
+- **🤖 AI Assistant** - Persistent AI chat assistant with workspace/directory context awareness
+- **♻️ Test Rerun** - Rerun tests directly from results pages
+- **✏️ In-Suite Test Editing** - Edit tests during suite creation/editing with context preservation
+- **🗺️ Routing Support** - Proper URL routing with page refresh support and deep linking
+- **🚨 Error Pages** - Custom error pages for 404, 500, 503, and other HTTP errors
+- **📈 System Resource Auto-Detection** - Automatic CPU, memory, disk, and network monitoring
+- **🎬 Demo Test Suite** - Ready-to-run demo tests for UI and API testing
 
-**[📖 Full Test Builder Guide](docs/TEST_BUILDER.md)** | **Quick Start**: `python frontend/start_builder.py` → http://localhost:8000
+**[📖 Full Test Builder Guide](docs/TEST_BUILDER.md)** | **[🆕 New Features Guide](docs/NEW_FEATURES.md)** | **Quick Start**: `python frontend/start_builder.py` → http://localhost:8000
 
 ### 🆕 Recent Features
 
 - **Metrics & Analytics Dashboard** - Comprehensive metrics page with test health monitoring (failing tests, flaky tests, stale tests), execution trends (time trends, failure rates, peak hours), test coverage analysis (by workspace, action type, complexity), quick insights (velocity, streaks, recent failures), and resource storage tracking
+- **Time Period Filtering** - Filter metrics by 7 days, 2 weeks, 3 weeks, 1 month, or 1 quarter for trend analysis
+- **AI Assistant** - Persistent AI chat assistant that maintains context across pages, including workspace, directory, current test, and view information
+- **Test Rerun** - Rerun tests directly from results pages with one click
+- **In-Suite Test Editing** - Edit tests while creating/editing suites without losing context
+- **Routing & Page Refresh** - Proper URL routing with state persistence, allowing page refreshes without errors
+- **Error Pages** - Custom error pages for common HTTP errors (404, 500, 503, etc.) with user-friendly messages
+- **System Resource Auto-Detection** - Automatic extraction and monitoring of CPU, memory, disk, and network resources from device updates
+- **Demo Test Suite** - Pre-built demo tests for UI and API testing using public endpoints (no setup required)
 - **Enhanced Test Results View** - Split-view interface with compact result cards showing test name and build number (instead of full paths), interactive preview panel for detailed execution logs
 - **Test Report Pagination** - Paginated test reports showing 10 reports per page with navigation controls
 - **Reusable Test Steps** - Use any test as a reusable step in other tests with `test.run` action, enabling modular test composition and maintainability
@@ -71,14 +87,17 @@ A powerful, user-friendly YAML-based BDD testing framework that supports multipl
 
 ## 🚀 Quick Start
 
+> **New to Easy BDD?** Check out the [Quick Start Guide](QUICK_START.md) for a 5-minute setup!
+
 ### First-Time Setup
 
 1. **Clone and Install**
 ```bash
 git clone <repository-url>
-cd Automation-Framework
+cd easy_bdd
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install --upgrade pip  # Required for pyproject.toml editable installs
 pip install -e .
 playwright install chromium  # Or: firefox, webkit
 ```
@@ -683,6 +702,28 @@ url: "${base_url}/api"  # ✅ Correct
 url: "$base_url/api"    # ❌ Won't work
 ```
 
+### Installation Issues
+
+**Issue: SyntaxError with gherkin package during installation**
+```bash
+# Error: SyntaxError: invalid syntax (ur'...')
+# This happens with old pytest-bdd versions on Python 3.9+
+
+# Solution: Upgrade pip first, then install
+pip install --upgrade pip
+pip install -e .
+
+# If still having issues, skip bytecode compilation:
+PYTHONDONTWRITEBYTECODE=1 pip install -e .
+```
+
+**Issue: pip install -e . fails with "setuptools-based build required"**
+```bash
+# Upgrade pip to support pyproject.toml editable installs
+pip install --upgrade pip
+pip install -e .
+```
+
 ### Getting Help
 
 1. **Check Documentation**: See `/docs` folder for detailed guides
@@ -720,6 +761,8 @@ python -m easy_bdd --help
 
 ## 📚 Additional Resources
 
+- **[User Guide](docs/USER_GUIDE.md)** - Complete user guide for the framework
+- **[New Features Guide](docs/NEW_FEATURES.md)** - Latest features and improvements
 - **[Test Builder Guide](docs/TEST_BUILDER.md)** - Complete guide to the web application
 - **[API Reference](docs/API_REFERENCE.md)** - Complete REST API documentation
 - **[Syntax Cheat Sheet](docs/SYNTAX_CHEATSHEET.md)** - Quick reference for all actions

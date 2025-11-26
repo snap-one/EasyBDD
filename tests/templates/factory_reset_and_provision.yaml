@@ -1,0 +1,221 @@
+name: "Factory Reset and Provision Device - ${device_name}"
+description: "Factory reset device to defaults and configure from scratch"
+tags: ["factory-reset", "provisioning", "setup", "${device_type}"]
+
+variables:
+  # OvrC Connection Settings
+  server_url: "wss://firmware.testing.ovrc.com:10444"  # Update with your OvrC server
+  device_id: "${device_mac}"  # Device MAC address (e.g., "D4:6A:91:E5:B7:3B")
+  protocol: "firmware-protocol"
+  verify_ssl: true
+  
+  # Device Configuration
+  device_name: "MyDevice-${device_id}"
+  device_ip: "192.168.1.100"  # Desired IP address
+  subnet_mask: "255.255.255.0"
+  gateway: "192.168.1.1"
+  dhcp_enabled: false  # Set to true for DHCP, false for static IP
+  dns_server1: "8.8.8.8"
+  dns_server2: "8.8.4.4"
+  web_port: 443
+  
+  # Time Settings
+  timezone_name: "America/New_York"  # e.g., "America/New_York", "Europe/London"
+  timezone_notes: "Eastern Time (US & Canada)"
+  utc_offset_minutes: 300  # UTC-5 = 300 minutes
+  
+  # Wait Times (in seconds)
+  reset_wait_time: 60  # Time to wait after factory reset
+  reconnect_retries: 10  # Number of retries to reconnect after reset
+  reconnect_delay: 10  # Delay between reconnection attempts
+
+setup:
+  - log:
+      message: "Starting factory reset and provisioning for device ${device_id}"
+  
+  # Connect to OvrC server
+  - ovrc.connect:
+      server_url: "${server_url}"
+      device_id: "${device_id}"
+      protocol: "${protocol}"
+      verify_ssl: "${verify_ssl}"
+    description: "Connect to OvrC WebSocket server"
+  
+  # Get device info before reset (for logging)
+  - ovrc.get about:
+      store_as: "device_info_before"
+    description: "Get device information before reset"
+  
+  - log:
+      message: "Device info before reset: ${device_info_before}"
+
+steps:
+  # ========== Phase 1: Factory Reset ==========
+  - log:
+      message: "Phase 1: Performing factory reset..."
+    description: "Log factory reset start"
+  
+  - ovrc.reset device: {}
+    description: "Reset device to factory defaults"
+  
+  - log:
+      message: "Factory reset initiated. Waiting ${reset_wait_time} seconds for device to restart..."
+    description: "Log reset completion"
+  
+  # Wait for device to restart
+  - wait:
+      time: "${reset_wait_time}"
+    description: "Wait for device to restart after factory reset"
+  
+  # Disconnect and wait for device to come back online
+  - ovrc.disconnect: {}
+    description: "Disconnect from OvrC server"
+  
+  # ========== Phase 2: Reconnect and Verify Device Online ==========
+  - log:
+      message: "Phase 2: Reconnecting to device..."
+    description: "Log reconnection phase"
+  
+  # Wait before first reconnection attempt
+  - wait:
+      time: "${reconnect_delay}"
+    description: "Wait before reconnection attempt"
+  
+  # Attempt to reconnect
+  - ovrc.connect:
+      server_url: "${server_url}"
+      device_id: "${device_id}"
+      protocol: "${protocol}"
+      verify_ssl: "${verify_ssl}"
+    description: "Reconnect to device after factory reset"
+  
+  # Start device updates to automatically pull system resources
+  - ovrc.start device updates:
+      store_as: "device_status"
+    description: "Start device status updates to automatically pull system resources"
+  
+  # Wait a moment for initial device updates to arrive
+  - wait:
+      time: 3
+    description: "Wait for initial device status updates"
+  
+  # Try to get device info to verify it's online
+  # If this fails, the device may need more time - adjust reset_wait_time if needed
+  - ovrc.get about:
+      store_as: "device_info_after"
+    description: "Get device info to verify device is online"
+  
+  - test.assert:
+      expression: "device_info_after is not None"
+      message: "Device did not come back online after factory reset. Try increasing reset_wait_time."
+    description: "Verify device is back online"
+  
+  - log:
+      message: "Device is back online after factory reset: ${device_info_after}"
+    description: "Log successful reconnection"
+  
+  - log:
+      message: "Device status updates started. System resources will be automatically pulled."
+    description: "Log that system resources are being pulled"
+  
+  # ========== Phase 3: Configure Network Settings ==========
+  - log:
+      message: "Phase 3: Configuring network settings..."
+    description: "Log network configuration phase"
+  
+  - ovrc.set network settings:
+      device_name: "${device_name}"
+      device_ip: "${device_ip}"
+      subnet_mask: "${subnet_mask}"
+      gateway: "${gateway}"
+      dhcp_enabled: "${dhcp_enabled}"
+      dns_server1: "${dns_server1}"
+      dns_server2: "${dns_server2}"
+      web_port: "${web_port}"
+    description: "Configure device network settings"
+  
+  # Verify network settings were applied
+  - wait:
+      time: 5
+    description: "Wait for network settings to apply"
+  
+  - ovrc.get network settings:
+      store_as: "network_settings_after"
+    description: "Retrieve network settings to verify"
+  
+  - test.assert:
+      expression: "network_settings_after is not None and network_settings_after.get('deviceIpAddress') == device_ip"
+      message: "Network settings were not applied correctly"
+    description: "Verify network settings"
+  
+  - log:
+      message: "Network settings configured: ${network_settings_after}"
+    description: "Log configured network settings"
+  
+  # ========== Phase 4: Configure Time Settings ==========
+  - log:
+      message: "Phase 4: Configuring time settings..."
+    description: "Log time configuration phase"
+  
+  - ovrc.set time settings:
+      timezone_name: "${timezone_name}"
+      timezone_notes: "${timezone_notes}"
+      utc_offset_minutes: "${utc_offset_minutes}"
+    description: "Configure device time zone"
+  
+  # Verify time settings were applied
+  - wait:
+      time: 3
+    description: "Wait for time settings to apply"
+  
+  - ovrc.get time settings:
+      store_as: "time_settings_after"
+    description: "Retrieve time settings to verify"
+  
+  - test.assert:
+      expression: "time_settings_after is not None"
+      message: "Time settings were not applied correctly"
+    description: "Verify time settings"
+  
+  - log:
+      message: "Time settings configured: ${time_settings_after}"
+    description: "Log configured time settings"
+  
+  # ========== Phase 5: Final Verification ==========
+  - log:
+      message: "Phase 5: Performing final verification..."
+    description: "Log verification phase"
+  
+  # Wait a bit more to ensure system resources are fully updated
+  - wait:
+      time: 5
+    description: "Wait for system resources to be fully updated"
+  
+  - ovrc.get about:
+      store_as: "device_info_final"
+    description: "Get final device information"
+  
+  - test.assert:
+      expression: "device_info_final is not None"
+      message: "Device information should be available"
+    description: "Verify device is fully operational"
+  
+  - log:
+      message: "Device successfully provisioned: ${device_info_final}"
+    description: "Log final device status"
+  
+  - log:
+      message: "System resources are being automatically pulled via device status updates"
+    description: "Log that system resources are available"
+
+cleanup:
+  - ovrc.stop device updates: {}
+    description: "Stop device status updates"
+  
+  - ovrc.disconnect: {}
+    description: "Disconnect from OvrC server"
+  
+  - log:
+      message: "Factory reset and provisioning completed for device ${device_id}"
+    description: "Log completion"
+

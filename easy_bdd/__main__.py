@@ -105,6 +105,14 @@ Examples:
     validate_parser.add_argument(
         "--strict", action="store_true", help="Treat warnings as errors"
     )
+    
+    # Edit-test command
+    edit_parser = subparsers.add_parser(
+        "edit-test", help="Open a test file in the default editor"
+    )
+    edit_parser.add_argument(
+        "test_path", type=str, help="Path to test file to edit"
+    )
     convert_parser.add_argument(
         "--output", help="Output file path (default: auto-generated)"
     )
@@ -130,6 +138,8 @@ Examples:
             return convert_recording(args)
         elif args.command == "validate":
             return validate_tests(args)
+        elif args.command == "edit-test":
+            return edit_test(args)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -421,6 +431,106 @@ def generate_features(args) -> int:
 
     print(f"\\nGenerated {generated_count} feature files in '{output_path}'")
     return 0
+
+
+def edit_test(args) -> int:
+    """Open a test file in the default editor"""
+    from pathlib import Path
+    from easy_bdd.core.parser import YAMLParser
+    import platform
+    import subprocess
+    
+    test_path = Path(args.test_path)
+    parser = YAMLParser()
+    
+    if not test_path.exists():
+        print(f"❌ Test file not found: {test_path}")
+        print(f"   Absolute path: {test_path.absolute()}")
+        return 1
+    
+    if not test_path.is_file():
+        print(f"❌ Path is not a file: {test_path}")
+        return 1
+    
+    file_path_str = str(test_path.absolute())
+    system = platform.system().lower()
+    
+    print(f"📁 Opening test file: {file_path_str}")
+    
+    try:
+        if system == "darwin":  # macOS
+            subprocess.run(["open", file_path_str], check=True)
+        elif system == "linux":
+            # Try VS Code first, then default editor
+            try:
+                subprocess.run(["code", file_path_str], check=True)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                subprocess.run(["xdg-open", file_path_str], check=True)
+        elif system == "windows":
+            subprocess.run(["start", file_path_str], check=True, shell=True)
+        else:
+            print(f"⚠️  Unknown platform: {system}")
+            print(f"   Please open manually: {file_path_str}")
+            return 1
+        
+        print(f"✅ Opened {test_path.name} in editor")
+        return 0
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to open file: {e}")
+        print(f"   Please open manually: {file_path_str}")
+        return 1
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return 1
+
+
+def edit_test(args) -> int:
+    """Open a test file in the default editor"""
+    from pathlib import Path
+    import platform
+    import subprocess
+    
+    test_path = Path(args.test_path)
+    
+    if not test_path.exists():
+        print(f"❌ Test file not found: {test_path}")
+        print(f"   Absolute path: {test_path.absolute()}")
+        return 1
+    
+    if not test_path.is_file():
+        print(f"❌ Path is not a file: {test_path}")
+        return 1
+    
+    file_path_str = str(test_path.absolute())
+    system = platform.system().lower()
+    
+    print(f"📁 Opening test file: {file_path_str}")
+    
+    try:
+        if system == "darwin":  # macOS
+            subprocess.run(["open", file_path_str], check=True)
+        elif system == "linux":
+            # Try VS Code first, then default editor
+            try:
+                subprocess.run(["code", file_path_str], check=True)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                subprocess.run(["xdg-open", file_path_str], check=True)
+        elif system == "windows":
+            subprocess.run(["start", file_path_str], check=True, shell=True)
+        else:
+            print(f"⚠️  Unknown platform: {system}")
+            print(f"   Please open manually: {file_path_str}")
+            return 1
+        
+        print(f"✅ Opened {test_path.name} in editor")
+        return 0
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to open file: {e}")
+        print(f"   Please open manually: {file_path_str}")
+        return 1
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return 1
 
 
 def validate_tests(args) -> int:
