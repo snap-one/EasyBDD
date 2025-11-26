@@ -37,6 +37,14 @@ Modern, professional web interface for visual test creation and management with 
 - **Test Report Pagination** - Paginated test reports (10 per page) for better navigation
 - **Report Generation** - Generate beautiful HTML reports with simple and debug logs
 
+### Metrics & Analytics
+- **Comprehensive Metrics Dashboard** - Access detailed analytics from the sidebar
+- **Test Health Monitoring** - Identify failing tests, flaky tests, stale tests, and incomplete tests
+- **Execution Trends** - Visual charts for execution time trends, failure rate trends, and peak execution hours
+- **Test Coverage Analysis** - Breakdown by workspace, action type, complexity, and tags
+- **Quick Insights** - Execution velocity, success streaks, and recent failures
+- **Resource Tracking** - Monitor storage usage for results and reports
+
 ### Developer Experience
 - **Zero Programming Required** - Build tests without writing code
 - **Professional UI** - Modern, responsive design with dark mode support
@@ -601,12 +609,57 @@ app.add_middleware(
 )
 ```
 
+### Metrics & Analytics
+
+Access comprehensive metrics and analytics from the sidebar navigation.
+
+#### Using the Metrics Dashboard
+
+1. **Navigate to Metrics** - Click "Metrics & Analytics" in the sidebar
+2. **View Overview** - See all metrics organized by category
+3. **Refresh Data** - Click "Refresh" button to reload latest metrics
+4. **Navigate to Details** - Click on test names or results to view details
+
+#### Test Health & Maintenance
+
+- **Most Failing Tests** - Lists tests with highest failure rates, sorted by failure percentage
+- **Flaky Tests** - Shows tests that have both passed and failed, indicating instability
+- **Stale Tests** - Tests not run in 30+ days, helping identify outdated tests
+- **Tests Without Steps** - Empty or incomplete tests that need attention
+
+#### Execution Trends
+
+- **Execution Time Trends** - Visual bar charts showing average execution time over last 30 days
+- **Failure Rate Trends** - Daily breakdown of pass/fail rates with visual indicators
+- **Peak Execution Hours** - Bar chart showing when most tests run (useful for scheduling)
+- **Slowest Tests** - Lists tests with longest execution times for optimization
+
+#### Test Coverage
+
+- **By Workspace** - Distribution of tests across workspaces
+- **By Action Type** - Breakdown of browser, API, command, test, OvrC, JSON-RPC, AWS actions
+- **Complexity Analysis** - Average steps per test, most/least complex tests
+- **Tag Distribution** - Most common tags across all tests
+
+#### Quick Insights
+
+- **Execution Velocity** - Tests run today, this week, this month, and average per day
+- **Success Streak** - Consecutive successful test runs
+- **Recent Failures** - Last 5 failed tests with clickable links to view details
+
+#### Resource & Storage
+
+- **Result Files** - Count and total size of JSON result files
+- **HTML Reports** - Count and total size of generated HTML reports
+- **Old Results** - Results older than 90 days (consider cleanup)
+
 ## 📊 API Documentation
 
 Interactive API documentation available at:
 
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
+- **[Complete API Reference](API_REFERENCE.md)** - Detailed API documentation with examples
 
 ## 🐛 Troubleshooting
 

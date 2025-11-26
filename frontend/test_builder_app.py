@@ -594,6 +594,11 @@ async def get_actions():
 @app.get("/api/actions/{action_id}")
 async def get_action(action_id: str):
     """Get detailed information about a specific action"""
+    # URL decode the action_id in case it was encoded
+    from urllib.parse import unquote
+
+    action_id = unquote(action_id)
+
     definition = get_action_definition(action_id)
     if not definition:
         raise HTTPException(status_code=404, detail=f"Action not found: {action_id}")
@@ -758,6 +763,9 @@ async def get_test_reports(
                         reports.append(
                             {
                                 "filename": result_file.name,
+                                "build_id": result_data.get(
+                                    "build_id"
+                                ),  # Include unique build ID
                                 "timestamp": result_data.get("timestamp")
                                 or result_data.get("started")
                                 or result_data.get("finished", ""),
@@ -781,6 +789,9 @@ async def get_test_reports(
                         reports.append(
                             {
                                 "filename": result_file.name,
+                                "build_id": result_data.get(
+                                    "build_id"
+                                ),  # Include unique build ID
                                 "timestamp": result_data.get("timestamp")
                                 or result_data.get("started")
                                 or result_data.get("finished", ""),
@@ -804,6 +815,9 @@ async def get_test_reports(
                 reports.append(
                     {
                         "filename": result_file.name,
+                        "build_id": result_data.get(
+                            "build_id"
+                        ),  # Include unique build ID
                         "timestamp": result_data.get("timestamp")
                         or result_data.get("started")
                         or result_data.get("finished", ""),
@@ -933,32 +947,62 @@ async def validate_test(
     errors = []
     warnings = []
 
-    # Validate test structure
-    if not request.test_definition.name:
-        errors.append("Test name is required")
+    try:
+        # Validate test structure
+        if not request.test_definition.name or not request.test_definition.name.strip():
+            errors.append("Test name is required")
 
-    if not request.test_definition.steps:
-        errors.append("Test must have at least one step")
+        # Count total steps (setup + steps + cleanup)
+        total_steps = (
+            len(request.test_definition.setup or [])
+            + len(request.test_definition.steps or [])
+            + len(request.test_definition.cleanup or [])
+        )
 
-    # Validate each step
-    all_steps = (
-        request.test_definition.setup
-        + request.test_definition.steps
-        + request.test_definition.cleanup
-    )
+        if total_steps == 0:
+            errors.append(
+                "Test must have at least one step (in setup, steps, or cleanup)"
+            )
 
-    for idx, step in enumerate(all_steps, 1):
-        action_def = get_action_definition(step.action)
+        # Validate each step
+        all_steps = []
+        step_context = []
 
-        if not action_def:
-            errors.append(f"Step {idx}: Unknown action '{step.action}'")
-            continue
+        # Add setup steps
+        for step in request.test_definition.setup or []:
+            all_steps.append(step)
+            step_context.append("setup")
 
-        # Validate parameters
-        valid, param_errors = validate_action_parameters(step.action, step.parameters)
-        if not valid:
-            for error in param_errors:
-                errors.append(f"Step {idx} ({step.action}): {error}")
+        # Add main steps
+        for step in request.test_definition.steps or []:
+            all_steps.append(step)
+            step_context.append("steps")
+
+        # Add cleanup steps
+        for step in request.test_definition.cleanup or []:
+            all_steps.append(step)
+            step_context.append("cleanup")
+
+        for idx, (step, context) in enumerate(zip(all_steps, step_context), 1):
+            if not step.action:
+                errors.append(f"Step {idx} ({context}): Action is required")
+                continue
+
+            action_def = get_action_definition(step.action)
+
+            if not action_def:
+                errors.append(f"Step {idx} ({context}): Unknown action '{step.action}'")
+                continue
+
+            # Validate parameters
+            step_params = step.parameters or {}
+            valid, param_errors = validate_action_parameters(step.action, step_params)
+            if not valid:
+                for error in param_errors:
+                    errors.append(f"Step {idx} ({context}, {step.action}): {error}")
+
+    except Exception as e:
+        errors.append(f"Validation error: {str(e)}")
 
     return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
@@ -1087,10 +1131,16 @@ async def execute_test(
             running_tests[test_id]["return_code"] = process.returncode
             running_tests[test_id]["finished"] = datetime.now().isoformat()
 
+            # Generate unique build ID
+            build_id = str(uuid4())[
+                :8
+            ]  # Use first 8 characters of UUID for shorter display
+
             # Save results to file
             result_data = {
                 "test_id": test_id,
                 "test_path": str(test_path),
+                "build_id": build_id,  # Unique build identifier
                 "status": running_tests[test_id]["status"],
                 "return_code": process.returncode,
                 "started": running_tests[test_id]["started"],
@@ -1103,7 +1153,8 @@ async def execute_test(
             # Include test_path in result data for better matching
             result_data["test_path"] = str(test_path)
 
-            result_filename = f"{test_id.replace('/', '_').replace('.yaml', '')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            # Include build_id in filename for easier identification
+            result_filename = f"{test_id.replace('/', '_').replace('.yaml', '')}_{build_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             result_path = reports_directory / result_filename
             with open(result_path, "w") as f:
                 json.dump(result_data, f, indent=2)
@@ -1126,6 +1177,9 @@ async def execute_test(
                     "result_file": result_filename,
                 }
             )
+
+            # Send Teams notification if enabled
+            await send_teams_notification(test_id, running_tests[test_id], test_path)
 
             print(
                 f"[BACKGROUND TASK] Test {test_id} completed. Status: {running_tests[test_id]['status']}"
@@ -1155,6 +1209,10 @@ async def execute_test(
                     "error_trace": error_trace,
                 }
             )
+
+            # Send Teams notification for error
+            running_tests[test_id]["status"] = "error"
+            await send_teams_notification(test_id, running_tests[test_id], test_path)
 
     # Verify execution record exists before starting background task
     if test_id not in running_tests:
@@ -1551,6 +1609,630 @@ async def get_hardware_stats_endpoint():
     return get_hardware_stats()
 
 
+@app.get("/api/metrics/comprehensive")
+async def get_comprehensive_metrics():
+    """Get comprehensive metrics for the metrics page"""
+    try:
+        from collections import defaultdict
+        from datetime import timedelta
+
+        # Load all test results
+        results = []
+        test_results_map = defaultdict(list)  # test_name -> list of results
+        if reports_directory.exists():
+            for result_file in reports_directory.glob("*.json"):
+                try:
+                    with open(result_file, "r") as f:
+                        result_data = json.load(f)
+
+                    test_info = None
+                    if (
+                        "tests" in result_data
+                        and isinstance(result_data["tests"], list)
+                        and result_data["tests"]
+                    ):
+                        test_info = result_data["tests"][0]
+
+                    status = (
+                        test_info.get("status", result_data.get("status", "unknown"))
+                        if test_info
+                        else result_data.get("status", "unknown")
+                    ).lower()
+
+                    timestamp = (
+                        result_data.get("timestamp")
+                        or result_data.get("started")
+                        or result_data.get("finished")
+                    )
+
+                    # Extract test name
+                    test_name = "Unknown Test"
+                    if test_info and test_info.get("name"):
+                        test_name = test_info.get("name")
+                    elif test_info and test_info.get("file_path"):
+                        test_path = test_info.get("file_path")
+                        test_name = Path(test_path).stem.replace("_", " ").title()
+                    elif test_info and test_info.get("test_path"):
+                        test_path = test_info.get("test_path")
+                        test_name = Path(test_path).stem.replace("_", " ").title()
+                    elif result_data.get("test_path"):
+                        test_path = result_data.get("test_path")
+                        test_name = Path(test_path).stem.replace("_", " ").title()
+                    elif result_data.get("file_path"):
+                        test_path = result_data.get("file_path")
+                        test_name = Path(test_path).stem.replace("_", " ").title()
+
+                    result_item = {
+                        "status": status,
+                        "timestamp": timestamp,
+                        "execution_time": test_info.get("execution_time")
+                        if test_info
+                        else result_data.get("execution_time", 0),
+                        "test_name": test_name,
+                        "test_path": test_info.get("test_path")
+                        or test_info.get("file_path")
+                        or result_data.get("test_path")
+                        or result_data.get("file_path"),
+                    }
+
+                    results.append(result_item)
+                    if timestamp:
+                        test_results_map[test_name].append(result_item)
+                except Exception as e:
+                    print(f"Error processing result file {result_file}: {e}")
+                    continue
+
+        # Sort results by timestamp
+        results_with_timestamp = [r for r in results if r.get("timestamp")]
+        results_with_timestamp.sort(key=lambda x: x["timestamp"], reverse=True)
+
+        # 1. Test Health & Maintenance
+        # Most failing tests
+        test_failure_counts = defaultdict(lambda: {"total": 0, "failed": 0})
+        for result in results:
+            test_name = result.get("test_name", "Unknown")
+            test_failure_counts[test_name]["total"] += 1
+            if result["status"] in ["failed", "error"]:
+                test_failure_counts[test_name]["failed"] += 1
+
+        most_failing_tests = []
+        for test_name, counts in test_failure_counts.items():
+            if counts["total"] > 0:
+                failure_rate = (counts["failed"] / counts["total"]) * 100
+                if counts["failed"] > 0:
+                    most_failing_tests.append(
+                        {
+                            "test_name": test_name,
+                            "total_runs": counts["total"],
+                            "failed_runs": counts["failed"],
+                            "failure_rate": round(failure_rate, 1),
+                        }
+                    )
+
+        most_failing_tests.sort(
+            key=lambda x: (x["failure_rate"], x["failed_runs"]), reverse=True
+        )
+
+        # Flaky tests (tests that have both passed and failed)
+        flaky_tests = []
+        for test_name, test_results in test_results_map.items():
+            if len(test_results) < 2:
+                continue
+            statuses = [r["status"] for r in test_results]
+            has_passed = any(s in ["passed", "completed", "success"] for s in statuses)
+            has_failed = any(s in ["failed", "error"] for s in statuses)
+            if has_passed and has_failed:
+                passed_count = sum(
+                    1 for s in statuses if s in ["passed", "completed", "success"]
+                )
+                failed_count = sum(1 for s in statuses if s in ["failed", "error"])
+                flaky_tests.append(
+                    {
+                        "test_name": test_name,
+                        "total_runs": len(test_results),
+                        "passed": passed_count,
+                        "failed": failed_count,
+                        "pass_rate": round((passed_count / len(test_results)) * 100, 1),
+                    }
+                )
+
+        flaky_tests.sort(key=lambda x: x["total_runs"], reverse=True)
+
+        # Stale tests (tests not run in last 30 days)
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        stale_tests = []
+        all_test_names = set()
+        if tests_directory.exists():
+            for test_file in tests_directory.rglob("*.yaml"):
+                test_name = test_file.stem.replace("_", " ").title()
+                all_test_names.add(test_name)
+
+        for test_name in all_test_names:
+            test_results = test_results_map.get(test_name, [])
+            if not test_results:
+                stale_tests.append(
+                    {
+                        "test_name": test_name,
+                        "last_run": None,
+                        "days_since_run": None,
+                    }
+                )
+            else:
+                latest_result = max(
+                    test_results, key=lambda x: x.get("timestamp") or ""
+                )
+                if latest_result.get("timestamp"):
+                    try:
+                        last_run_date = datetime.fromisoformat(
+                            latest_result["timestamp"].replace("Z", "+00:00")
+                        )
+                        if last_run_date < thirty_days_ago:
+                            days_since = (datetime.now() - last_run_date).days
+                            stale_tests.append(
+                                {
+                                    "test_name": test_name,
+                                    "last_run": latest_result["timestamp"],
+                                    "days_since_run": days_since,
+                                }
+                            )
+                    except Exception:
+                        pass
+
+        stale_tests.sort(
+            key=lambda x: x["days_since_run"] if x["days_since_run"] else 999,
+            reverse=True,
+        )
+
+        # Tests without steps
+        tests_without_steps = []
+        if tests_directory.exists():
+            for test_file in tests_directory.rglob("*.yaml"):
+                try:
+                    with open(test_file, "r") as f:
+                        test_data = yaml.safe_load(f)
+                        test_name = test_file.stem.replace("_", " ").title()
+                        steps_count = (
+                            len(test_data.get("steps", []))
+                            + len(test_data.get("setup", []))
+                            + len(test_data.get("cleanup", []))
+                        )
+                        if steps_count == 0:
+                            tests_without_steps.append(
+                                {
+                                    "test_name": test_name,
+                                    "test_path": str(
+                                        test_file.relative_to(tests_directory)
+                                    ),
+                                }
+                            )
+                except Exception:
+                    pass
+
+        # 2. Test Suite Statistics
+        suite_stats = {
+            "total_suites": 0,
+            "suites_with_tests": 0,
+            "total_tests_in_suites": 0,
+            "most_active_suites": [],
+        }
+
+        if test_suites_directory.exists():
+            suites = []
+            for suite_file in test_suites_directory.glob("*.json"):
+                try:
+                    with open(suite_file, "r") as f:
+                        data = json.load(f)
+                        suite = TestSuite(**data)
+                        suites.append(suite)
+                except Exception:
+                    continue
+
+            suite_stats["total_suites"] = len(suites)
+            suite_stats["suites_with_tests"] = sum(
+                1 for s in suites if len(s.tests) > 0
+            )
+            suite_stats["total_tests_in_suites"] = sum(len(s.tests) for s in suites)
+
+            # Most active suites (by test count)
+            suite_activity = [
+                {"name": s.name, "test_count": len(s.tests), "id": s.id} for s in suites
+            ]
+            suite_activity.sort(key=lambda x: x["test_count"], reverse=True)
+            suite_stats["most_active_suites"] = suite_activity[:10]
+
+        # 3. Execution Trends
+        # Execution time trends (last 30 days)
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        recent_results = [
+            r
+            for r in results_with_timestamp
+            if r.get("timestamp")
+            and datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00"))
+            > thirty_days_ago
+        ]
+
+        # Group by date
+        execution_time_by_date = defaultdict(list)
+        failure_rate_by_date = defaultdict(lambda: {"total": 0, "failed": 0})
+
+        for result in recent_results:
+            try:
+                result_date = datetime.fromisoformat(
+                    result["timestamp"].replace("Z", "+00:00")
+                )
+                date_key = result_date.strftime("%Y-%m-%d")
+                if result.get("execution_time"):
+                    execution_time_by_date[date_key].append(result["execution_time"])
+                failure_rate_by_date[date_key]["total"] += 1
+                if result["status"] in ["failed", "error"]:
+                    failure_rate_by_date[date_key]["failed"] += 1
+            except Exception:
+                pass
+
+        execution_trends = []
+        for date_key in sorted(execution_time_by_date.keys()):
+            times = execution_time_by_date[date_key]
+            execution_trends.append(
+                {
+                    "date": date_key,
+                    "avg_time": round(sum(times) / len(times), 2) if times else 0,
+                    "min_time": round(min(times), 2) if times else 0,
+                    "max_time": round(max(times), 2) if times else 0,
+                }
+            )
+
+        failure_rate_trends = []
+        for date_key in sorted(failure_rate_by_date.keys()):
+            stats = failure_rate_by_date[date_key]
+            rate = (stats["failed"] / stats["total"] * 100) if stats["total"] > 0 else 0
+            failure_rate_trends.append(
+                {
+                    "date": date_key,
+                    "total": stats["total"],
+                    "failed": stats["failed"],
+                    "failure_rate": round(rate, 1),
+                }
+            )
+
+        # Peak execution times (by hour)
+        executions_by_hour = defaultdict(int)
+        for result in results_with_timestamp:
+            try:
+                result_time = datetime.fromisoformat(
+                    result["timestamp"].replace("Z", "+00:00")
+                )
+                hour = result_time.hour
+                executions_by_hour[hour] += 1
+            except Exception:
+                pass
+
+        peak_hours = [
+            {"hour": h, "count": executions_by_hour[h]}
+            for h in sorted(executions_by_hour.keys())
+        ]
+
+        # Slowest tests
+        slowest_tests = []
+        test_execution_times = defaultdict(list)
+        for result in results:
+            if result.get("execution_time"):
+                test_name = result.get("test_name", "Unknown")
+                test_execution_times[test_name].append(result["execution_time"])
+
+        for test_name, times in test_execution_times.items():
+            slowest_tests.append(
+                {
+                    "test_name": test_name,
+                    "avg_time": round(sum(times) / len(times), 2),
+                    "max_time": round(max(times), 2),
+                    "min_time": round(min(times), 2),
+                    "runs": len(times),
+                }
+            )
+
+        slowest_tests.sort(key=lambda x: x["avg_time"], reverse=True)
+
+        # 4. Test Coverage & Distribution
+        # Tests by workspace
+        tests_by_workspace = defaultdict(int)
+        if tests_directory.exists():
+            for test_file in tests_directory.rglob("*.yaml"):
+                try:
+                    with open(test_file, "r") as f:
+                        test_data = yaml.safe_load(f)
+                        workspace = test_data.get("workspace") or "No Workspace"
+                        tests_by_workspace[workspace] += 1
+                except Exception:
+                    tests_by_workspace["Unknown"] += 1
+
+        workspace_distribution = [
+            {"workspace": ws, "count": count}
+            for ws, count in sorted(
+                tests_by_workspace.items(), key=lambda x: x[1], reverse=True
+            )
+        ]
+
+        # Tests by action type
+        action_type_counts = defaultdict(int)
+        total_steps = 0
+        if tests_directory.exists():
+            for test_file in tests_directory.rglob("*.yaml"):
+                try:
+                    with open(test_file, "r") as f:
+                        test_data = yaml.safe_load(f)
+                        for step in (
+                            test_data.get("steps", [])
+                            + test_data.get("setup", [])
+                            + test_data.get("cleanup", [])
+                        ):
+                            action = step.get("action", "unknown")
+                            # Categorize action
+                            if action.startswith("browser.") or action.startswith(
+                                "browser "
+                            ):
+                                action_type_counts["Browser"] += 1
+                            elif action.startswith("api.") or action.startswith("api "):
+                                action_type_counts["API"] += 1
+                            elif action.startswith("command.") or action.startswith(
+                                "command "
+                            ):
+                                action_type_counts["Command"] += 1
+                            elif action.startswith("test.") or action.startswith(
+                                "test "
+                            ):
+                                action_type_counts["Test"] += 1
+                            elif "ovrc" in action.lower():
+                                action_type_counts["OvrC API"] += 1
+                            elif (
+                                "jsonrpc" in action.lower()
+                                or "json-rpc" in action.lower()
+                            ):
+                                action_type_counts["JSON-RPC"] += 1
+                            elif "aws" in action.lower():
+                                action_type_counts["AWS"] += 1
+                            else:
+                                action_type_counts["Other"] += 1
+                            total_steps += 1
+                except Exception:
+                    pass
+
+        action_distribution = [
+            {
+                "type": action_type,
+                "count": count,
+                "percentage": round(
+                    (count / total_steps * 100) if total_steps > 0 else 0, 1
+                ),
+            }
+            for action_type, count in sorted(
+                action_type_counts.items(), key=lambda x: x[1], reverse=True
+            )
+        ]
+
+        # Test complexity (steps per test)
+        test_complexity = []
+        if tests_directory.exists():
+            for test_file in tests_directory.rglob("*.yaml"):
+                try:
+                    with open(test_file, "r") as f:
+                        test_data = yaml.safe_load(f)
+                        test_name = test_file.stem.replace("_", " ").title()
+                        steps_count = (
+                            len(test_data.get("steps", []))
+                            + len(test_data.get("setup", []))
+                            + len(test_data.get("cleanup", []))
+                        )
+                        test_complexity.append(
+                            {
+                                "test_name": test_name,
+                                "steps": steps_count,
+                                "setup_steps": len(test_data.get("setup", [])),
+                                "main_steps": len(test_data.get("steps", [])),
+                                "cleanup_steps": len(test_data.get("cleanup", [])),
+                            }
+                        )
+                except Exception:
+                    pass
+
+        test_complexity.sort(key=lambda x: x["steps"], reverse=True)
+        avg_complexity = (
+            sum(t["steps"] for t in test_complexity) / len(test_complexity)
+            if test_complexity
+            else 0
+        )
+
+        # Tag distribution
+        tag_counts = defaultdict(int)
+        if tests_directory.exists():
+            for test_file in tests_directory.rglob("*.yaml"):
+                try:
+                    with open(test_file, "r") as f:
+                        test_data = yaml.safe_load(f)
+                        tags = test_data.get("tags", [])
+                        for tag in tags:
+                            tag_counts[tag] += 1
+                except Exception:
+                    pass
+
+        tag_distribution = [
+            {"tag": tag, "count": count}
+            for tag, count in sorted(
+                tag_counts.items(), key=lambda x: x[1], reverse=True
+            )[:20]
+        ]
+
+        # 5. Quick Insights
+        # Execution velocity (tests per day/week)
+        today = datetime.now().date()
+        week_ago = today - timedelta(days=7)
+        month_ago = today - timedelta(days=30)
+
+        today_count = sum(
+            1
+            for r in results_with_timestamp
+            if r.get("timestamp")
+            and datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00")).date()
+            == today
+        )
+
+        week_count = sum(
+            1
+            for r in results_with_timestamp
+            if r.get("timestamp")
+            and datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00")).date()
+            >= week_ago
+        )
+
+        month_count = sum(
+            1
+            for r in results_with_timestamp
+            if r.get("timestamp")
+            and datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00")).date()
+            >= month_ago
+        )
+
+        # Success streak
+        success_streak = 0
+        for result in results_with_timestamp[:10]:  # Check last 10 runs
+            if result["status"] in ["passed", "completed", "success"]:
+                success_streak += 1
+            else:
+                break
+
+        # Recent failures
+        recent_failures = [
+            r for r in results_with_timestamp[:20] if r["status"] in ["failed", "error"]
+        ][:5]
+
+        # 6. Resource & Storage
+        # Test result storage
+        result_files_size = 0
+        result_file_count = 0
+        if reports_directory.exists():
+            for result_file in reports_directory.glob("*.json"):
+                try:
+                    result_files_size += result_file.stat().st_size
+                    result_file_count += 1
+                except Exception:
+                    pass
+
+        # HTML reports
+        html_reports_size = 0
+        html_report_count = 0
+        if reports_directory.exists():
+            for html_file in reports_directory.glob("*.html"):
+                try:
+                    html_reports_size += html_file.stat().st_size
+                    html_report_count += 1
+                except Exception:
+                    pass
+
+        # Old results (older than 90 days)
+        ninety_days_ago = datetime.now() - timedelta(days=90)
+        old_results_count = sum(
+            1
+            for r in results_with_timestamp
+            if r.get("timestamp")
+            and datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00"))
+            < ninety_days_ago
+        )
+
+        return {
+            "test_health": {
+                "most_failing_tests": most_failing_tests[:10],
+                "flaky_tests": flaky_tests[:10],
+                "stale_tests": stale_tests[:20],
+                "tests_without_steps": tests_without_steps[:20],
+            },
+            "suite_statistics": suite_stats,
+            "execution_trends": {
+                "time_trends": execution_trends[-30:],  # Last 30 days
+                "failure_rate_trends": failure_rate_trends[-30:],
+                "peak_hours": peak_hours,
+                "slowest_tests": slowest_tests[:10],
+            },
+            "test_coverage": {
+                "by_workspace": workspace_distribution,
+                "by_action_type": action_distribution,
+                "complexity": {
+                    "average": round(avg_complexity, 1),
+                    "most_complex": test_complexity[:10],
+                    "least_complex": sorted(test_complexity, key=lambda x: x["steps"])[
+                        :10
+                    ],
+                },
+                "tag_distribution": tag_distribution,
+            },
+            "quick_insights": {
+                "execution_velocity": {
+                    "today": today_count,
+                    "this_week": week_count,
+                    "this_month": month_count,
+                    "avg_per_day": round(week_count / 7, 1) if week_count > 0 else 0,
+                },
+                "success_streak": success_streak,
+                "recent_failures": recent_failures,
+            },
+            "resource_storage": {
+                "result_files": {
+                    "count": result_file_count,
+                    "size_mb": round(result_files_size / (1024 * 1024), 2),
+                },
+                "html_reports": {
+                    "count": html_report_count,
+                    "size_mb": round(html_reports_size / (1024 * 1024), 2),
+                },
+                "old_results_count": old_results_count,
+            },
+        }
+    except Exception as e:
+        print(f"Error calculating comprehensive metrics: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return {
+            "test_health": {
+                "most_failing_tests": [],
+                "flaky_tests": [],
+                "stale_tests": [],
+                "tests_without_steps": [],
+            },
+            "suite_statistics": {
+                "total_suites": 0,
+                "suites_with_tests": 0,
+                "total_tests_in_suites": 0,
+                "most_active_suites": [],
+            },
+            "execution_trends": {
+                "time_trends": [],
+                "failure_rate_trends": [],
+                "peak_hours": [],
+                "slowest_tests": [],
+            },
+            "test_coverage": {
+                "by_workspace": [],
+                "by_action_type": [],
+                "complexity": {"average": 0, "most_complex": [], "least_complex": []},
+                "tag_distribution": [],
+            },
+            "quick_insights": {
+                "execution_velocity": {
+                    "today": 0,
+                    "this_week": 0,
+                    "this_month": 0,
+                    "avg_per_day": 0,
+                },
+                "success_streak": 0,
+                "recent_failures": [],
+            },
+            "resource_storage": {
+                "result_files": {"count": 0, "size_mb": 0},
+                "html_reports": {"count": 0, "size_mb": 0},
+                "old_results_count": 0,
+            },
+        }
+
+
 @app.get("/api/results")
 async def list_test_results(
     page: int = 1,
@@ -1617,6 +2299,7 @@ async def list_test_results(
             results.append(
                 {
                     "filename": result_file.name,
+                    "build_id": result_data.get("build_id"),  # Include unique build ID
                     "test_id": test_info.get(
                         "name", result_data.get("test_file", "unknown")
                     )
@@ -3926,7 +4609,352 @@ def record_action(session_id: str, action: str, parameters: Dict[str, Any]):
         print(f"[RECORDER] Error broadcasting message: {e}")
 
 
-# ==================== MAIN ====================
+# ==================== SETTINGS API ====================
+
+SETTINGS_FILE = Path(__file__).parent / "test_builder_settings.json"
+
+
+class TeamsConfig(BaseModel):
+    """Teams notification configuration"""
+
+    enabled: bool = False
+    webhook_url: str = ""
+    notify_on_success: bool = False
+    include_screenshots: bool = False
+    include_html_report: bool = False
+
+
+class TeamsTestRequest(BaseModel):
+    """Request model for testing Teams connection"""
+
+    webhook_url: str
+
+
+def load_settings() -> Dict[str, Any]:
+    """Load settings from JSON file"""
+    if SETTINGS_FILE.exists():
+        try:
+            with open(SETTINGS_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading settings: {e}")
+            return {}
+    return {}
+
+
+def save_settings(settings: Dict[str, Any]) -> None:
+    """Save settings to JSON file"""
+    try:
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(settings, f, indent=2)
+    except Exception as e:
+        print(f"Error saving settings: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save settings: {e}")
+
+
+@app.get("/api/settings/teams")
+async def get_teams_config():
+    """Get Teams notification configuration"""
+    settings = load_settings()
+    teams_config = settings.get("teams", {})
+
+    # Also check environment variable for webhook URL (for backward compatibility)
+    if not teams_config.get("webhook_url") and os.environ.get("TEAMS_WEBHOOK_URL"):
+        teams_config["webhook_url"] = os.environ.get("TEAMS_WEBHOOK_URL")
+
+    return teams_config
+
+
+@app.put("/api/settings/teams")
+async def update_teams_config(config: TeamsConfig):
+    """Update Teams notification configuration"""
+    settings = load_settings()
+    settings["teams"] = config.model_dump()
+    save_settings(settings)
+
+    # Also set environment variable for backward compatibility
+    if config.webhook_url:
+        os.environ["TEAMS_WEBHOOK_URL"] = config.webhook_url
+
+    return {"success": True, "message": "Teams configuration updated"}
+
+
+async def send_teams_notification(
+    test_id: str, test_result: Dict[str, Any], test_path: Path
+):
+    """Send Teams notification for test completion"""
+    try:
+        settings = load_settings()
+        teams_config = settings.get("teams", {})
+
+        # Check if Teams notifications are enabled
+        if not teams_config.get("enabled", False):
+            return
+
+        webhook_url = teams_config.get("webhook_url", "")
+        if not webhook_url:
+            # Fallback to environment variable
+            webhook_url = os.environ.get("TEAMS_WEBHOOK_URL", "")
+
+        if not webhook_url:
+            print("[TEAMS] Webhook URL not configured, skipping notification")
+            return
+
+        # Check if we should notify (only failures or all)
+        status = test_result.get("status", "unknown")
+        notify_on_success = teams_config.get("notify_on_success", False)
+
+        if status == "completed" and not notify_on_success:
+            print(
+                "[TEAMS] Test passed and notify_on_success is disabled, skipping notification"
+            )
+            return
+
+        # Prepare message
+        test_name = test_path.stem if test_path else "Unknown Test"
+        status_emoji = "✅" if status == "completed" else "❌"
+        status_text = "PASSED" if status == "completed" else "FAILED"
+
+        # Calculate duration
+        started = test_result.get("started")
+        finished = test_result.get("finished")
+        duration = "N/A"
+        if started and finished:
+            try:
+                start_time = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                end_time = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+                duration_seconds = (end_time - start_time).total_seconds()
+                if duration_seconds < 60:
+                    duration = f"{duration_seconds:.1f}s"
+                else:
+                    duration = f"{duration_seconds / 60:.1f}m"
+            except Exception:
+                pass
+
+        # Get output summary (last few lines)
+        output = test_result.get("output", [])
+        output_summary = "\n".join(output[-10:]) if output else "No output available"
+
+        message_body = [
+            {
+                "type": "TextBlock",
+                "text": f"{status_emoji} Test Execution: {status_text}",
+                "wrap": True,
+                "weight": "Bolder",
+                "size": "Large",
+                "color": "Good" if status == "completed" else "Attention",
+            },
+            {
+                "type": "TextBlock",
+                "text": f"**Test:** {test_name}",
+                "wrap": True,
+                "spacing": "Medium",
+            },
+            {
+                "type": "TextBlock",
+                "text": f"**Duration:** {duration}",
+                "wrap": True,
+                "spacing": "Small",
+            },
+        ]
+
+        # Add error details if failed
+        if status != "completed":
+            error = test_result.get("error", "")
+            if error:
+                message_body.append(
+                    {
+                        "type": "TextBlock",
+                        "text": f"**Error:** {error[:200]}",
+                        "wrap": True,
+                        "spacing": "Medium",
+                        "color": "Attention",
+                    }
+                )
+
+        # Add output summary
+        if output_summary and len(output_summary) > 0:
+            message_body.append(
+                {
+                    "type": "TextBlock",
+                    "text": f"**Output:**\n```\n{output_summary[-500:]}\n```",
+                    "wrap": True,
+                    "spacing": "Medium",
+                    "fontType": "Monospace",
+                    "size": "Small",
+                }
+            )
+
+        # Add timestamp
+        message_body.append(
+            {
+                "type": "TextBlock",
+                "text": f"*Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*",
+                "wrap": True,
+                "isSubtle": True,
+                "size": "Small",
+                "spacing": "Large",
+            }
+        )
+
+        # Prepare card actions (for HTML report link)
+        card_actions = []
+        include_html_report = teams_config.get("include_html_report", False)
+        if include_html_report:
+            result_file = test_result.get("result_file")
+            if result_file:
+                # Get base URL (try to get from environment or use default)
+                base_url = os.environ.get("BASE_URL", "http://localhost:8000")
+                report_url = f"{base_url}/api/results/{result_file}/generate-report"
+
+                card_actions.append(
+                    {
+                        "type": "Action.OpenUrl",
+                        "title": "📊 Download HTML Report",
+                        "url": report_url,
+                    }
+                )
+
+        teams_message = {
+            "type": "message",
+            "attachments": [
+                {
+                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "content": {
+                        "type": "AdaptiveCard",
+                        "body": message_body,
+                        "actions": card_actions if card_actions else None,
+                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                        "version": "1.2",
+                    },
+                }
+            ],
+        }
+
+        # Remove actions if empty (some Teams clients don't like empty arrays)
+        if not card_actions:
+            teams_message["attachments"][0]["content"].pop("actions", None)
+
+        # Send notification
+        try:
+            import requests
+
+            response = requests.post(
+                webhook_url,
+                headers={"Content-Type": "application/json"},
+                json=teams_message,
+                timeout=10,
+            )
+            if response.status_code in [200, 202]:
+                print(f"[TEAMS] Notification sent successfully for test {test_id}")
+            else:
+                print(
+                    f"[TEAMS] Failed to send notification. Status: {response.status_code}"
+                )
+        except ImportError:
+            print("[TEAMS] requests library not available, cannot send notification")
+        except Exception as e:
+            print(f"[TEAMS] Error sending notification: {e}")
+    except Exception as e:
+        print(f"[TEAMS] Error preparing notification: {e}")
+
+
+@app.post("/api/settings/teams/test")
+async def test_teams_connection(request: TeamsTestRequest):
+    """Test Teams webhook connection by sending a test message"""
+    print(
+        f"[TEAMS TEST] Received test request with webhook_url: {request.webhook_url[:50]}..."
+    )
+    webhook_url = request.webhook_url
+
+    if not webhook_url:
+        raise HTTPException(status_code=400, detail="Webhook URL is required")
+
+    try:
+        import requests
+
+        test_message = {
+            "type": "message",
+            "attachments": [
+                {
+                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "content": {
+                        "type": "AdaptiveCard",
+                        "body": [
+                            {
+                                "type": "TextBlock",
+                                "text": "✅ Test notification from Easy BDD Test Builder",
+                                "wrap": True,
+                                "weight": "Bolder",
+                                "size": "Large",
+                            },
+                            {
+                                "type": "TextBlock",
+                                "text": "If you received this message, your Teams webhook is configured correctly!",
+                                "wrap": True,
+                                "spacing": "Medium",
+                            },
+                            {
+                                "type": "TextBlock",
+                                "text": f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                                "wrap": True,
+                                "isSubtle": True,
+                                "size": "Small",
+                            },
+                        ],
+                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                        "version": "1.2",
+                    },
+                }
+            ],
+        }
+
+        response = requests.post(
+            webhook_url,
+            headers={"Content-Type": "application/json"},
+            json=test_message,
+            timeout=10,
+        )
+
+        if response.status_code == 200 or response.status_code == 202:
+            return {
+                "success": True,
+                "message": "Test notification sent successfully! Check your Teams channel.",
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"Failed to send notification. Status: {response.status_code}, Response: {response.text[:200]}",
+            }
+    except ImportError:
+        raise HTTPException(status_code=500, detail="requests library not available")
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Error sending test notification: {str(e)}",
+        }
+
+
+# Catch-all route for client-side routing (must be last)
+@app.get("/{full_path:path}")
+async def serve_frontend(full_path: str):
+    """
+    Serve the frontend HTML file for any route that doesn't match API endpoints.
+    This allows client-side routing to work when refreshing the page.
+    """
+    # Don't serve HTML for API routes or static files
+    if (
+        full_path.startswith("api/")
+        or full_path.startswith("static/")
+        or full_path.startswith("favicon.ico")
+    ):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    html_path = Path(__file__).parent / "static" / "test_builder.html"
+    if html_path.exists():
+        return FileResponse(html_path)
+    return HTMLResponse("<h1>Test Builder</h1><p>Frontend not found</p>")
+
 
 if __name__ == "__main__":
     import uvicorn

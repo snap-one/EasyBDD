@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..services.browser_service import BrowserService
+from ..services.command_service import CommandService
 from ..services.ovrc_api_service import OvrCApiService
 from .assertions import AssertionEngine, JSONSchemaValidator, ResponseValidator
 from .data_loader import DataLoader
@@ -918,6 +919,7 @@ class TestRunner:
                 "ws": "websocket",
                 "ovrc": "ovrc",  # OvrC API service
                 "test": "browser",  # test.assert, test.wait use browser context
+                "command": "command",  # Command execution service
             }
             return service_map.get(service_prefix, "browser")
 
@@ -935,6 +937,19 @@ class TestRunner:
             return "websocket"
         elif "ovrc" in action_lower:
             return "ovrc"
+        elif any(
+            keyword in action_lower
+            for keyword in [
+                "command",
+                "ssh",
+                "bash",
+                "shell",
+                "powershell",
+                "batch",
+                "python",
+            ]
+        ):
+            return "command"
         else:
             return "browser"  # Default to browser
 
@@ -956,6 +971,8 @@ class TestRunner:
 
                 traceback.print_exc()
                 raise
+        elif service_type == "command":
+            return CommandService(self.config)
         else:
             # For now, return a mock service for other types
             return MockService(service_type)
@@ -1010,6 +1027,15 @@ class TestRunner:
                     step_params, variables, soft_assert_manager
                 )
 
+            # Command execution actions
+            # Handle both dot notation (command.ssh) and normalized format (command ssh)
+            # Check if action starts with "command" and contains a command type
+            command_types = ["ssh", "shell", "bash", "powershell", "batch", "python"]
+            if action_lower.startswith("command") and any(
+                cmd_type in action_lower for cmd_type in command_types
+            ):
+                return self._handle_command_action(action, step_params, variables)
+
             # Check if we have custom actions defined
             if hasattr(self.config, "get_custom_action"):
                 custom_action = self.config.get_custom_action(action)
@@ -1030,12 +1056,14 @@ class TestRunner:
 
             return False
         except Exception as e:
-            # Don't catch JSON-RPC or OvrC failures - let them propagate
+            # Don't catch JSON-RPC, OvrC, or Command failures - let them propagate
             # to avoid "Unknown action" fallthrough
             action_lower_check = action.lower()
-            if action_lower_check.startswith(
-                "jsonrpc"
-            ) or action_lower_check.startswith("ovrc"):
+            if (
+                action_lower_check.startswith("jsonrpc")
+                or action_lower_check.startswith("ovrc")
+                or action_lower_check.startswith("command")
+            ):
                 raise
             print(f"      Warning: Custom action '{action}' failed: {e}")
             return False
@@ -2107,6 +2135,270 @@ class TestRunner:
             else:
                 raise
 
+    def _handle_command_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle command execution actions (SSH, shell, bash, PowerShell, batch, Python)"""
+        try:
+            params = self._get_params(step_params)
+            action_lower = action.lower()
+
+            # Create command service if not already created
+            if not hasattr(self, "_command_service"):
+                self._command_service = CommandService(self.config)
+
+            # Handle SSH command
+            # Support both "command.ssh" and "command ssh" formats
+            if "command" in action_lower and "ssh" in action_lower:
+                host = params.get("host", "")
+                command = params.get("command", "")
+                if not host or not command:
+                    raise ValueError(
+                        "SSH command requires 'host' and 'command' parameters"
+                    )
+
+                print(f"      🔐 Executing SSH command on {host}: {command[:50]}...")
+                output, exit_code = self._command_service.execute_ssh_command(
+                    host=host,
+                    command=command,
+                    username=params.get("username"),
+                    password=params.get("password"),
+                    key_file=params.get("key_file"),
+                    port=params.get("port", 22),
+                    timeout=params.get("timeout", 30),
+                )
+
+                # Store output if requested
+                store_as = params.get("store_as")
+                if store_as:
+                    variables[store_as] = output
+                    print(f"      Stored output as: {store_as}")
+
+                # Store exit code if requested
+                store_exit_code = params.get("store_exit_code")
+                if store_exit_code:
+                    variables[store_exit_code] = exit_code
+                    print(f"      Stored exit code as: {store_exit_code}")
+
+                # Print output
+                if output:
+                    print(f"      Output:\n{output}")
+
+                # Check if we should fail on error
+                fail_on_error = params.get("fail_on_error", True)
+                if exit_code != 0 and fail_on_error:
+                    raise RuntimeError(f"SSH command failed with exit code {exit_code}")
+
+                return exit_code == 0
+
+            # Handle shell command
+            # Support both "command.shell" and "command shell" formats
+            elif (
+                "command" in action_lower
+                and "shell" in action_lower
+                and "bash" not in action_lower
+            ):
+                command = params.get("command", "")
+                if not command:
+                    raise ValueError("Shell command requires 'command' parameter")
+
+                print(f"      💻 Executing shell command: {command[:50]}...")
+                output, exit_code = self._command_service.execute_shell_command(
+                    command=command,
+                    shell=params.get("shell", "auto"),
+                    working_directory=params.get("working_directory"),
+                    timeout=params.get("timeout", 30),
+                )
+
+                # Store output if requested
+                store_as = params.get("store_as")
+                if store_as:
+                    variables[store_as] = output
+                    print(f"      Stored output as: {store_as}")
+
+                # Store exit code if requested
+                store_exit_code = params.get("store_exit_code")
+                if store_exit_code:
+                    variables[store_exit_code] = exit_code
+                    print(f"      Stored exit code as: {store_exit_code}")
+
+                # Print output
+                if output:
+                    print(f"      Output:\n{output}")
+
+                # Check if we should fail on error
+                fail_on_error = params.get("fail_on_error", True)
+                if exit_code != 0 and fail_on_error:
+                    raise RuntimeError(
+                        f"Shell command failed with exit code {exit_code}"
+                    )
+
+                return exit_code == 0
+
+            # Handle bash command
+            # Support both "command.bash" and "command bash" formats
+            elif "command" in action_lower and "bash" in action_lower:
+                command = params.get("command", "")
+                if not command:
+                    raise ValueError("Bash command requires 'command' parameter")
+
+                print(f"      🐚 Executing bash command: {command[:50]}...")
+                output, exit_code = self._command_service.execute_bash_command(
+                    command=command,
+                    working_directory=params.get("working_directory"),
+                    timeout=params.get("timeout", 30),
+                )
+
+                # Store output if requested
+                store_as = params.get("store_as")
+                if store_as:
+                    variables[store_as] = output
+                    print(f"      Stored output as: {store_as}")
+
+                # Store exit code if requested
+                store_exit_code = params.get("store_exit_code")
+                if store_exit_code:
+                    variables[store_exit_code] = exit_code
+                    print(f"      Stored exit code as: {store_exit_code}")
+
+                # Print output
+                if output:
+                    print(f"      Output:\n{output}")
+
+                # Check if we should fail on error
+                fail_on_error = params.get("fail_on_error", True)
+                if exit_code != 0 and fail_on_error:
+                    raise RuntimeError(
+                        f"Bash command failed with exit code {exit_code}"
+                    )
+
+                return exit_code == 0
+
+            # Handle PowerShell command
+            # Support both "command.powershell" and "command powershell" formats
+            elif "command" in action_lower and "powershell" in action_lower:
+                command = params.get("command", "")
+                if not command:
+                    raise ValueError("PowerShell command requires 'command' parameter")
+
+                print(f"      ⚡ Executing PowerShell command: {command[:50]}...")
+                output, exit_code = self._command_service.execute_powershell_command(
+                    command=command,
+                    working_directory=params.get("working_directory"),
+                    timeout=params.get("timeout", 30),
+                )
+
+                # Store output if requested
+                store_as = params.get("store_as")
+                if store_as:
+                    variables[store_as] = output
+                    print(f"      Stored output as: {store_as}")
+
+                # Store exit code if requested
+                store_exit_code = params.get("store_exit_code")
+                if store_exit_code:
+                    variables[store_exit_code] = exit_code
+                    print(f"      Stored exit code as: {store_exit_code}")
+
+                # Print output
+                if output:
+                    print(f"      Output:\n{output}")
+
+                # Check if we should fail on error
+                fail_on_error = params.get("fail_on_error", True)
+                if exit_code != 0 and fail_on_error:
+                    raise RuntimeError(
+                        f"PowerShell command failed with exit code {exit_code}"
+                    )
+
+                return exit_code == 0
+
+            # Handle batch command
+            # Support both "command.batch" and "command batch" formats
+            elif "command" in action_lower and "batch" in action_lower:
+                command = params.get("command", "")
+                if not command:
+                    raise ValueError("Batch command requires 'command' parameter")
+
+                print(f"      📜 Executing batch command: {command[:50]}...")
+                output, exit_code = self._command_service.execute_batch_command(
+                    command=command,
+                    working_directory=params.get("working_directory"),
+                    timeout=params.get("timeout", 30),
+                )
+
+                # Store output if requested
+                store_as = params.get("store_as")
+                if store_as:
+                    variables[store_as] = output
+                    print(f"      Stored output as: {store_as}")
+
+                # Store exit code if requested
+                store_exit_code = params.get("store_exit_code")
+                if store_exit_code:
+                    variables[store_exit_code] = exit_code
+                    print(f"      Stored exit code as: {store_exit_code}")
+
+                # Print output
+                if output:
+                    print(f"      Output:\n{output}")
+
+                # Check if we should fail on error
+                fail_on_error = params.get("fail_on_error", True)
+                if exit_code != 0 and fail_on_error:
+                    raise RuntimeError(
+                        f"Batch command failed with exit code {exit_code}"
+                    )
+
+                return exit_code == 0
+
+            # Handle Python code execution
+            # Support both "command.python" and "command python" formats
+            elif "command" in action_lower and "python" in action_lower:
+                code = params.get("code", "")
+                if not code:
+                    raise ValueError("Python command requires 'code' parameter")
+
+                print(f"      🐍 Executing Python code: {code[:50]}...")
+                output, result, exit_code = self._command_service.execute_python_code(
+                    code=code,
+                    working_directory=params.get("working_directory"),
+                    timeout=params.get("timeout", 30),
+                )
+
+                # Store output if requested
+                store_as = params.get("store_as")
+                if store_as:
+                    variables[store_as] = output
+                    print(f"      Stored output as: {store_as}")
+
+                # Store result if requested
+                store_result = params.get("store_result")
+                if store_result and result is not None:
+                    variables[store_result] = result
+                    print(f"      Stored result as: {store_result}")
+
+                # Print output
+                if output:
+                    print(f"      Output:\n{output}")
+
+                # Check if we should fail on error
+                fail_on_error = params.get("fail_on_error", True)
+                if exit_code != 0 and fail_on_error:
+                    raise RuntimeError(
+                        f"Python code execution failed with exit code {exit_code}"
+                    )
+
+                return exit_code == 0
+
+            else:
+                raise ValueError(f"Unknown command action: {action}")
+
+        except Exception as e:
+            print(f"      ❌ Command execution failed: {e}")
+            # Re-raise to prevent "Unknown action" fallthrough
+            raise
+
     def _extract_nested_value(self, data: dict, path: str) -> Any:
         """Extract a value from nested dict using dot notation path."""
         keys = path.split(".")
@@ -2352,6 +2644,13 @@ class TestRunner:
             "api.put": "api put",
             "api.patch": "api patch",
             "api.delete": "api delete",
+            # Command actions
+            "command.ssh": "command ssh",
+            "command.shell": "command shell",
+            "command.bash": "command bash",
+            "command.powershell": "command powershell",
+            "command.batch": "command batch",
+            "command.python": "command python",
         }
 
         return action_map.get(action_lower, action_lower)

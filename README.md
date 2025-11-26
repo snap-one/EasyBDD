@@ -24,11 +24,13 @@ A powerful, user-friendly YAML-based BDD testing framework that supports multipl
 - **📄 Test Report Pagination** - Paginated test reports (10 per page) for better navigation
 - **♻️ Reusable Test Steps** - Use any test as a step in other tests with `test.run` action for modular test composition
 - **🗑️ Safe Deletions** - Confirmation dialogs for deleting variables and steps
+- **📊 Metrics & Analytics Dashboard** - Comprehensive metrics page with test health, execution trends, coverage analysis, and resource insights
 
 **[📖 Full Test Builder Guide](docs/TEST_BUILDER.md)** | **Quick Start**: `python frontend/start_builder.py` → http://localhost:8000
 
 ### 🆕 Recent Features
 
+- **Metrics & Analytics Dashboard** - Comprehensive metrics page with test health monitoring (failing tests, flaky tests, stale tests), execution trends (time trends, failure rates, peak hours), test coverage analysis (by workspace, action type, complexity), quick insights (velocity, streaks, recent failures), and resource storage tracking
 - **Enhanced Test Results View** - Split-view interface with compact result cards showing test name and build number (instead of full paths), interactive preview panel for detailed execution logs
 - **Test Report Pagination** - Paginated test reports showing 10 reports per page with navigation controls
 - **Reusable Test Steps** - Use any test as a reusable step in other tests with `test.run` action, enabling modular test composition and maintainability
@@ -719,7 +721,9 @@ python -m easy_bdd --help
 ## 📚 Additional Resources
 
 - **[Test Builder Guide](docs/TEST_BUILDER.md)** - Complete guide to the web application
+- **[API Reference](docs/API_REFERENCE.md)** - Complete REST API documentation
 - **[Syntax Cheat Sheet](docs/SYNTAX_CHEATSHEET.md)** - Quick reference for all actions
+- **[Metrics & Analytics](docs/metrics-analytics.md)** - Metrics dashboard and analytics guide
 - **[Examples](docs/examples.md)** - Real-world test examples
 - **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
 - **[Contributing](CONTRIBUTING.md)** - How to contribute to the project

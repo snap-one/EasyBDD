@@ -1766,6 +1766,343 @@ ACTION_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
+    # ==================== COMMAND EXECUTION ACTIONS ====================
+    "command.ssh": {
+        "category": "Command",
+        "label": "Execute SSH Command",
+        "description": "Execute a command on a remote server via SSH",
+        "icon": "🔐",
+        "parameters": {
+            "host": {
+                "type": "text",
+                "required": True,
+                "label": "Host",
+                "placeholder": "192.168.1.100",
+                "help": "SSH server hostname or IP address",
+            },
+            "command": {
+                "type": "textarea",
+                "required": True,
+                "label": "Command",
+                "placeholder": "ls -la /tmp",
+                "help": "Command to execute on remote server",
+            },
+            "username": {
+                "type": "text",
+                "required": False,
+                "label": "Username",
+                "placeholder": "admin",
+                "help": "SSH username (optional if using key-based auth)",
+            },
+            "password": {
+                "type": "text",
+                "required": False,
+                "label": "Password",
+                "placeholder": "password123",
+                "help": "SSH password (optional if using key-based auth)",
+            },
+            "key_file": {
+                "type": "file",
+                "required": False,
+                "label": "Private Key File",
+                "placeholder": "/path/to/id_rsa",
+                "help": "Path to SSH private key file",
+            },
+            "port": {
+                "type": "number",
+                "required": False,
+                "label": "Port",
+                "placeholder": "22",
+                "default": 22,
+                "help": "SSH port (default: 22)",
+            },
+            "timeout": {
+                "type": "number",
+                "required": False,
+                "label": "Timeout (seconds)",
+                "placeholder": "30",
+                "default": 30,
+                "help": "Command execution timeout",
+            },
+            "store_as": {
+                "type": "text",
+                "required": False,
+                "label": "Variable Name",
+                "placeholder": "ssh_output",
+                "help": "Store command output in variable",
+            },
+            "store_exit_code": {
+                "type": "text",
+                "required": False,
+                "label": "Exit Code Variable",
+                "placeholder": "ssh_exit_code",
+                "help": "Store command exit code in variable",
+            },
+        },
+    },
+    "command.shell": {
+        "category": "Command",
+        "label": "Execute Shell Command",
+        "description": "Execute a shell command locally (bash on Linux/Mac, cmd on Windows)",
+        "icon": "💻",
+        "parameters": {
+            "command": {
+                "type": "textarea",
+                "required": True,
+                "label": "Command",
+                "placeholder": "ls -la /tmp",
+                "help": "Command to execute",
+            },
+            "shell": {
+                "type": "select",
+                "required": False,
+                "label": "Shell Type",
+                "options": ["auto", "bash", "sh", "zsh", "cmd", "powershell"],
+                "default": "auto",
+                "help": "Shell to use (auto detects based on OS)",
+            },
+            "working_directory": {
+                "type": "text",
+                "required": False,
+                "label": "Working Directory",
+                "placeholder": "/tmp",
+                "help": "Directory to execute command in",
+            },
+            "timeout": {
+                "type": "number",
+                "required": False,
+                "label": "Timeout (seconds)",
+                "placeholder": "30",
+                "default": 30,
+                "help": "Command execution timeout",
+            },
+            "store_as": {
+                "type": "text",
+                "required": False,
+                "label": "Variable Name",
+                "placeholder": "command_output",
+                "help": "Store command output in variable",
+            },
+            "store_exit_code": {
+                "type": "text",
+                "required": False,
+                "label": "Exit Code Variable",
+                "placeholder": "exit_code",
+                "help": "Store command exit code in variable",
+            },
+            "fail_on_error": {
+                "type": "boolean",
+                "required": False,
+                "label": "Fail on Error",
+                "default": True,
+                "help": "If true, test fails if command returns non-zero exit code",
+            },
+        },
+    },
+    "command.bash": {
+        "category": "Command",
+        "label": "Execute Bash Command",
+        "description": "Execute a bash command locally",
+        "icon": "🐚",
+        "parameters": {
+            "command": {
+                "type": "textarea",
+                "required": True,
+                "label": "Command",
+                "placeholder": "echo 'Hello World'",
+                "help": "Bash command to execute",
+            },
+            "working_directory": {
+                "type": "text",
+                "required": False,
+                "label": "Working Directory",
+                "placeholder": "/tmp",
+                "help": "Directory to execute command in",
+            },
+            "timeout": {
+                "type": "number",
+                "required": False,
+                "label": "Timeout (seconds)",
+                "placeholder": "30",
+                "default": 30,
+                "help": "Command execution timeout",
+            },
+            "store_as": {
+                "type": "text",
+                "required": False,
+                "label": "Variable Name",
+                "placeholder": "bash_output",
+                "help": "Store command output in variable",
+            },
+            "store_exit_code": {
+                "type": "text",
+                "required": False,
+                "label": "Exit Code Variable",
+                "placeholder": "bash_exit_code",
+                "help": "Store command exit code in variable",
+            },
+            "fail_on_error": {
+                "type": "boolean",
+                "required": False,
+                "label": "Fail on Error",
+                "default": True,
+                "help": "If true, test fails if command returns non-zero exit code",
+            },
+        },
+    },
+    "command.powershell": {
+        "category": "Command",
+        "label": "Execute PowerShell Command",
+        "description": "Execute a PowerShell command (Windows)",
+        "icon": "⚡",
+        "parameters": {
+            "command": {
+                "type": "textarea",
+                "required": True,
+                "label": "Command",
+                "placeholder": "Get-Process | Select-Object Name, CPU",
+                "help": "PowerShell command to execute",
+            },
+            "working_directory": {
+                "type": "text",
+                "required": False,
+                "label": "Working Directory",
+                "placeholder": "C:\\temp",
+                "help": "Directory to execute command in",
+            },
+            "timeout": {
+                "type": "number",
+                "required": False,
+                "label": "Timeout (seconds)",
+                "placeholder": "30",
+                "default": 30,
+                "help": "Command execution timeout",
+            },
+            "store_as": {
+                "type": "text",
+                "required": False,
+                "label": "Variable Name",
+                "placeholder": "ps_output",
+                "help": "Store command output in variable",
+            },
+            "store_exit_code": {
+                "type": "text",
+                "required": False,
+                "label": "Exit Code Variable",
+                "placeholder": "ps_exit_code",
+                "help": "Store command exit code in variable",
+            },
+            "fail_on_error": {
+                "type": "boolean",
+                "required": False,
+                "label": "Fail on Error",
+                "default": True,
+                "help": "If true, test fails if command returns non-zero exit code",
+            },
+        },
+    },
+    "command.batch": {
+        "category": "Command",
+        "label": "Execute Batch Command",
+        "description": "Execute a Windows batch command (.bat/.cmd)",
+        "icon": "📜",
+        "parameters": {
+            "command": {
+                "type": "textarea",
+                "required": True,
+                "label": "Command",
+                "placeholder": "dir C:\\temp",
+                "help": "Batch command to execute",
+            },
+            "working_directory": {
+                "type": "text",
+                "required": False,
+                "label": "Working Directory",
+                "placeholder": "C:\\temp",
+                "help": "Directory to execute command in",
+            },
+            "timeout": {
+                "type": "number",
+                "required": False,
+                "label": "Timeout (seconds)",
+                "placeholder": "30",
+                "default": 30,
+                "help": "Command execution timeout",
+            },
+            "store_as": {
+                "type": "text",
+                "required": False,
+                "label": "Variable Name",
+                "placeholder": "batch_output",
+                "help": "Store command output in variable",
+            },
+            "store_exit_code": {
+                "type": "text",
+                "required": False,
+                "label": "Exit Code Variable",
+                "placeholder": "batch_exit_code",
+                "help": "Store command exit code in variable",
+            },
+            "fail_on_error": {
+                "type": "boolean",
+                "required": False,
+                "label": "Fail on Error",
+                "default": True,
+                "help": "If true, test fails if command returns non-zero exit code",
+            },
+        },
+    },
+    "command.python": {
+        "category": "Command",
+        "label": "Execute Python Code",
+        "description": "Execute Python code and capture output",
+        "icon": "🐍",
+        "parameters": {
+            "code": {
+                "type": "textarea",
+                "required": True,
+                "label": "Python Code",
+                "placeholder": "import os\nprint(os.getcwd())",
+                "help": "Python code to execute",
+            },
+            "working_directory": {
+                "type": "text",
+                "required": False,
+                "label": "Working Directory",
+                "placeholder": "/tmp",
+                "help": "Directory to execute code in",
+            },
+            "timeout": {
+                "type": "number",
+                "required": False,
+                "label": "Timeout (seconds)",
+                "placeholder": "30",
+                "default": 30,
+                "help": "Code execution timeout",
+            },
+            "store_as": {
+                "type": "text",
+                "required": False,
+                "label": "Variable Name",
+                "placeholder": "python_output",
+                "help": "Store code output in variable",
+            },
+            "store_result": {
+                "type": "text",
+                "required": False,
+                "label": "Result Variable",
+                "placeholder": "python_result",
+                "help": "Store Python return value (if code returns a value)",
+            },
+            "fail_on_error": {
+                "type": "boolean",
+                "required": False,
+                "label": "Fail on Error",
+                "default": True,
+                "help": "If true, test fails if code raises an exception",
+            },
+        },
+    },
 }
 
 
@@ -1793,6 +2130,15 @@ def get_actions_by_category() -> Dict[str, List[Dict[str, Any]]]:
 
 def get_action_definition(action_id: str) -> Dict[str, Any]:
     """Get definition for a specific action"""
+    # Handle legacy action ID mappings
+    legacy_mappings = {
+        "wait": "browser.wait",  # Map legacy "wait" to "browser.wait"
+    }
+
+    # Check if this is a legacy action ID and map it
+    if action_id in legacy_mappings:
+        action_id = legacy_mappings[action_id]
+
     return ACTION_DEFINITIONS.get(action_id, {})
 
 

@@ -1,0 +1,14 @@
+name: action_test_ssh
+description: ''
+tags: []
+steps:
+- command.ssh:
+    port: '22'
+    timeout: '30'
+    command: python --version
+    host: 192.168.100.100
+    username: jenkins
+    password:  # pragma: allowlist secret SnapAV704
+    store_as: jenkins_server_python_version
+    key_file: ''
+    store_exit_code: ''

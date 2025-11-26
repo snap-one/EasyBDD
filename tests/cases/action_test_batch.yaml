@@ -1,0 +1,11 @@
+name: action_test_batch
+description: ''
+tags: []
+steps:
+- command.batch:
+    timeout: '30'
+    fail_on_error: 'true'
+    command: ipconfig
+    working_directory: ''
+    store_as: ''
+    store_exit_code: ''

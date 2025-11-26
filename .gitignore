@@ -91,3 +91,7 @@ reports/*.webm
 # Test suites (keep structure)
 test_suites/*.json
 !test_suites/.gitkeep
+
+# Test Builder settings (contains sensitive webhook URLs)
+frontend/test_builder_settings.json
+test_builder_settings.json

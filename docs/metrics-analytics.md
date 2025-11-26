@@ -2,7 +2,59 @@
 
 The Easy BDD Framework includes comprehensive built-in metrics and analytics capabilities for tracking test execution trends, identifying issues, and gaining insights without requiring external tools like TestRail.
 
-## 📊 Features
+## 🎨 Web UI Metrics Dashboard (New!)
+
+**Access the comprehensive metrics dashboard directly from the Test Builder web application!**
+
+### Quick Access
+1. Start the Test Builder: `python frontend/start_builder.py`
+2. Navigate to **"Metrics & Analytics"** in the sidebar
+3. View comprehensive metrics in a beautiful, interactive dashboard
+
+### Dashboard Features
+
+#### 📊 Test Health & Maintenance
+- **Most Failing Tests** - Identify tests with highest failure rates that need attention
+- **Flaky Tests** - Automatically detect tests that pass and fail inconsistently
+- **Stale Tests** - Find tests that haven't been run in 30+ days
+- **Tests Without Steps** - Discover empty or incomplete tests
+
+#### 📦 Test Suite Statistics
+- **Total Suites** - Count of all test suites
+- **Suites With Tests** - Active suites containing tests
+- **Total Tests in Suites** - Aggregate count across all suites
+- **Most Active Suites** - Suites with the most tests
+
+#### 📈 Execution Trends
+- **Execution Time Trends** - Visual charts showing average execution time over last 30 days
+- **Failure Rate Trends** - Track pass/fail rates over time with daily breakdown
+- **Peak Execution Hours** - Identify when most tests run (scheduling insights)
+- **Slowest Tests** - Tests taking the longest time (optimization targets)
+
+#### 🎯 Test Coverage & Distribution
+- **Tests by Workspace** - Breakdown of tests across workspaces
+- **Tests by Action Type** - Distribution of browser, API, command, etc. actions
+- **Test Complexity** - Average steps per test, most/least complex tests
+- **Tag Distribution** - Most common tags across all tests
+
+#### ⚡ Quick Insights
+- **Execution Velocity** - Tests run today, this week, this month, average per day
+- **Success Streak** - Consecutive successful test runs
+- **Recent Failures** - Last 5 failed tests with quick navigation links
+
+#### 💾 Resource & Storage
+- **Result Files** - Count and size of JSON result files
+- **HTML Reports** - Count and size of generated HTML reports
+- **Old Results** - Results older than 90 days (cleanup suggestions)
+
+### Using the Dashboard
+
+1. **Refresh Data** - Click the "Refresh" button to reload all metrics
+2. **Navigate to Details** - Click on any test name or result to view details
+3. **Filter & Sort** - Use the interactive widgets to explore your test data
+4. **Export Insights** - Use the data to identify areas for improvement
+
+## 📊 CLI & API Features
 
 ### Historical Trending
 - Track pass rates over time (daily, weekly, monthly)
@@ -285,7 +337,7 @@ Integrate metrics into your CI/CD pipeline:
       --output metrics.html \
       --format html \
       --days 30
-    
+
 - name: Check Pass Rate
   run: |
     python -c "
@@ -355,11 +407,11 @@ metrics:
   enabled: true
   results_dir: "reports"
   s3_bucket: null  # Optional
-  
+
   # Thresholds
   flaky_threshold: 0.3  # 30% failure rate
   min_runs_for_flaky: 3  # Minimum runs to detect flaky
-  
+
   # Trends
   trend_threshold: 5.0  # % change for trend detection
   recent_days: 7  # Days considered "recent"
