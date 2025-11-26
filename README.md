@@ -20,12 +20,21 @@ A powerful, user-friendly YAML-based BDD testing framework that supports multipl
 - **🔑 Variable Management** - Postman-like environments, collections, and suite variables with scoped variable resolution
 - **📱 Workspace Organization** - Organize tests by workspace/folder with filtering
 - **🔄 Step Copy/Duplicate** - Quickly duplicate test steps
-- **📈 Test Results Dashboard** - View all test results with pagination and filtering
+- **📈 Test Results Dashboard** - Split-view results interface with compact cards, test name/build number extraction, and interactive preview panel
+- **📄 Test Report Pagination** - Paginated test reports (10 per page) for better navigation
+- **♻️ Reusable Test Steps** - Use any test as a step in other tests with `test.run` action for modular test composition
+- **🗑️ Safe Deletions** - Confirmation dialogs for deleting variables and steps
 
 **[📖 Full Test Builder Guide](docs/TEST_BUILDER.md)** | **Quick Start**: `python frontend/start_builder.py` → http://localhost:8000
 
 ### 🆕 Recent Features
 
+- **Enhanced Test Results View** - Split-view interface with compact result cards showing test name and build number (instead of full paths), interactive preview panel for detailed execution logs
+- **Test Report Pagination** - Paginated test reports showing 10 reports per page with navigation controls
+- **Reusable Test Steps** - Use any test as a reusable step in other tests with `test.run` action, enabling modular test composition and maintainability
+- **Improved Variable Management** - Enhanced variable creation with no duplicate empty variables, no prefilled placeholders, and confirmation dialogs for deletions
+- **Confirmation Dialogs** - Added confirmation prompts when deleting variables and test steps to prevent accidental deletions
+- **Navigation Improvements** - Reorganized navigation panel with Resources section above Workspaces for better accessibility
 - **Environment & Collection Variables** - Postman-like variable management with environments, collections/workspaces, and suite variables. Use `${env.variable_name}`, `${collection.variable_name}`, or `${suite.variable_name}` in your tests
 - **Test Suites** - Create test suites, add/remove tests, enable/disable tests, reorder execution, view execution history
 - **OvrC API Actions** - Full support for OvrC WebSocket (JSON-RPC) and HTTP API with automatic authentication
@@ -308,10 +317,10 @@ variables:
 
 steps:
   - browser.open:
-      url: "${base_url}/login"
+    url: "${base_url}/login"
   - browser.fill:
-      field: "username"
-      value: "${username}"
+    field: "username"
+    value: "${username}"
 ```
 
 ### 🔒 Security Best Practices
@@ -358,28 +367,28 @@ variables:
 
 steps:
   - browser.open:
-      url: "${base_url}/login"
+    url: "${base_url}/login"
 
   - browser.fill:
-      field: "#username"
-      value: "${username}"
+    field: "#username"
+    value: "${username}"
 
   - browser.fill:
-      field: "#password"
-      value: "${password}"
+    field: "#password"
+    value: "${password}"
 
   - browser.click:
-      role: button
-      name: "Log In"
+    role: button
+    name: "Log In"
 
   - browser.wait:
-      timeout: 2000
+    timeout: 2000
 
   - browser.screenshot:
-      name: "after-login"
+    name: "after-login"
 
   - test.assert:
-      expression: "'Dashboard' in page_content"
+    expression: "'Dashboard' in page_content"
 ```
 
 ### OvrC API Testing
@@ -428,11 +437,11 @@ See [Test Builder Guide](docs/TEST_BUILDER.md#test-suites) for detailed instruct
 
 ```yaml
 - browser.upload:
-    selector: 'iframe >> #file-input'
-    file_path: 'path/to/file.bin'
+  selector: 'iframe >> #file-input'
+  file_path: 'path/to/file.bin'
 
 - browser.click:
-    selector: 'iframe >> #upload-button'
+  selector: 'iframe >> #upload-button'
 ```
 
 ### Conditional Firmware Upgrade
@@ -446,14 +455,14 @@ steps:
   - condition: "current_version < target_version"
     then:
       - browser.upload:
-          selector: 'iframe >> #firmware'
-          file_path: 'Firmware/${firmware_file}'
+        selector: 'iframe >> #firmware'
+        file_path: 'Firmware/${firmware_file}'
 
       - browser.click:
-          selector: 'iframe >> #upgrade-button'
+        selector: 'iframe >> #upgrade-button'
     else:
       - browser.screenshot:
-          name: "already-updated"
+        name: "already-updated"
 ```
 
 ### AWS S3 Firmware Management
@@ -462,47 +471,47 @@ steps:
 setup:
   # Get list of all firmware files
   - aws.s3.list:
-      bucket_name: "my-bucket"
-      folder_prefix: "firmware/"
-      file_extension: ".bin"
-      download_dir: "Firmware"
-      store_as: "firmware_list"
+    bucket_name: "my-bucket"
+    folder_prefix: "firmware/"
+    file_extension: ".bin"
+    download_dir: "Firmware"
+    store_as: "firmware_list"
 
   # Get latest firmware
   - aws.s3.get_latest:
-      bucket_name: "my-bucket"
-      folder_prefix: "firmware/"
-      file_extension: ".bin"
-      download_dir: "Firmware"
-      store_filename_as: "latest_fw"
-      store_version_as: "latest_version"
+    bucket_name: "my-bucket"
+    folder_prefix: "firmware/"
+    file_extension: ".bin"
+    download_dir: "Firmware"
+    store_filename_as: "latest_fw"
+    store_version_as: "latest_version"
 
 steps:
   # Use downloaded firmware
   - browser.upload:
-      selector: "#firmware-input"
-      file_path: "Firmware/${latest_fw_basename}"
+    selector: "#firmware-input"
+    file_path: "Firmware/${latest_fw_basename}"
 ```
 
 ### API Testing with Assertions
 
 ```yaml
 - api.get:
-    url: "https://api.example.com/users/123"
-    headers:
-      Authorization: "Bearer ${api_token}"
+  url: "https://api.example.com/users/123"
+  headers:
+    Authorization: "Bearer ${api_token}"
 
 - test.assert:
-    expression: "last_status == 200"
-    message: "API should return 200"
+  expression: "last_status == 200"
+  message: "API should return 200"
 
 - test.assert:
-    expression: "last_json['id'] == 123"
-    message: "Should return correct user ID"
+  expression: "last_json['id'] == 123"
+  message: "Should return correct user ID"
 
 - test.assert:
-    expression: "'email' in last_json"
-    message: "Response should contain email field"
+  expression: "'email' in last_json"
+  message: "Response should contain email field"
 ```
 
 ## ⚙️ Configuration
@@ -599,8 +608,8 @@ python -m easy_bdd run --tags browser,api
 data_source: "test_data.csv"
 steps:
   - browser.fill:
-      field: "username"
-      value: "${data.username}"  # From CSV column
+    field: "username"
+    value: "${data.username}"  # From CSV column
 ```
 
 ## 🐛 Common Issues & Debugging
@@ -620,20 +629,20 @@ python -m easy_bdd run tests/cases/my_test.yaml --headed
 ```yaml
 # Add wait before clicking
 - browser.wait:
-    timeout: 2000
+  timeout: 2000
 
 # Use role-based selectors (more reliable)
 - browser.click:
-    role: button
-    name: "Submit"
+  role: button
+  name: "Submit"
 ```
 
 **Issue: File upload fails**
 ```yaml
 # For hidden inputs in iframes, use iframe syntax
 - browser.upload:
-    selector: 'iframe >> #file-input'
-    file_path: 'full/path/to/file.bin'
+  selector: 'iframe >> #file-input'
+  file_path: 'full/path/to/file.bin'
 ```
 
 ### AWS Issues
@@ -655,12 +664,12 @@ export AWS_DEFAULT_REGION="us-east-1"
 ```yaml
 # Increase timeout
 - browser.wait_for_element:
-    selector: "#slow-element"
-    timeout: 30000  # 30 seconds
+  selector: "#slow-element"
+  timeout: 30000  # 30 seconds
 
 # Add explicit waits
 - browser.wait:
-    timeout: 5000
+  timeout: 5000
 ```
 
 **Issue: Variables not substituting**

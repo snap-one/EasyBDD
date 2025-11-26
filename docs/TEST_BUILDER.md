@@ -33,7 +33,8 @@ Modern, professional web interface for visual test creation and management with 
 - **One-Click Execution** - Run tests directly from the web interface
 - **Real-Time Output** - Stream test execution logs via WebSocket
 - **CLI Integration** - Seamlessly integrates with existing CLI framework
-- **Result Tracking** - View test results and execution history
+- **Enhanced Result Tracking** - Split-view results interface with compact cards, test name/build number extraction, and interactive preview panel
+- **Test Report Pagination** - Paginated test reports (10 per page) for better navigation
 - **Report Generation** - Generate beautiful HTML reports with simple and debug logs
 
 ### Developer Experience
@@ -42,6 +43,8 @@ Modern, professional web interface for visual test creation and management with 
 - **Auto-Complete** - Smart suggestions for parameters and values
 - **Help Text** - Built-in documentation for every action and parameter
 - **Action Templates** - Pre-filled templates for all actions with required/optional parameters
+- **Improved Variable Management** - Enhanced variable creation with no duplicate empty variables, no prefilled placeholders
+- **Enhanced Navigation** - Reorganized navigation panel with Resources section above Workspaces
 
 ## 🚀 Quick Start
 
@@ -94,10 +97,20 @@ Navigate to: **http://localhost:8000**
    - Click the edit icon on any step
    - Modify parameters in the form
    - Click "Update Step" to save changes
+   - Confirmation dialog appears when deleting steps
 
 6. **Copy/Duplicate Steps**
    - Click the copy icon on any step
    - The step is duplicated immediately after the original
+
+7. **Use Tests as Reusable Steps**
+   - When adding a step, select "Test" category
+   - Choose "Run Test" action
+   - Select an existing test file from the dropdown
+   - Configure parameters to pass to the test
+   - Specify variables to extract from the test execution
+   - The selected test will run as a step in your current test
+   - This enables modular test composition and code reuse
 
 7. **Reorder Steps** (if needed)
    - Use arrow buttons to move steps up/down
@@ -297,15 +310,35 @@ Generate beautiful HTML reports from test results.
 
 #### Viewing Test Results
 
+The Test Results view features a modern split-view interface for efficient result browsing:
+
 1. **Go to "Test Results"** tab (or click "View Results" after test execution)
-2. **Browse Results**:
-   - Filter by workspace
-   - Search by test name
-   - View paginated results
-3. **View Details**:
-   - Click on a result to view details
-   - See step-by-step execution
-   - View simple and debug logs
+2. **Browse Results** (Left Panel):
+   - Filter by workspace using the dropdown
+   - Results are displayed in compact cards showing:
+     - Test name (extracted from path, not full path)
+     - Build number (extracted from filename)
+     - Status badge (PASSED, FAILED, etc.)
+     - Short date format (e.g., "2h ago", "3d ago")
+   - Results are grouped by workspace
+   - Click any result card to view details in the preview panel
+3. **View Details** (Right Panel):
+   - Interactive preview panel shows full execution details
+   - Execution information (started, finished, return code, output lines)
+   - Command used for execution
+   - Full execution output with syntax highlighting
+   - Action buttons: Generate Report, Download, Delete
+4. **Pagination**:
+   - Navigate through multiple pages of results
+   - Shows current page and total pages
+
+#### Test Reports Pagination
+
+When viewing test reports for a specific test:
+- Reports are paginated (10 per page)
+- Navigate using Previous/Next buttons
+- Shows "Showing X to Y of Z reports" information
+- Only displays pagination controls when there are more than 10 reports
 
 #### Generating HTML Reports
 
@@ -630,7 +663,7 @@ const ws = new WebSocket('ws://localhost:8000/ws');
 
 ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
-    
+
     if (data.type === 'test_output') {
         console.log(data.line);
     } else if (data.type === 'test_completed') {

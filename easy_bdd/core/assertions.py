@@ -11,14 +11,13 @@ Author: Easy BDD Framework
 Date: November 22, 2025
 """
 
-import re
 import ast
-import operator
 import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+import operator
+import re
 from dataclasses import dataclass
-from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional, Union
 
 
 @dataclass
@@ -238,7 +237,7 @@ class AssertionEngine:
 
             # Only allow safe functions
             if func not in self.SAFE_FUNCTIONS.values():
-                raise ValueError(f"Function calls are restricted for security")
+                raise ValueError("Function calls are restricted for security")
 
             return func(*args, **kwargs)
 
@@ -389,7 +388,7 @@ class ResponseValidator:
             expected_status = expectations["status"]
         elif "status_code" in expectations:
             expected_status = expectations["status_code"]
-        
+
         if expected_status is not None:
             actual_status = response.get("status") or response.get("status_code")
             if actual_status != expected_status:

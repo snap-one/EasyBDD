@@ -2,12 +2,12 @@
 HTML Report Generator for Easy BDD Tests
 """
 
-from pathlib import Path
-from datetime import datetime
-from typing import List, Dict, Any
+import html
 import json
 import re
-import html
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
 
 
 class HTMLReporter:
@@ -22,36 +22,47 @@ class HTMLReporter:
         steps = []
         if not execution_log:
             return steps
-        
-        lines = execution_log.split('\n')
+
+        lines = execution_log.split("\n")
         current_step = None
-        
+
         # Patterns to match step information - each tuple is (pattern, step_num_group_index, action_group_index)
         step_patterns = [
-            (r'Step\s+(\d+)/(\d+):\s+(.+)', 1, 3),  # "Step 1/5: action" - group 1 is step num, group 3 is action
-            (r'Step\s+(\d+):\s+(.+)', 1, 2),  # "Step 1: action" - group 1 is step num, group 2 is action
-            (r'→\s+(.+)', None, 1),  # "→ action" - group 1 is action, no step num
+            (
+                r"Step\s+(\d+)/(\d+):\s+(.+)",
+                1,
+                3,
+            ),  # "Step 1/5: action" - group 1 is step num, group 3 is action
+            (
+                r"Step\s+(\d+):\s+(.+)",
+                1,
+                2,
+            ),  # "Step 1: action" - group 1 is step num, group 2 is action
+            (r"→\s+(.+)", None, 1),  # "→ action" - group 1 is action, no step num
         ]
-        
+
         for i, line in enumerate(lines):
             line = line.strip()
             if not line:
                 continue
-            
+
             # Check for step start
             for pattern_info in step_patterns:
                 pattern, step_num_group, action_group = pattern_info
                 match = re.match(pattern, line)
                 if match:
                     # Extract step number
-                    if step_num_group is not None and len(match.groups()) >= step_num_group:
+                    if (
+                        step_num_group is not None
+                        and len(match.groups()) >= step_num_group
+                    ):
                         try:
                             step_num = int(match.group(step_num_group))
                         except (ValueError, IndexError):
                             step_num = len(steps) + 1
                     else:
                         step_num = len(steps) + 1
-                    
+
                     # Extract action
                     if action_group is not None and len(match.groups()) >= action_group:
                         try:
@@ -60,131 +71,149 @@ class HTMLReporter:
                             action = line
                     else:
                         action = line
-                    
+
                     # Close previous step if exists
                     if current_step:
                         steps.append(current_step)
-                    
+
                     # Start new step
                     current_step = {
-                        'number': step_num,
-                        'action': action,
-                        'status': 'pending',
-                        'output': []
+                        "number": step_num,
+                        "action": action,
+                        "status": "pending",
+                        "output": [],
                     }
                     break
-            
+
             # Check for step completion indicators
             if current_step:
-                if '✅' in line or 'completed successfully' in line.lower() or 'PASSED' in line:
-                    current_step['status'] = 'completed'
+                if (
+                    "✅" in line
+                    or "completed successfully" in line.lower()
+                    or "PASSED" in line
+                ):
+                    current_step["status"] = "completed"
                     steps.append(current_step)
                     current_step = None
-                elif '❌' in line or 'FAILED' in line or 'failed' in line.lower():
-                    current_step['status'] = 'failed'
-                    current_step['output'].append(line)
+                elif "❌" in line or "FAILED" in line or "failed" in line.lower():
+                    current_step["status"] = "failed"
+                    current_step["output"].append(line)
                     steps.append(current_step)
                     current_step = None
                 else:
                     # Add to step output
-                    current_step['output'].append(line)
-        
+                    current_step["output"].append(line)
+
         # Add final step if exists
         if current_step:
             steps.append(current_step)
-        
+
         return steps
 
     def _parse_logs_into_sections(self, execution_log: str) -> tuple:
         """Parse execution log into simple and debug sections"""
         if not execution_log:
             return ("", "")
-        
-        lines = execution_log.split('\n')
+
+        lines = execution_log.split("\n")
         simple_lines = []
         debug_lines = []
-        
+
         # Patterns that indicate verbose/debug content (should be excluded from simple log)
         verbose_patterns = [
-            r'^\s+📋',  # Request/Response Headers
-            r'^\s+📤',  # Request Body
-            r'^\s+📡',  # Status
-            r'^\s+📦',  # Response Body
-            r'^\s+🔑',  # Token/auth info
-            r'^\s+🔄',  # Retry/auth refresh
-            r'^\s+💾',  # Storage info
-            r'^\s+⚠️',  # Warnings
-            r'^\s+🔍',  # Debug/search
-            r'^\s+\{',  # JSON objects (indented)
-            r'^\s+\[',  # JSON arrays (indented)
-            r'Response Headers:',
-            r'Request Headers:',
-            r'Query Params:',
-            r'Request Body \(JSON\):',
-            r'Response Body \(JSON\):',
-            r'Response Body:',
-            r'Request Body:',
+            r"^\s+📋",  # Request/Response Headers
+            r"^\s+📤",  # Request Body
+            r"^\s+📡",  # Status
+            r"^\s+📦",  # Response Body
+            r"^\s+🔑",  # Token/auth info
+            r"^\s+🔄",  # Retry/auth refresh
+            r"^\s+💾",  # Storage info
+            r"^\s+⚠️",  # Warnings
+            r"^\s+🔍",  # Debug/search
+            r"^\s+\{",  # JSON objects (indented)
+            r"^\s+\[",  # JSON arrays (indented)
+            r"Response Headers:",
+            r"Request Headers:",
+            r"Query Params:",
+            r"Request Body \(JSON\):",
+            r"Response Body \(JSON\):",
+            r"Response Body:",
+            r"Request Body:",
         ]
-        
+
         # Patterns for simple log (step names, status, minimal info)
         simple_patterns = [
-            r'^Step\s+\d+/\d+:',  # "Step 1/5:"
-            r'^Step\s+\d+:',  # "Step 1:"
-            r'^→\s+',  # "→"
-            r'^Executing test',
-            r'^Test Results:',
-            r'^Execution time:',
-            r'^Generated \d+',
-            r'^Running \d+',
-            r'^===',
-            r'^✅|^❌|^PASSED|^FAILED',
-            r'^.*completed successfully',
-            r'^.*STEP.*FAILED',
+            r"^Step\s+\d+/\d+:",  # "Step 1/5:"
+            r"^Step\s+\d+:",  # "Step 1:"
+            r"^→\s+",  # "→"
+            r"^Executing test",
+            r"^Test Results:",
+            r"^Execution time:",
+            r"^Generated \d+",
+            r"^Running \d+",
+            r"^===",
+            r"^✅|^❌|^PASSED|^FAILED",
+            r"^.*completed successfully",
+            r"^.*STEP.*FAILED",
         ]
-        
+
         i = 0
         while i < len(lines):
             line = lines[i]
             line_stripped = line.strip()
-            
+
             # Skip empty lines in simple log, but keep them in debug log
             if not line_stripped:
                 debug_lines.append(line)
                 i += 1
                 continue
-            
+
             # Check if line is verbose/debug content
-            is_verbose = any(re.search(pattern, line, re.IGNORECASE) for pattern in verbose_patterns)
-            
+            is_verbose = any(
+                re.search(pattern, line, re.IGNORECASE) for pattern in verbose_patterns
+            )
+
             # Check if line is a simple/status line
-            is_simple_line = any(re.search(pattern, line, re.IGNORECASE) for pattern in simple_patterns)
-            
+            is_simple_line = any(
+                re.search(pattern, line, re.IGNORECASE) for pattern in simple_patterns
+            )
+
             # Always add to debug log
             debug_lines.append(line)
-            
+
             # Add to simple log only if it's a simple line and not verbose
             if is_simple_line and not is_verbose:
                 # For API lines, extract just the basic info
-                if 'API' in line and ('GET' in line or 'POST' in line or 'PUT' in line or 'PATCH' in line or 'DELETE' in line):
+                if "API" in line and (
+                    "GET" in line
+                    or "POST" in line
+                    or "PUT" in line
+                    or "PATCH" in line
+                    or "DELETE" in line
+                ):
                     # Extract just "API GET: url" without device info
-                    match = re.match(r'(.+?API\s+(?:GET|POST|PUT|PATCH|DELETE):\s+[^\s(]+)', line)
+                    match = re.match(
+                        r"(.+?API\s+(?:GET|POST|PUT|PATCH|DELETE):\s+[^\s(]+)", line
+                    )
                     if match:
                         simple_lines.append(match.group(1).strip())
                     else:
                         # Fallback: just the API method and URL part
-                        parts = line.split('(')
+                        parts = line.split("(")
                         simple_lines.append(parts[0].strip())
                 else:
                     simple_lines.append(line)
             elif is_simple_line and is_verbose:
                 # It's a simple line but has verbose content - extract just the key part
-                if 'API' in line:
-                    match = re.match(r'(.+?API\s+(?:GET|POST|PUT|PATCH|DELETE):\s+[^\s(]+)', line)
+                if "API" in line:
+                    match = re.match(
+                        r"(.+?API\s+(?:GET|POST|PUT|PATCH|DELETE):\s+[^\s(]+)", line
+                    )
                     if match:
                         simple_lines.append(match.group(1).strip())
-            
+
             i += 1
-        
+
         return ("\n".join(simple_lines), "\n".join(debug_lines))
 
     def generate_report(
@@ -213,7 +242,7 @@ class HTMLReporter:
             padding: 0;
             box-sizing: border-box;
         }}
-        
+
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             background: #0f172a;
@@ -221,12 +250,12 @@ class HTMLReporter:
             line-height: 1.6;
             padding: 20px;
         }}
-        
+
         .container {{
             max-width: 1400px;
             margin: 0 auto;
         }}
-        
+
         .header {{
             background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
             color: #f1f5f9;
@@ -236,25 +265,25 @@ class HTMLReporter:
             margin-bottom: 30px;
             border: 1px solid #334155;
         }}
-        
+
         .header h1 {{
             font-size: 32px;
             font-weight: 600;
             margin-bottom: 8px;
         }}
-        
+
         .header .subtitle {{
             font-size: 14px;
             opacity: 0.9;
         }}
-        
+
         .stats-grid {{
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 20px;
             margin-bottom: 30px;
         }}
-        
+
         .stat-card {{
             background: #1e293b;
             padding: 24px;
@@ -265,29 +294,29 @@ class HTMLReporter:
             transition: transform 0.2s ease, box-shadow 0.2s ease;
             border: 1px solid #334155;
         }}
-        
+
         .stat-card:hover {{
             transform: translateY(-2px);
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
             background: #334155;
         }}
-        
+
         .stat-card.success {{
             border-top-color: #10b981;
         }}
-        
+
         .stat-card.failure {{
             border-top-color: #ef4444;
         }}
-        
+
         .stat-card.rate {{
             border-top-color: #3b82f6;
         }}
-        
+
         .stat-card.duration {{
             border-top-color: #f59e0b;
         }}
-        
+
         .stat-card .label {{
             color: #94a3b8;
             font-size: 12px;
@@ -296,29 +325,29 @@ class HTMLReporter:
             margin-bottom: 8px;
             font-weight: 600;
         }}
-        
+
         .stat-card .value {{
             font-size: 32px;
             font-weight: 700;
             color: #f1f5f9;
         }}
-        
+
         .stat-card.success .value {{
             color: #10b981;
         }}
-        
+
         .stat-card.failure .value {{
             color: #ef4444;
         }}
-        
+
         .stat-card.rate .value {{
             color: #3b82f6;
         }}
-        
+
         .stat-card.duration .value {{
             color: #f59e0b;
         }}
-        
+
         .progress-bar {{
             background: #1e293b;
             padding: 24px;
@@ -327,14 +356,14 @@ class HTMLReporter:
             margin-bottom: 30px;
             border: 1px solid #334155;
         }}
-        
+
         .progress-bar h3 {{
             color: #f1f5f9;
             margin-bottom: 16px;
             font-size: 16px;
             font-weight: 600;
         }}
-        
+
         .progress-track {{
             background: #334155;
             height: 32px;
@@ -342,7 +371,7 @@ class HTMLReporter:
             overflow: hidden;
             position: relative;
         }}
-        
+
         .progress-fill {{
             background: linear-gradient(90deg, #10b981 0%, #059669 100%);
             height: 100%;
@@ -354,7 +383,7 @@ class HTMLReporter:
             font-size: 13px;
             transition: width 1s ease;
         }}
-        
+
         .tests-section {{
             background: #1e293b;
             padding: 30px;
@@ -363,7 +392,7 @@ class HTMLReporter:
             margin-bottom: 30px;
             border: 1px solid #334155;
         }}
-        
+
         .tests-section h2 {{
             color: #f1f5f9;
             margin-bottom: 24px;
@@ -372,7 +401,7 @@ class HTMLReporter:
             font-size: 20px;
             font-weight: 600;
         }}
-        
+
         .test-item {{
             padding: 24px;
             border-left: 4px solid #334155;
@@ -382,32 +411,32 @@ class HTMLReporter:
             transition: all 0.2s ease;
             border: 1px solid #334155;
         }}
-        
+
         .test-item:hover {{
             background: #1e293b;
         }}
-        
+
         .test-item.passed {{
             border-left-color: #10b981;
         }}
-        
+
         .test-item.failed {{
             border-left-color: #ef4444;
         }}
-        
+
         .test-header {{
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 12px;
         }}
-        
+
         .test-name {{
             font-size: 18px;
             font-weight: 600;
             color: #f1f5f9;
         }}
-        
+
         .test-status {{
             padding: 6px 14px;
             border-radius: 6px;
@@ -416,23 +445,23 @@ class HTMLReporter:
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }}
-        
+
         .test-status.passed {{
             background: #d1fae5;
             color: #065f46;
         }}
-        
+
         .test-status.failed {{
             background: #fee2e2;
             color: #991b1b;
         }}
-        
+
         .test-description {{
             color: #94a3b8;
             font-size: 14px;
             margin-bottom: 12px;
         }}
-        
+
         .test-meta {{
             display: flex;
             gap: 20px;
@@ -440,13 +469,13 @@ class HTMLReporter:
             color: #64748b;
             margin-bottom: 16px;
         }}
-        
+
         .test-meta span {{
             display: flex;
             align-items: center;
             gap: 6px;
         }}
-        
+
         .tag {{
             display: inline-block;
             padding: 4px 10px;
@@ -457,12 +486,12 @@ class HTMLReporter:
             margin-right: 6px;
             font-weight: 500;
         }}
-        
+
         .steps-section {{
             margin-top: 20px;
             margin-bottom: 20px;
         }}
-        
+
         .steps-title {{
             font-size: 14px;
             font-weight: 600;
@@ -471,13 +500,13 @@ class HTMLReporter:
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }}
-        
+
         .steps-list {{
             display: flex;
             flex-direction: column;
             gap: 8px;
         }}
-        
+
         .step-item {{
             display: flex;
             align-items: flex-start;
@@ -488,13 +517,13 @@ class HTMLReporter:
             border: 1px solid #334155;
             transition: all 0.2s ease;
         }}
-        
+
         .step-item:hover {{
             border-color: #475569;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
             background: #334155;
         }}
-        
+
         .step-icon {{
             width: 24px;
             height: 24px;
@@ -505,38 +534,38 @@ class HTMLReporter:
             flex-shrink: 0;
             font-size: 12px;
         }}
-        
+
         .step-item.pending .step-icon {{
             background: #334155;
             color: #64748b;
         }}
-        
+
         .step-item.completed .step-icon {{
             background: #065f46;
             color: #10b981;
         }}
-        
+
         .step-item.failed .step-icon {{
             background: #7f1d1d;
             color: #ef4444;
         }}
-        
+
         .step-content {{
             flex: 1;
         }}
-        
+
         .step-action {{
             font-size: 14px;
             font-weight: 500;
             color: #f1f5f9;
             margin-bottom: 4px;
         }}
-        
+
         .step-description {{
             font-size: 12px;
             color: #94a3b8;
         }}
-        
+
         .error-message {{
             margin-top: 16px;
             padding: 16px;
@@ -549,18 +578,18 @@ class HTMLReporter:
             white-space: pre-wrap;
             line-height: 1.5;
         }}
-        
+
         .log-section {{
             margin-top: 20px;
         }}
-        
+
         .log-tabs {{
             display: flex;
             gap: 8px;
             margin-bottom: 12px;
             border-bottom: 2px solid #334155;
         }}
-        
+
         .log-tab {{
             background: transparent;
             color: #94a3b8;
@@ -574,18 +603,18 @@ class HTMLReporter:
             border-bottom: 2px solid transparent;
             margin-bottom: -2px;
         }}
-        
+
         .log-tab:hover {{
             color: #f1f5f9;
             background: #1e293b;
         }}
-        
+
         .log-tab.active {{
             color: #3b82f6;
             border-bottom-color: #3b82f6;
             background: #1e293b;
         }}
-        
+
         .log-content {{
             display: none;
             padding: 16px;
@@ -599,11 +628,11 @@ class HTMLReporter:
             white-space: pre-wrap;
             line-height: 1.6;
         }}
-        
+
         .log-content.active {{
             display: block;
         }}
-        
+
         .log-toggle {{
             background: #3b82f6;
             color: white;
@@ -619,11 +648,11 @@ class HTMLReporter:
             gap: 6px;
             margin-bottom: 12px;
         }}
-        
+
         .log-toggle:hover {{
             background: #2563eb;
         }}
-        
+
         .footer {{
             text-align: center;
             color: #94a3b8;
@@ -631,17 +660,17 @@ class HTMLReporter:
             padding: 24px;
             font-size: 13px;
         }}
-        
+
         @media print {{
             body {{
                 background: white;
                 padding: 0;
             }}
-            
+
             .test-item {{
                 page-break-inside: avoid;
             }}
-            
+
             .log-content {{
                 max-height: none;
             }}
@@ -654,7 +683,7 @@ class HTMLReporter:
             <h1>🧪 Easy BDD Test Report</h1>
             <div class="subtitle">Generated on {timestamp}</div>
         </div>
-        
+
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="label">Total Tests</div>
@@ -677,7 +706,7 @@ class HTMLReporter:
                 <div class="value">{execution_time:.1f}s</div>
             </div>
         </div>
-        
+
         <div class="progress-bar">
             <h3>Test Execution Progress</h3>
             <div class="progress-track">
@@ -686,7 +715,7 @@ class HTMLReporter:
                 </div>
             </div>
         </div>
-        
+
         <div class="tests-section">
             <h2>📋 Test Results Details</h2>
 """
@@ -702,10 +731,14 @@ class HTMLReporter:
             file_path = test.get("file_path", "")
             execution_log = test.get("execution_log", "")
 
-            status_class = "passed" if status == "passed" or status == "completed" else "failed"
+            status_class = (
+                "passed" if status == "passed" or status == "completed" else "failed"
+            )
             status_emoji = "✅" if status == "passed" or status == "completed" else "❌"
 
-            tags_html = "".join([f'<span class="tag">{html.escape(str(tag))}</span>' for tag in tags])
+            tags_html = "".join(
+                [f'<span class="tag">{html.escape(str(tag))}</span>' for tag in tags]
+            )
 
             html_content += f"""
             <div class="test-item {status_class}">
@@ -730,17 +763,13 @@ class HTMLReporter:
                     <div class="steps-list">
 """
                 for step in steps:
-                    step_status = step.get('status', 'pending')
-                    step_num = step.get('number', 0)
-                    step_action = html.escape(step.get('action', 'Unknown step'))
-                    
-                    icon_map = {
-                        'pending': '○',
-                        'completed': '✓',
-                        'failed': '✗'
-                    }
-                    icon = icon_map.get(step_status, '○')
-                    
+                    step_status = step.get("status", "pending")
+                    step_num = step.get("number", 0)
+                    step_action = html.escape(step.get("action", "Unknown step"))
+
+                    icon_map = {"pending": "○", "completed": "✓", "failed": "✗"}
+                    icon = icon_map.get(step_status, "○")
+
                     html_content += f"""
                         <div class="step-item {step_status}">
                             <div class="step-icon">{icon}</div>
@@ -872,30 +901,30 @@ class HTMLReporter:
 
         html_content += """
         </div>
-        
+
         <div class="footer">
             <p>Easy BDD Framework - Making BDD Testing Simple</p>
         </div>
     </div>
-    
+
     <script>
         // Animate progress bar on load
         window.addEventListener('load', () => {
             const progressFill = document.querySelector('.progress-fill');
             if (progressFill) {
-                const width = progressFill.style.width;
-                progressFill.style.width = '0%';
-                setTimeout(() => {
-                    progressFill.style.width = width;
-                }, 100);
+            const width = progressFill.style.width;
+            progressFill.style.width = '0%';
+            setTimeout(() => {
+                progressFill.style.width = width;
+            }, 100);
             }
         });
-        
+
         // Toggle log section visibility
         function toggleLogSection(button) {
             const tabsContainer = button.nextElementSibling;
             const span = button.querySelector('span:last-child');
-            
+
             if (tabsContainer.style.display === 'none') {
                 tabsContainer.style.display = 'block';
                 span.textContent = 'Hide Execution Logs';
@@ -904,26 +933,26 @@ class HTMLReporter:
                 span.textContent = 'Show Execution Logs';
             }
         }
-        
+
         // Switch between Simple and Debug log tabs
         function switchLogTab(button, logId, logType) {
             // Get the log section container
             const logSection = button.closest('.log-section');
             const tabs = logSection.querySelectorAll('.log-tab');
-            
+
             // Remove active class from all tabs
             tabs.forEach(tab => tab.classList.remove('active'));
-            
+
             // Add active class to clicked tab
             button.classList.add('active');
-            
+
             // Hide all log contents
             const simpleContent = document.getElementById(`log-simple-${logId}`);
             const debugContent = document.getElementById(`log-debug-${logId}`);
-            
+
             if (simpleContent) simpleContent.classList.remove('active');
             if (debugContent) debugContent.classList.remove('active');
-            
+
             // Show the selected content
             if (logType === 'simple' && simpleContent) {
                 simpleContent.classList.add('active');

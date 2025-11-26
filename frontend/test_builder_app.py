@@ -37,8 +37,17 @@ from pydantic import BaseModel, Field
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Try to import markdown for documentation rendering
+try:
+    import markdown
+
+    MARKDOWN_AVAILABLE = True
+except ImportError:
+    MARKDOWN_AVAILABLE = False
+
 # Import action definitions from local file (no framework dependencies)
-from action_definitions import (
+# E402: module level import not at top of file - required for sys.path setup
+from action_definitions import (  # noqa: E402
     ACTION_DEFINITIONS,
     get_action_definition,
     get_actions_by_category,
@@ -339,6 +348,238 @@ async def root():
     if html_path.exists():
         return FileResponse(html_path)
     return HTMLResponse("<h1>Test Builder</h1><p>Frontend not found</p>")
+
+
+@app.get("/api/docs/{doc_name}", response_class=HTMLResponse)
+async def get_documentation(doc_name: str):
+    """
+    Serve local markdown documentation files.
+    Returns HTML-rendered markdown or raw markdown if markdown library is not available.
+    """
+    # Map document names to file paths
+    base_dir = Path(__file__).parent.parent  # Go up from frontend/ to project root
+
+    # Debug: log the request
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Documentation request for: {doc_name}")
+    logger.info(f"Base directory: {base_dir}")
+    logger.info(f"Base directory exists: {base_dir.exists()}")
+    doc_map = {
+        "README": base_dir / "README.md",
+        "setup": base_dir / "docs" / "setup.md",
+        "syntax": base_dir / "docs" / "syntax.md",
+        "examples": base_dir / "docs" / "examples.md",
+        "TEST_BUILDER": base_dir / "docs" / "TEST_BUILDER.md",
+        "TEST_BUILDER_QUICKREF": base_dir / "docs" / "TEST_BUILDER_QUICKREF.md",
+        "actions": base_dir / "docs" / "actions.md",
+        "assertions": base_dir / "docs" / "assertions.md",
+        "conditional-steps": base_dir / "docs" / "conditional-steps.md",
+        "data-driven": base_dir / "docs" / "data-driven.md",
+        "soft-assertions": base_dir / "docs" / "soft-assertions.md",
+        "aws-s3-integration": base_dir / "docs" / "aws-s3-integration.md",
+        "jsonrpc-websocket": base_dir / "docs" / "jsonrpc-websocket.md",
+        "api-authentication": base_dir / "docs" / "api-authentication.md",
+        "datalake-logger": base_dir / "docs" / "datalake-logger.md",
+        "advanced": base_dir / "docs" / "advanced.md",
+        "CENTRALIZED_VARIABLES": base_dir / "docs" / "CENTRALIZED_VARIABLES.md",
+        "WORKSPACE_MANAGEMENT": base_dir / "docs" / "WORKSPACE_MANAGEMENT.md",
+        "troubleshooting": base_dir / "docs" / "troubleshooting.md",
+        "LIVE_RECORDER": base_dir / "docs" / "LIVE_RECORDER.md",
+        "PLAYWRIGHT_RECORDING": base_dir / "docs" / "PLAYWRIGHT_RECORDING.md",
+    }
+
+    file_path = doc_map.get(doc_name)
+    if not file_path:
+        # Default to README if not found
+        file_path = base_dir / "README.md"
+
+    logger.info(f"Resolved file path: {file_path}")
+    logger.info(f"File exists: {file_path.exists()}")
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Documentation file not found: {doc_name} (path: {file_path})",
+        )
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Convert markdown to HTML if markdown library is available
+        if MARKDOWN_AVAILABLE:
+            # Use markdown extensions for better rendering
+            md = markdown.Markdown(extensions=["fenced_code", "tables", "toc"])
+            html_content = md.convert(content)
+
+            # Wrap in a styled HTML document with dark mode
+            html_doc = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{doc_name} - Documentation</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #f1f5f9;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: #0f172a;
+            min-height: 100vh;
+        }}
+        h1, h2, h3, h4, h5, h6 {{
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+            color: #f1f5f9;
+        }}
+        h1 {{
+            border-bottom: 2px solid #334155;
+            padding-bottom: 0.3em;
+            color: #3b82f6;
+        }}
+        h2 {{
+            border-bottom: 1px solid #334155;
+            padding-bottom: 0.3em;
+            color: #60a5fa;
+        }}
+        h3 {{
+            color: #93c5fd;
+        }}
+        code {{
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-size: 85%;
+            border: 1px solid #334155;
+        }}
+        pre {{
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 1em;
+            border-radius: 6px;
+            overflow-x: auto;
+            border: 1px solid #334155;
+        }}
+        pre code {{
+            background: none;
+            padding: 0;
+            border: none;
+        }}
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }}
+        table th, table td {{
+            border: 1px solid #334155;
+            padding: 0.6em 1em;
+        }}
+        table th {{
+            background: #1e293b;
+            font-weight: 600;
+            color: #f1f5f9;
+        }}
+        table td {{
+            background: #0f172a;
+            color: #e2e8f0;
+        }}
+        blockquote {{
+            border-left: 4px solid #3b82f6;
+            padding-left: 1em;
+            color: #94a3b8;
+            margin: 1em 0;
+            background: #1e293b;
+            padding: 1em;
+            border-radius: 4px;
+        }}
+        a {{
+            color: #60a5fa;
+            text-decoration: none;
+        }}
+        a:hover {{
+            color: #93c5fd;
+            text-decoration: underline;
+        }}
+        ul, ol {{
+            margin: 1em 0;
+            padding-left: 2em;
+            color: #e2e8f0;
+        }}
+        li {{
+            margin: 0.5em 0;
+        }}
+        p {{
+            color: #e2e8f0;
+            margin: 1em 0;
+        }}
+        img {{
+            max-width: 100%;
+            height: auto;
+            border-radius: 4px;
+        }}
+        strong {{
+            color: #f1f5f9;
+            font-weight: 600;
+        }}
+        em {{
+            color: #cbd5e1;
+        }}
+        hr {{
+            border: none;
+            border-top: 1px solid #334155;
+            margin: 2em 0;
+        }}
+    </style>
+</head>
+<body>
+{html_content}
+</body>
+</html>"""
+            return HTMLResponse(content=html_doc)
+        else:
+            # Fallback: return raw markdown with dark mode styling
+            html_doc = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{doc_name} - Documentation</title>
+    <style>
+        body {{
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            white-space: pre-wrap;
+            padding: 2rem;
+            background: #0f172a;
+            color: #e2e8f0;
+            line-height: 1.6;
+        }}
+    </style>
+</head>
+<body>{content}</body>
+</html>"""
+            return HTMLResponse(content=html_doc)
+    except Exception as e:
+        import traceback
+
+        error_detail = (
+            f"Error reading documentation: {str(e)}\n{traceback.format_exc()}"
+        )
+        print(f"[ERROR] {error_detail}")
+        raise HTTPException(
+            status_code=500, detail=f"Error reading documentation: {str(e)}"
+        )
 
 
 @app.get("/api/actions")
@@ -926,7 +1167,7 @@ async def execute_test(
     print(f"[API] Adding background task for test execution: {test_id}")
     print(f"[API] Execution record status: {running_tests[test_id].get('status')}")
     background_tasks.add_task(run_test)
-    print(f"[API] Background task added successfully")
+    print("[API] Background task added successfully")
     print(f"[API] running_tests now contains: {list(running_tests.keys())}")
 
     return {
@@ -1788,7 +2029,7 @@ def _save_suite(suite: TestSuite) -> bool:
     """Save a test suite to disk"""
     try:
         suite_file = _get_suite_file_path(suite.id)
-        suite_dict = suite.dict()
+        suite_dict = suite.model_dump()
         suite_dict["modified"] = datetime.now().isoformat()
         if not suite_dict.get("created"):
             suite_dict["created"] = datetime.now().isoformat()
@@ -1829,7 +2070,7 @@ async def list_test_suites(
     # Sort by modified date (newest first)
     suites.sort(key=lambda s: s.modified or s.created or "", reverse=True)
 
-    return {"suites": [suite.dict() for suite in suites], "total": len(suites)}
+    return {"suites": [suite.model_dump() for suite in suites], "total": len(suites)}
 
 
 @app.get("/api/test-suites/{suite_id}")
@@ -1840,7 +2081,7 @@ async def get_test_suite(
     suite = _load_suite(suite_id)
     if not suite:
         raise HTTPException(status_code=404, detail=f"Test suite not found: {suite_id}")
-    return suite.dict()
+    return suite.model_dump()
 
 
 @app.post("/api/test-suites")
@@ -1858,7 +2099,7 @@ async def create_test_suite(
     suite.modified = now
 
     if _save_suite(suite):
-        return suite.dict()
+        return suite.model_dump()
     else:
         raise HTTPException(status_code=500, detail="Failed to create test suite")
 
@@ -1878,7 +2119,7 @@ async def update_test_suite(
     suite.created = existing.created
 
     if _save_suite(suite):
-        return suite.dict()
+        return suite.model_dump()
     else:
         raise HTTPException(status_code=500, detail="Failed to update test suite")
 
@@ -2139,7 +2380,7 @@ def _save_environment(env: Environment) -> bool:
     try:
         env_file = _get_environment_file_path(env.id)
         with open(env_file, "w") as f:
-            json.dump(env.dict(), f, indent=2)
+            json.dump(env.model_dump(), f, indent=2)
         return True
     except Exception as e:
         print(f"Error saving environment {env.id}: {e}")
@@ -2171,7 +2412,7 @@ def _save_collection(collection: Collection) -> bool:
     try:
         collection_file = _get_collection_file_path(collection.id)
         with open(collection_file, "w") as f:
-            json.dump(collection.dict(), f, indent=2)
+            json.dump(collection.model_dump(), f, indent=2)
         return True
     except Exception as e:
         print(f"Error saving collection {collection.id}: {e}")
@@ -2258,7 +2499,7 @@ async def list_environments():
     environments.sort(key=lambda e: e.name.lower())
 
     return {
-        "environments": [env.dict() for env in environments],
+        "environments": [env.model_dump() for env in environments],
         "total": len(environments),
         "active": active_env,
     }
@@ -2272,7 +2513,7 @@ async def get_environment(
     env = _load_environment(env_id)
     if not env:
         raise HTTPException(status_code=404, detail=f"Environment not found: {env_id}")
-    return env.dict()
+    return env.model_dump()
 
 
 @app.post("/api/environments")
@@ -2294,7 +2535,7 @@ async def create_environment(
         _deactivate_all_environments()
 
     if _save_environment(env):
-        return env.dict()
+        return env.model_dump()
     else:
         raise HTTPException(status_code=500, detail="Failed to create environment")
 
@@ -2319,7 +2560,7 @@ async def update_environment(
         _deactivate_all_environments()
 
     if _save_environment(env):
-        return env.dict()
+        return env.model_dump()
     else:
         raise HTTPException(status_code=500, detail="Failed to update environment")
 
@@ -2363,7 +2604,7 @@ async def activate_environment(
         return {
             "success": True,
             "message": f"Environment '{env.name}' activated",
-            "environment": env.dict(),
+            "environment": env.model_dump(),
         }
     else:
         raise HTTPException(status_code=500, detail="Failed to activate environment")
@@ -2394,7 +2635,7 @@ async def list_collections():
     collections.sort(key=lambda c: c.name.lower())
 
     return {
-        "collections": [collection.dict() for collection in collections],
+        "collections": [collection.model_dump() for collection in collections],
         "total": len(collections),
     }
 
@@ -2409,7 +2650,7 @@ async def get_collection(
         raise HTTPException(
             status_code=404, detail=f"Collection not found: {collection_id}"
         )
-    return collection.dict()
+    return collection.model_dump()
 
 
 @app.get("/api/collections/by-name/{name}")
@@ -2420,7 +2661,7 @@ async def get_collection_by_name(
     collection = _get_collection_by_name(name)
     if not collection:
         raise HTTPException(status_code=404, detail=f"Collection not found: {name}")
-    return collection.dict()
+    return collection.model_dump()
 
 
 @app.post("/api/collections")
@@ -2438,7 +2679,7 @@ async def create_collection(
     collection.modified = now
 
     if _save_collection(collection):
-        return collection.dict()
+        return collection.model_dump()
     else:
         raise HTTPException(status_code=500, detail="Failed to create collection")
 
@@ -2461,7 +2702,7 @@ async def update_collection(
     collection.modified = datetime.now().isoformat()
 
     if _save_collection(collection):
-        return collection.dict()
+        return collection.model_dump()
     else:
         raise HTTPException(status_code=500, detail="Failed to update collection")
 
@@ -2529,7 +2770,7 @@ async def update_suite_variables(
     variables_file = test_suites_directory / f"{suite_id}_variables.json"
     try:
         with open(variables_file, "w") as f:
-            json.dump(suite_vars.dict(), f, indent=2)
+            json.dump(suite_vars.model_dump(), f, indent=2)
         return {
             "success": True,
             "message": "Suite variables updated",
@@ -3019,7 +3260,7 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                         f"[EasyBDD Recorder] recordAction called: {action_type} with params: {params}"
                     )
                     record_action(session_id, action_type, params)
-                    print(f"[EasyBDD Recorder] Action recorded successfully")
+                    print("[EasyBDD Recorder] Action recorded successfully")
                 except Exception as e:
                     print(f"[EasyBDD Recorder] Error in recordAction wrapper: {e}")
                     import traceback

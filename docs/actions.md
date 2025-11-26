@@ -266,11 +266,11 @@ All actions support variable substitution using `${variable}` syntax:
 variables:
   base_url: "https://api.example.com"
   user_id: "12345"
-  
+
 steps:
   - action: "api get"
     url: "${base_url}/users/${user_id}"
-    
+
   - action: "fill field"
     field: "email"
     value: "${user_email}"
@@ -447,6 +447,45 @@ Navigates to the next page in browser history.
 
 **Parameters:**
 - `description` (optional): Step description
+
+## 🔄 Test Actions
+
+### test.run
+
+Execute another test as a reusable step within your current test. This enables modular test composition and code reuse.
+
+**Parameters:**
+- `test_path` (required): Path to the test file relative to `tests/cases/` directory (e.g., `OvrC/ovrc_api_websocket_test.yaml`)
+- `variables` (optional): Key-value pairs of variables to pass to the called test
+- `store_variables` (optional): Variables to extract from the called test's results. Format: `{"variable_name": "path.to.value"}` (e.g., `{"fw_version": "about_result.firmware"}`)
+- `continue_on_failure` (optional, default: false): If true, continue test execution even if the called test fails
+
+**Example:**
+```yaml
+steps:
+  # Run another test as a step
+  - test.run:
+      test_path: "OvrC/dxGetAbout.yaml"
+      variables:
+        device_ip: "192.168.1.100"
+        device_id: "4B:00:00:00:00:15"
+      store_variables:
+        firmware_version: "about_result.firmware"
+        device_model: "about_result.model"
+
+  # Use extracted variables in subsequent steps
+  - test.assert:
+      expression: "'firmware_version' in locals()"
+      message: "Firmware version should be extracted"
+```
+
+**Use Cases:**
+- Extract firmware version from a device and use it in subsequent steps
+- Reuse common test sequences (e.g., login, device setup) across multiple tests
+- Create modular test libraries for maintainability
+- Pass variables between tests for data flow
+
+**Note:** The called test runs in the same execution context, so variables can be shared. Use `store_variables` to extract specific values from the called test's execution results.
 
 ## ⏱ Utility Actions
 
@@ -659,22 +698,22 @@ Automatic screenshots when steps fail:
 steps:
   - action: Open browser
     url: "${app_url}/login"
-  
+
   - action: Fill form field
     field: "[name='username']"
     value: "${username}"
-  
+
   - action: Fill form field
     field: "[name='password']"
     value: "${password}"
-  
+
   - action: Click element
     selector: "[type='submit']"
-  
+
   - action: Wait for element
     selector: ".dashboard"
     state: "visible"
-  
+
   - action: Verify text
     text: "Welcome"
 ```
@@ -685,17 +724,17 @@ steps:
   - action: Fill form field
     field: "#email"
     value: "invalid-email"
-  
+
   - action: Click element
     selector: "#submit"
-  
+
   - action: Wait for element
     selector: ".error-message"
     state: "visible"
-  
+
   - action: Verify text
     text: "Please enter a valid email"
-  
+
   - action: Take screenshot
     name: "validation-error"
 ```
