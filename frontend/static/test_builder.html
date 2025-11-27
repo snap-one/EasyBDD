@@ -3312,6 +3312,9 @@
                     <button class="nav-button" :class="{active: view === 'results'}" @click="navigateToView('results'); loadResults()">
                         <i class="fas fa-chart-bar"></i> Test Results
                     </button>
+                    <button class="nav-button" :class="{active: view === 'queue'}" @click="navigateToView('queue'); loadQueueStatus()">
+                        <i class="fas fa-tasks"></i> Test Queue
+                    </button>
                     <button class="nav-button" :class="{active: view === 'metrics'}" @click="navigateToView('metrics'); loadMetrics()">
                         <i class="fas fa-chart-line"></i> Metrics & Analytics
                     </button>
@@ -3380,6 +3383,7 @@
                     <h2 v-else-if="view === 'actions'">Actions Library</h2>
                     <h2 v-else-if="view === 'templates'">Test Templates</h2>
                     <h2 v-else-if="view === 'results'">Test Results</h2>
+                    <h2 v-else-if="view === 'queue'">Test Queue Management</h2>
                     <h2 v-else-if="view === 'metrics'">Metrics & Analytics</h2>
                     <h2 v-else-if="view === 'variables'">Variables</h2>
                     <h2 v-else-if="view === 'test-suites'">Test Suites</h2>
@@ -4590,6 +4594,281 @@
                 </div>
 
                 <!-- Metrics View -->
+                <!-- Queue Management View -->
+                <div v-if="view === 'queue'" class="container container-resizable" :style="{ maxWidth: containerWidth + 'px' }">
+                    <div class="queue-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                        <div>
+                            <h2><i class="fas fa-tasks"></i> Test Queue Management</h2>
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem;">Manage test execution queue for 99% runtime</p>
+                        </div>
+                        <div style="display: flex; gap: 0.75rem;">
+                            <button class="btn btn-primary" @click="openAddToQueueModal()">
+                                <i class="fas fa-plus"></i> Add Test to Queue
+                            </button>
+                            <button class="btn btn-secondary" @click="loadQueueStatus()">
+                                <i class="fas fa-sync"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Status Cards -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+                        <div class="card">
+                            <div class="card-body">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Queue Length</div>
+                                        <div style="font-size: 2rem; font-weight: bold; color: var(--primary);">{{ queueStatus.queue_length }}</div>
+                                    </div>
+                                    <i class="fas fa-list" style="font-size: 2rem; opacity: 0.3;"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-body">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Running</div>
+                                        <div style="font-size: 2rem; font-weight: bold; color: var(--success);">{{ queueStatus.currently_running }}</div>
+                                    </div>
+                                    <i class="fas fa-play-circle" style="font-size: 2rem; opacity: 0.3;"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-body">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Max Concurrent</div>
+                                        <div style="font-size: 2rem; font-weight: bold; color: var(--warning);">{{ queueStatus.max_concurrent }}</div>
+                                    </div>
+                                    <i class="fas fa-layer-group" style="font-size: 2rem; opacity: 0.3;"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-body">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Continuous Mode</div>
+                                        <div style="font-size: 1.25rem; font-weight: bold; color: var(--primary);">
+                                            <span v-if="queueStatus.continuous_execution" style="color: var(--success);">Enabled</span>
+                                            <span v-else style="color: var(--text-secondary);">Disabled</span>
+                                        </div>
+                                    </div>
+                                    <i class="fas" :class="queueStatus.continuous_execution ? 'fa-toggle-on' : 'fa-toggle-off'" style="font-size: 2rem; opacity: 0.3;"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Configuration Cards -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2rem;">
+                        <!-- Continuous Execution -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3><i class="fas fa-infinity"></i> Continuous Execution</h3>
+                            </div>
+                            <div class="card-body">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                                    <div>
+                                        <div style="font-weight: 500; margin-bottom: 0.25rem;">Status</div>
+                                        <div style="color: var(--text-secondary); font-size: 0.875rem;">
+                                            {{ queueStatus.continuous_execution ? 'Tests run continuously' : 'Tests run on demand' }}
+                                        </div>
+                                    </div>
+                                    <button class="btn" :class="queueStatus.continuous_execution ? 'btn-success' : 'btn-secondary'" @click="toggleContinuousExecution()">
+                                        <i class="fas" :class="queueStatus.continuous_execution ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
+                                        {{ queueStatus.continuous_execution ? 'Disable' : 'Enable' }}
+                                    </button>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Max Concurrent Tests</label>
+                                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                        <input type="number" 
+                                               :value="queueStatus.max_concurrent" 
+                                               min="1" 
+                                               max="10" 
+                                               class="form-control" 
+                                               style="width: 100px;"
+                                               @input="handleMaxConcurrentInput($event)"
+                                               @change="handleMaxConcurrentChange($event)">
+                                        <button class="btn btn-sm btn-primary" @click="updateMaxConcurrent()">
+                                            <i class="fas fa-save"></i> Update
+                                        </button>
+                                    </div>
+                                    <div class="form-help">Number of tests that can run simultaneously</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Retry Configuration -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3><i class="fas fa-redo"></i> Automatic Retry</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label class="form-label">
+                                        <input type="checkbox" v-model="retryConfig.enabled" style="margin-right: 8px;">
+                                        Enable Automatic Retry
+                                    </label>
+                                </div>
+                                <div v-if="retryConfig.enabled" style="margin-top: 1rem;">
+                                    <div class="form-group">
+                                        <label class="form-label">Max Retries</label>
+                                        <input type="number" v-model.number="retryConfig.max_retries" min="1" max="10" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Retry Delay (seconds)</label>
+                                        <input type="number" v-model.number="retryConfig.retry_delay" min="1" max="60" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">
+                                            <input type="checkbox" v-model="retryConfig.retry_on_failure" style="margin-right: 8px;">
+                                            Retry on Test Failure
+                                        </label>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">
+                                            <input type="checkbox" v-model="retryConfig.retry_on_error" style="margin-right: 8px;">
+                                            Retry on System Error
+                                        </label>
+                                    </div>
+                                    <button class="btn btn-primary" @click="updateRetryConfig()" style="margin-top: 0.5rem;">
+                                        <i class="fas fa-save"></i> Save Configuration
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Health Monitoring -->
+                    <div class="card" style="margin-bottom: 2rem;">
+                        <div class="card-header">
+                            <h3><i class="fas fa-heartbeat"></i> Health Monitoring</h3>
+                        </div>
+                        <div class="card-body">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                                <div>
+                                    <div style="font-weight: 500; margin-bottom: 0.25rem;">Status</div>
+                                    <div style="color: var(--text-secondary); font-size: 0.875rem;">
+                                        {{ healthStatus.enabled ? 'Monitoring active' : 'Monitoring disabled' }}
+                                    </div>
+                                </div>
+                                <button class="btn" :class="healthStatus.enabled ? 'btn-success' : 'btn-secondary'" @click="toggleHealthMonitoring()">
+                                    <i class="fas" :class="healthStatus.enabled ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
+                                    {{ healthStatus.enabled ? 'Disable' : 'Enable' }}
+                                </button>
+                            </div>
+                            <div v-if="healthStatus.enabled" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem;">
+                                <div>
+                                    <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.25rem;">System Status</div>
+                                    <div style="font-size: 1.25rem; font-weight: bold;" :style="{ color: healthStatus.status === 'healthy' ? 'var(--success)' : healthStatus.status === 'degraded' ? 'var(--warning)' : 'var(--danger)' }">
+                                        {{ healthStatus.status || 'unknown' }}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.25rem;">CPU Usage</div>
+                                    <div style="font-size: 1.25rem; font-weight: bold;">{{ healthStatus.cpu_percent || 0 }}%</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Memory Usage</div>
+                                    <div style="font-size: 1.25rem; font-weight: bold;">{{ healthStatus.memory_percent || 0 }}%</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Last Check</div>
+                                    <div style="font-size: 0.875rem;">{{ healthStatus.last_check ? new Date(healthStatus.last_check).toLocaleString() : 'Never' }}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Queue List -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-list"></i> Queued Tests</h3>
+                        </div>
+                        <div class="card-body">
+                            <div v-if="queueStatus.queue && queueStatus.queue.length === 0" class="empty-state">
+                                <div class="empty-state-icon">📋</div>
+                                <h3 class="empty-state-title">Queue is Empty</h3>
+                                <p class="empty-state-text">Add tests to the queue to start continuous execution</p>
+                                <button class="btn btn-primary" @click="openAddToQueueModal()">
+                                    <i class="fas fa-plus"></i> Add Test to Queue
+                                </button>
+                            </div>
+                            <div v-else>
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Position</th>
+                                            <th>Test Path</th>
+                                            <th>Queued At</th>
+                                            <th>Retry Count</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(item, index) in queueStatus.queue" :key="item.test_id">
+                                            <td>{{ index + 1 }}</td>
+                                            <td>{{ item.test_path }}</td>
+                                            <td>{{ item.queued_at ? new Date(item.queued_at).toLocaleString() : 'Unknown' }}</td>
+                                            <td>
+                                                <span v-if="item.retry_count > 0" class="badge badge-warning">{{ item.retry_count }}</span>
+                                                <span v-else class="badge badge-success">0</span>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-sm btn-danger" @click="removeFromQueue(item.test_id)">
+                                                    <i class="fas fa-trash"></i> Remove
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Add to Queue Modal -->
+                <div v-if="showAddToQueueModal" class="modal-overlay" @click.self="showAddToQueueModal = false">
+                    <div class="modal-content" style="max-width: 600px;">
+                        <div class="modal-header">
+                            <h3><i class="fas fa-plus"></i> Add Test to Queue</h3>
+                            <button class="btn btn-icon" @click="showAddToQueueModal = false">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label class="form-label">Select Test</label>
+                                <select v-model="selectedTestForQueue" class="form-control">
+                                    <option value="">-- Select a test --</option>
+                                    <option v-for="test in tests" :key="test.id" :value="test.id || test.path">
+                                        {{ test.name }} ({{ test.workspace || 'Root' }})
+                                    </option>
+                                </select>
+                                <div v-if="tests.length === 0" class="form-help" style="margin-top: 0.5rem; color: var(--text-secondary);">
+                                    No tests available. <a href="#" @click.prevent="navigateToView('tests'); loadTests()">Go to Tests</a> to create one.
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <input type="checkbox" v-model="queueHeadless" style="margin-right: 8px;">
+                                    Run in Headless Mode
+                                </label>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" @click="showAddToQueueModal = false">Cancel</button>
+                            <button class="btn btn-primary" @click="addTestToQueue(selectedTestForQueue, queueHeadless)" :disabled="!selectedTestForQueue">
+                                <i class="fas fa-plus"></i> Add to Queue
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <div v-if="view === 'metrics'" class="metrics-page">
                     <div class="metrics-header">
                         <div class="metrics-header-left">
@@ -6706,6 +6985,11 @@
                         path: '/settings',
                         name: 'settings',
                         component: { template: '<div></div>' }
+                    },
+                    {
+                        path: '/queue',
+                        name: 'queue',
+                        component: { template: '<div></div>' }
                     }
                 ];
 
@@ -6970,6 +7254,34 @@
                     teamsTestResult: null,
                     openaiTestResult: null,
                     teamsTestResult: null,
+                    // Queue management
+                    queueStatus: {
+                        queue_length: 0,
+                        currently_running: 0,
+                        max_concurrent: 1,
+                        continuous_execution: false,
+                        queue: []
+                    },
+                    retryConfig: {
+                        enabled: false,
+                        max_retries: 3,
+                        retry_delay: 5,
+                        retry_on_failure: true,
+                        retry_on_error: true
+                    },
+                    healthStatus: {
+                        enabled: false,
+                        status: 'healthy',
+                        cpu_percent: 0,
+                        memory_percent: 0,
+                        running_tests: 0,
+                        queued_tests: 0,
+                        last_check: null
+                    },
+                    queuePollInterval: null,
+                    selectedTestForQueue: null,
+                    showAddToQueueModal: false,
+                    queueHeadless: true,
                     showCreateCollectionModal: false,
                     showEditCollectionModal: false,
                     currentEnvironment: {
@@ -7133,12 +7445,14 @@
                                 '/dashboard': 'dashboard',
                                 '/tests': 'tests',
                                 '/results': 'results',
+                                '/queue': 'queue',
                                 '/suites': 'test-suites',
                                 '/actions': 'actions',
                                 '/templates': 'templates',
                                 '/docs': 'docs',
                                 '/variables': 'variables',
-                                '/metrics': 'metrics'
+                                '/metrics': 'metrics',
+                                '/settings': 'settings'
                             };
 
                             // Handle dynamic routes - always fetch fresh data
@@ -7201,6 +7515,9 @@
                                     this.loadVariables();
                                 } else if (targetView === 'metrics') {
                                     this.loadMetrics();
+                                } else if (targetView === 'queue') {
+                                    this.loadQueueStatus();
+                                    this.startQueuePolling();
                                 } else if (targetView === 'settings') {
                                     this.loadSettings();
                                 }
@@ -7213,6 +7530,13 @@
                 view(newView, oldView) {
                     if (newView === 'actions' && Object.keys(this.actionsByCategory).length === 0) {
                         this.loadActions();
+                    }
+                    // Start/stop queue polling based on view
+                    if (newView === 'queue') {
+                        this.loadQueueStatus();
+                        this.startQueuePolling();
+                    } else {
+                        this.stopQueuePolling();
                     }
                 }
             },
@@ -7291,6 +7615,7 @@
                         '/dashboard': 'dashboard',
                         '/tests': 'tests',
                         '/results': 'results',
+                        '/queue': 'queue',
                         '/suites': 'test-suites',
                         '/actions': 'actions',
                         '/templates': 'templates',
@@ -8109,6 +8434,165 @@
                     } catch (error) {
                         console.error('Failed to load workspaces:', error);
                     }
+                },
+                async loadQueueStatus() {
+                    try {
+                        const [queueResponse, retryResponse, healthResponse, continuousResponse] = await Promise.all([
+                            axios.get('/api/tests/queue'),
+                            axios.get('/api/tests/retry-config'),
+                            axios.get('/api/health/status'),
+                            axios.get('/api/tests/continuous-execution')
+                        ]);
+                        this.queueStatus = queueResponse.data;
+                        this.retryConfig = retryResponse.data;
+                        // Ensure healthStatus has enabled property
+                        this.healthStatus = {
+                            enabled: healthResponse.data.enabled || false,
+                            status: healthResponse.data.status || 'Unknown',
+                            cpu_usage_percent: healthResponse.data.cpu_usage_percent || healthResponse.data.cpu_percent || 0,
+                            memory_usage_percent: healthResponse.data.memory_usage_percent || healthResponse.data.memory_percent || 0,
+                            last_check: healthResponse.data.last_check || null,
+                            ...healthResponse.data
+                        };
+                        this.queueStatus.continuous_execution = continuousResponse.data.enabled || false;
+                        this.queueStatus.max_concurrent = continuousResponse.data.max_concurrent || 1;
+                        this.queueStatus.running_tests_count = queueResponse.data.currently_running || 0;
+                        this.queueStatus.queue_length = queueResponse.data.queue_length || 0;
+                    } catch (error) {
+                        console.error('Failed to load queue status:', error);
+                        // Initialize with defaults on error
+                        if (!this.healthStatus) {
+                            this.healthStatus = { enabled: false, status: 'Unknown', cpu_usage_percent: 0, memory_usage_percent: 0, last_check: null };
+                        }
+                    }
+                },
+                startQueuePolling() {
+                    if (this.queuePollInterval) {
+                        clearInterval(this.queuePollInterval);
+                    }
+                    this.queuePollInterval = setInterval(() => {
+                        if (this.view === 'queue') {
+                            this.loadQueueStatus();
+                        }
+                    }, 2000); // Poll every 2 seconds
+                },
+                stopQueuePolling() {
+                    if (this.queuePollInterval) {
+                        clearInterval(this.queuePollInterval);
+                        this.queuePollInterval = null;
+                    }
+                },
+                async toggleContinuousExecution() {
+                    try {
+                        const enabled = !this.queueStatus.continuous_execution;
+                        const response = await axios.post('/api/tests/continuous-execution', null, {
+                            params: { enabled: enabled }
+                        });
+                        // Update local state immediately
+                        this.queueStatus.continuous_execution = response.data.enabled || enabled;
+                        await this.loadQueueStatus();
+                    } catch (error) {
+                        console.error('Failed to toggle continuous execution:', error);
+                        alert('Failed to toggle continuous execution: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async updateRetryConfig() {
+                    try {
+                        await axios.put('/api/tests/retry-config', this.retryConfig);
+                        await this.loadQueueStatus();
+                        alert('Retry configuration updated successfully');
+                    } catch (error) {
+                        console.error('Failed to update retry config:', error);
+                        alert('Failed to update retry configuration: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                handleMaxConcurrentInput(event) {
+                    const value = parseInt(event.target.value) || 1;
+                    const clamped = Math.max(1, Math.min(10, value));
+                    this.queueStatus.max_concurrent = clamped;
+                    event.target.value = clamped;
+                },
+                handleMaxConcurrentChange(event) {
+                    const value = parseInt(event.target.value) || 1;
+                    const clamped = Math.max(1, Math.min(10, value));
+                    this.queueStatus.max_concurrent = clamped;
+                    event.target.value = clamped;
+                },
+                async updateMaxConcurrent() {
+                    try {
+                        const value = Math.max(1, Math.min(10, this.queueStatus.max_concurrent || 1));
+                        await axios.put('/api/tests/max-concurrent', null, {
+                            params: { max_tests: value }
+                        });
+                        await this.loadQueueStatus();
+                        alert('Max concurrent tests updated successfully');
+                    } catch (error) {
+                        console.error('Failed to update max concurrent:', error);
+                        alert('Failed to update max concurrent: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async toggleHealthMonitoring() {
+                    try {
+                        const enabled = !this.healthStatus.enabled;
+                        const response = await axios.post('/api/health/monitor', null, {
+                            params: { enabled: enabled }
+                        });
+                        // Update local state immediately
+                        this.healthStatus.enabled = response.data.enabled !== undefined ? response.data.enabled : enabled;
+                        await this.loadQueueStatus();
+                    } catch (error) {
+                        console.error('Failed to toggle health monitoring:', error);
+                        alert('Failed to toggle health monitoring: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async addTestToQueue(testPath, headless = true) {
+                    try {
+                        if (!testPath) {
+                            alert('Please select a test to add to the queue');
+                            return;
+                        }
+                        
+                        // Ensure test path is in correct format (tests/cases/...)
+                        let normalizedPath = testPath;
+                        if (!normalizedPath.startsWith('tests/cases/')) {
+                            if (normalizedPath.startsWith('cases/')) {
+                                normalizedPath = 'tests/' + normalizedPath;
+                            } else {
+                                normalizedPath = 'tests/cases/' + normalizedPath;
+                            }
+                        }
+                        
+                        console.log('Adding test to queue:', normalizedPath);
+                        await axios.post('/api/tests/queue', {
+                            test_path: normalizedPath,
+                            headless: headless,
+                            tags: []
+                        });
+                        await this.loadQueueStatus();
+                        this.showAddToQueueModal = false;
+                        this.selectedTestForQueue = null;
+                    } catch (error) {
+                        console.error('Failed to add test to queue:', error);
+                        const errorMsg = error.response?.data?.detail || error.message || 'Unknown error';
+                        alert('Failed to add test to queue: ' + errorMsg);
+                    }
+                },
+                async removeFromQueue(testId) {
+                    try {
+                        await axios.delete(`/api/tests/queue/${testId}`);
+                        await this.loadQueueStatus();
+                    } catch (error) {
+                        console.error('Failed to remove from queue:', error);
+                        alert('Failed to remove from queue: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async openAddToQueueModal() {
+                    // Load tests if not already loaded
+                    if (!this.tests || this.tests.length === 0) {
+                        await this.loadTests();
+                    }
+                    this.selectedTestForQueue = null;
+                    this.showAddToQueueModal = true;
                 },
                 async openCreateSuiteModal() {
                     try {
@@ -10015,9 +10499,9 @@
                             console.warn('No test_id in response:', response.data);
                         }
 
-                        // Navigate to results view to see the new execution
-                        this.navigateToView('results');
-                        this.loadResults();
+                        // Don't navigate away - keep progress modal visible
+                        // The progress modal will show live updates via WebSocket/polling
+                        // User can navigate to results later if they want
                     } catch (error) {
                         console.error('Failed to re-run test:', error);
                         console.error('Error details:', error.response?.data);
@@ -14460,7 +14944,8 @@ Would you like to enter a selector manually?
                             'docs': '/docs',
                             'variables': '/variables',
                             'metrics': '/metrics',
-                            'settings': '/settings'
+                            'settings': '/settings',
+                            'queue': '/queue'
                         };
                         
                         const route = viewToRouteMap[newView];
@@ -14810,7 +15295,9 @@ Would you like to enter a selector manually?
                     console.log('Starting execution polling for test:', testId);
 
                     let pollCount = 0;
-                    const maxPolls = 300; // Stop after 10 minutes (300 * 2 seconds)
+                    // Support tests up to 10 hours (18000 polls * 2 seconds = 36000 seconds = 10 hours)
+                    // For 9-hour tests, this allows plenty of headroom
+                    const maxPolls = 18000; // Stop after 10 hours (18000 * 2 seconds)
                     let testCompleted = false; // Flag to track if test completed via WebSocket
 
                     this.executionPollInterval = setInterval(async () => {

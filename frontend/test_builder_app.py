@@ -28,6 +28,7 @@ from fastapi import (
     BackgroundTasks,
     FastAPI,
     HTTPException,
+    Query,
     Request,
     WebSocket,
     WebSocketDisconnect,
@@ -247,6 +248,25 @@ running_tests: Dict[str, Dict] = {}
 test_results: Dict[str, Any] = {}
 websocket_connections: List[WebSocket] = []
 recording_sessions: Dict[str, Dict[str, Any]] = {}  # session_id -> session data
+
+# ==================== TEST QUEUE & CONTINUOUS EXECUTION ====================
+test_queue: List[Dict[str, Any]] = []  # Queue of tests waiting to execute
+continuous_execution_enabled: bool = False  # Continuous execution mode
+max_concurrent_tests: int = 1  # Maximum concurrent test executions
+currently_running_count: int = 0  # Count of currently running tests
+test_retry_config: Dict[str, Any] = {
+    "enabled": False,
+    "max_retries": 3,
+    "retry_delay": 5,  # seconds
+    "retry_on_failure": True,
+    "retry_on_error": True,
+}
+health_monitoring: Dict[str, Any] = {
+    "enabled": False,
+    "check_interval": 60,  # seconds
+    "last_check": None,
+    "status": "healthy",
+}
 
 # ==================== UTILITY FUNCTIONS ====================
 
@@ -1227,20 +1247,37 @@ async def execute_test(
         )
         raise HTTPException(status_code=500, detail="Failed to create execution record")
 
-    # Add background task and log
-    print(f"[API] Adding background task for test execution: {test_id}")
-    print(f"[API] Execution record status: {running_tests[test_id].get('status')}")
-    background_tasks.add_task(run_test)
-    print("[API] Background task added successfully")
-    print(f"[API] running_tests now contains: {list(running_tests.keys())}")
+    # Check if continuous execution is enabled - if so, add to queue instead
+    if continuous_execution_enabled:
+        test_queue.append({
+            "test_id": test_id,
+            "test_path": test_path,
+            "request": request,
+            "retry_count": 0,
+            "queued_at": datetime.now().isoformat(),
+        })
+        return {
+            "test_id": test_id,
+            "status": "queued",
+            "message": "Test added to queue for continuous execution",
+            "test_path": str(test_path),
+            "queue_position": len(test_queue),
+        }
+    else:
+        # Add background task and log
+        print(f"[API] Adding background task for test execution: {test_id}")
+        print(f"[API] Execution record status: {running_tests[test_id].get('status')}")
+        background_tasks.add_task(run_test)
+        print("[API] Background task added successfully")
+        print(f"[API] running_tests now contains: {list(running_tests.keys())}")
 
-    return {
-        "test_id": test_id,
-        "status": "queued",
-        "message": "Test execution started",
-        "test_path": str(test_path),
-        "execution_record_exists": test_id in running_tests,
-    }
+        return {
+            "test_id": test_id,
+            "status": "queued",
+            "message": "Test execution started",
+            "test_path": str(test_path),
+            "execution_record_exists": test_id in running_tests,
+        }
 
 
 @app.get("/api/tests/execution/{test_id}")
@@ -5788,6 +5825,369 @@ When you provide a test in YAML format, the system will automatically create it 
 
 
 # ==================== TEST ENDPOINTS FOR ERROR PAGES ====================
+
+# ==================== TEST QUEUE & CONTINUOUS EXECUTION ====================
+
+async def process_test_queue():
+    """Process queued tests continuously for 99% runtime"""
+    global currently_running_count
+    
+    while True:
+        try:
+            # Check if we can run more tests
+            if currently_running_count < max_concurrent_tests:
+                # Get next test from queue
+                if test_queue:
+                    test_item = test_queue.pop(0)
+                    currently_running_count += 1
+                    
+                    # Execute the test
+                    test_id = test_item.get("test_id")
+                    test_path = test_item.get("test_path")
+                    request = test_item.get("request")
+                    retry_count = test_item.get("retry_count", 0)
+                    
+                    print(f"[QUEUE] Processing test from queue: {test_id} (retry: {retry_count})")
+                    
+                    # Create execution record
+                    running_tests[test_id] = {
+                        "test_path": str(test_path),
+                        "status": "running",
+                        "started": datetime.now().isoformat(),
+                        "output": [],
+                        "command": None,
+                        "retry_count": retry_count,
+                        "from_queue": True,
+                    }
+                    
+                    # Execute test
+                    try:
+                        await execute_test_internal(test_id, test_path, request)
+                    except Exception as e:
+                        print(f"[QUEUE] Error executing test {test_id}: {e}")
+                        running_tests[test_id]["status"] = "error"
+                        running_tests[test_id]["error"] = str(e)
+                    
+                    # Check if test failed and retry is enabled
+                    if running_tests[test_id]["status"] in ["failed", "error"]:
+                        if test_retry_config["enabled"]:
+                            if retry_count < test_retry_config["max_retries"]:
+                                # Check if we should retry
+                                should_retry = False
+                                if running_tests[test_id]["status"] == "failed" and test_retry_config["retry_on_failure"]:
+                                    should_retry = True
+                                elif running_tests[test_id]["status"] == "error" and test_retry_config["retry_on_error"]:
+                                    should_retry = True
+                                
+                                if should_retry:
+                                    new_retry_count = retry_count + 1
+                                    print(f"[QUEUE] Scheduling retry {new_retry_count}/{test_retry_config['max_retries']} for test {test_id}")
+                                    
+                                    # Wait before retry
+                                    await asyncio.sleep(test_retry_config["retry_delay"])
+                                    
+                                    # Re-queue the test
+                                    test_queue.append({
+                                        "test_id": str(uuid4()),  # New test ID for retry
+                                        "test_path": test_path,
+                                        "request": request,
+                                        "retry_count": new_retry_count,
+                                        "original_test_id": test_id,
+                                    })
+                    
+                    currently_running_count -= 1
+                    
+                    # If continuous execution is enabled and queue is empty, check for scheduled tests
+                    if continuous_execution_enabled and not test_queue:
+                        # Could add logic here to check for scheduled tests or re-queue completed tests
+                        pass
+                else:
+                    # No tests in queue, wait a bit
+                    await asyncio.sleep(1)
+            else:
+                # At max capacity, wait
+                await asyncio.sleep(1)
+                
+        except Exception as e:
+            print(f"[QUEUE] Error in queue processor: {e}")
+            await asyncio.sleep(5)  # Wait before retrying queue processor
+
+
+async def execute_test_internal(test_id: str, test_path: Path, request: TestExecutionRequest):
+    """Internal test execution function (extracted from execute_test)"""
+    project_root = Path(__file__).parent.parent
+    
+    # Try to use venv Python if available
+    venv_python = project_root / ".venv" / "bin" / "python"
+    python_executable = str(venv_python) if venv_python.exists() else sys.executable
+    
+    # Build command
+    cmd = [python_executable, "-m", "easy_bdd", "run", str(test_path)]
+    
+    if request.headless:
+        cmd.append("--headless")
+    
+    if request.tags:
+        cmd.extend(["--tags", ",".join(request.tags)])
+    
+    command_str = " ".join(cmd)
+    running_tests[test_id]["command"] = command_str
+    
+    # Execute test
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        cwd=str(Path(__file__).parent.parent),
+    )
+    
+    # Stream output
+    line_count = 0
+    async for line in process.stdout:
+        line_str = line.decode("utf-8", errors="replace").strip()
+        if line_str:
+            running_tests[test_id]["output"].append(line_str)
+            line_count += 1
+            
+            await broadcast_message({
+                "type": "test_output",
+                "test_id": test_id,
+                "line": line_str
+            })
+    
+    return_code = await process.wait()
+    
+    # Update status
+    running_tests[test_id]["status"] = "completed" if process.returncode == 0 else "failed"
+    running_tests[test_id]["return_code"] = process.returncode
+    running_tests[test_id]["finished"] = datetime.now().isoformat()
+    
+    # Save results
+    build_id = str(uuid4())[:8]
+    result_data = {
+        "test_id": test_id,
+        "test_path": str(test_path),
+        "build_id": build_id,
+        "status": running_tests[test_id]["status"],
+        "return_code": process.returncode,
+        "started": running_tests[test_id]["started"],
+        "finished": running_tests[test_id]["finished"],
+        "output": running_tests[test_id]["output"],
+        "command": command_str,
+    }
+    
+    result_filename = f"{test_id.replace('/', '_').replace('.yaml', '')}_{build_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    result_path = reports_directory / result_filename
+    with open(result_path, "w") as f:
+        json.dump(result_data, f, indent=2)
+    
+    running_tests[test_id]["result_file"] = str(result_filename)
+    running_tests[test_id]["completed_at"] = datetime.now().isoformat()
+    
+    await broadcast_message({
+        "type": "test_completed",
+        "test_id": test_id,
+        "status": running_tests[test_id]["status"],
+        "result_file": result_filename,
+    })
+
+
+async def health_monitor():
+    """Monitor system health for 99% runtime"""
+    while health_monitoring["enabled"]:
+        try:
+            # Check system resources
+            if PSUTIL_AVAILABLE:
+                cpu_percent = psutil.cpu_percent(interval=1)
+                memory = psutil.virtual_memory()
+                
+                # Update health status
+                if cpu_percent > 90 or memory.percent > 90:
+                    health_monitoring["status"] = "degraded"
+                elif cpu_percent > 95 or memory.percent > 95:
+                    health_monitoring["status"] = "critical"
+                else:
+                    health_monitoring["status"] = "healthy"
+                
+                health_monitoring["last_check"] = datetime.now().isoformat()
+                health_monitoring["cpu_percent"] = cpu_percent
+                health_monitoring["memory_percent"] = memory.percent
+            
+            # Check running tests
+            running_count = sum(1 for t in running_tests.values() if t.get("status") == "running")
+            health_monitoring["running_tests"] = running_count
+            health_monitoring["queued_tests"] = len(test_queue)
+            
+        except Exception as e:
+            print(f"[HEALTH] Error in health monitor: {e}")
+            health_monitoring["status"] = "error"
+        
+        await asyncio.sleep(health_monitoring["check_interval"])
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks on server startup"""
+    # Start queue processor if continuous execution is enabled
+    if continuous_execution_enabled:
+        asyncio.create_task(process_test_queue())
+        print("[STARTUP] Test queue processor started")
+    
+    # Start health monitor if enabled
+    if health_monitoring["enabled"]:
+        asyncio.create_task(health_monitor())
+        print("[STARTUP] Health monitor started")
+
+
+@app.post("/api/tests/queue")
+async def queue_test(request: TestExecutionRequest):
+    """Add a test to the execution queue"""
+    project_root = Path(__file__).parent.parent
+    test_path = Path(request.test_path)
+    
+    if not test_path.is_absolute():
+        test_path = project_root / test_path
+    
+    if not test_path.exists():
+        raise HTTPException(status_code=404, detail=f"Test file not found: {test_path}")
+    
+    test_id = str(uuid4())
+    test_queue.append({
+        "test_id": test_id,
+        "test_path": test_path,
+        "request": request,
+        "retry_count": 0,
+        "queued_at": datetime.now().isoformat(),
+    })
+    
+    return {
+        "test_id": test_id,
+        "status": "queued",
+        "queue_position": len(test_queue),
+        "message": "Test added to queue",
+    }
+
+
+@app.get("/api/tests/queue")
+async def get_queue_status():
+    """Get current queue status"""
+    return {
+        "queue_length": len(test_queue),
+        "currently_running": currently_running_count,
+        "max_concurrent": max_concurrent_tests,
+        "continuous_execution": continuous_execution_enabled,
+        "queue": [
+            {
+                "test_id": item["test_id"],
+                "test_path": str(item["test_path"]),
+                "queued_at": item.get("queued_at"),
+                "retry_count": item.get("retry_count", 0),
+            }
+            for item in test_queue
+        ],
+    }
+
+
+@app.delete("/api/tests/queue/{test_id}")
+async def remove_from_queue(test_id: str):
+    """Remove a test from the queue"""
+    global test_queue
+    original_length = len(test_queue)
+    test_queue = [item for item in test_queue if item["test_id"] != test_id]
+    
+    if len(test_queue) < original_length:
+        return {"message": "Test removed from queue", "test_id": test_id}
+    else:
+        raise HTTPException(status_code=404, detail="Test not found in queue")
+
+
+@app.post("/api/tests/continuous-execution")
+async def toggle_continuous_execution(enabled: Optional[bool] = None):
+    """Enable or disable continuous execution mode"""
+    global continuous_execution_enabled
+    
+    # If still None, toggle
+    if enabled is None:
+        enabled = not continuous_execution_enabled
+    
+    continuous_execution_enabled = bool(enabled)
+    
+    if continuous_execution_enabled:
+        # Start queue processor if not already running
+        asyncio.create_task(process_test_queue())
+        print("[CONTINUOUS] Continuous execution enabled")
+    else:
+        print("[CONTINUOUS] Continuous execution disabled")
+    
+    return {
+        "enabled": continuous_execution_enabled,
+        "message": "Continuous execution " + ("enabled" if continuous_execution_enabled else "disabled"),
+    }
+
+
+@app.get("/api/tests/continuous-execution")
+async def get_continuous_execution_status():
+    """Get continuous execution status"""
+    return {
+        "enabled": continuous_execution_enabled,
+        "queue_length": len(test_queue),
+        "currently_running": currently_running_count,
+        "max_concurrent": max_concurrent_tests,
+    }
+
+
+@app.put("/api/tests/retry-config")
+async def update_retry_config(config: Dict[str, Any]):
+    """Update retry configuration"""
+    global test_retry_config
+    test_retry_config.update(config)
+    return {"message": "Retry configuration updated", "config": test_retry_config}
+
+
+@app.get("/api/tests/retry-config")
+async def get_retry_config():
+    """Get retry configuration"""
+    return test_retry_config
+
+
+@app.put("/api/tests/max-concurrent")
+async def update_max_concurrent(max_tests: int = Query(...)):
+    """Update maximum concurrent test executions"""
+    global max_concurrent_tests
+    if max_tests < 1:
+        raise HTTPException(status_code=400, detail="max_tests must be at least 1")
+    max_concurrent_tests = max_tests
+    return {"message": "Max concurrent tests updated", "max_concurrent": max_concurrent_tests}
+
+
+@app.post("/api/health/monitor")
+async def toggle_health_monitoring(enabled: Optional[bool] = Query(None)):
+    """Enable or disable health monitoring"""
+    global health_monitoring
+    
+    # If still None, toggle
+    if enabled is None:
+        enabled = not health_monitoring["enabled"]
+    
+    health_monitoring["enabled"] = bool(enabled)
+    
+    if health_monitoring["enabled"]:
+        asyncio.create_task(health_monitor())
+        print("[HEALTH] Health monitoring enabled")
+    else:
+        print("[HEALTH] Health monitoring disabled")
+    
+    return {
+        "enabled": health_monitoring["enabled"],
+        "message": "Health monitoring " + ("enabled" if health_monitoring["enabled"] else "disabled"),
+    }
+
+
+@app.get("/api/health/status")
+async def get_health_status():
+    """Get current health status"""
+    return health_monitoring
+
 
 @app.get("/api/test-error-500")
 async def test_error_500():

@@ -387,9 +387,11 @@ class TestRunner:
             # Collect results as they complete
             for future in future_to_iteration:
                 try:
+                    # Support long-running iterations (up to 10 hours per iteration)
+                    # For 9-hour tests, this allows plenty of headroom
                     iteration_num, success, exec_time = future.result(
-                        timeout=120
-                    )  # 2 minute timeout
+                        timeout=36000  # 10 hour timeout (36000 seconds) for long-running tests
+                    )
                     results.append((iteration_num, success, exec_time))
                     if not success:
                         all_passed = False

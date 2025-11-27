@@ -29,7 +29,8 @@ A powerful, user-friendly YAML-based BDD testing framework that supports multipl
 - **🤖 AI Assistant** - Persistent AI chat assistant with workspace/directory context awareness and **automatic test creation**
 - **♻️ Test Rerun** - Rerun tests directly from results pages
 - **✏️ In-Suite Test Editing** - Edit tests during suite creation/editing with context preservation
-- **🗺️ Routing Support** - Proper URL routing with page refresh support and deep linking
+- **🗺️ Routing Support** - Proper URL routing with page refresh support and deep linking (all pages have unique routes)
+- **🎯 Test Queue Management UI** - Comprehensive web interface for managing test queues, continuous execution, retries, and health monitoring
 - **🚨 Error Pages** - Custom error pages for 404, 500, 503, and other HTTP errors
 - **📈 System Resource Auto-Detection** - Automatic CPU, memory, disk, and network monitoring
 - **🎬 Demo Test Suite** - Ready-to-run demo tests for UI and API testing
@@ -43,7 +44,8 @@ A powerful, user-friendly YAML-based BDD testing framework that supports multipl
 - **AI Assistant** - Persistent AI chat assistant that maintains context across pages, including workspace, directory, current test, and view information. **Can automatically create tests from natural language requests!**
 - **Test Rerun** - Rerun tests directly from results pages with one click
 - **In-Suite Test Editing** - Edit tests while creating/editing suites without losing context
-- **Routing & Page Refresh** - Proper URL routing with state persistence, allowing page refreshes without errors
+- **Routing & Page Refresh** - Proper URL routing with state persistence, allowing page refreshes without errors. All pages have unique routes (e.g., `/queue`, `/metrics`, `/settings`)
+- **Test Queue Management UI** - Full-featured web interface for managing test execution queues with real-time status updates, continuous execution toggle, retry configuration, and health monitoring
 - **Error Pages** - Custom error pages for common HTTP errors (404, 500, 503, etc.) with user-friendly messages
 - **System Resource Auto-Detection** - Automatic extraction and monitoring of CPU, memory, disk, and network resources from device updates
 - **Demo Test Suite** - Pre-built demo tests for UI and API testing using public endpoints (no setup required)

@@ -206,6 +206,7 @@ The Test Builder now uses proper routing, so you can refresh pages without losin
 - `/variables` - Variable management
 - `/metrics` - Metrics & Analytics
 - `/settings` - Settings
+- `/queue` - Test Queue Management
 
 ### Benefits
 
@@ -214,6 +215,49 @@ The Test Builder now uses proper routing, so you can refresh pages without losin
 - Share links with team members
 - Use browser back/forward navigation
 - Better browser history tracking
+
+---
+
+## 🎯 Test Queue Management UI
+
+A comprehensive web interface for managing test execution queues, continuous execution, automatic retries, and health monitoring.
+
+### Features
+
+- **Queue Status Dashboard** - Real-time view of queue length, running tests, max concurrent tests, and continuous execution status
+- **Continuous Execution Toggle** - Enable/disable continuous execution mode with one click (buttons work immediately)
+- **Max Concurrent Tests Configuration** - Adjust the number of simultaneous test executions (1-10) with interactive number input
+- **Automatic Retry Configuration** - Configure retry behavior:
+  - Enable/disable automatic retries
+  - Set max retry attempts
+  - Configure retry delay
+  - Choose to retry on failure and/or error
+- **Health Monitoring** - Real-time system health monitoring:
+  - System status (Healthy, Degraded, Critical)
+  - CPU usage percentage
+  - Memory usage percentage
+  - Last check timestamp
+- **Queue Management** - View and manage queued tests:
+  - See all tests in the queue with position, test path, queued time, and retry count
+  - Remove tests from the queue
+  - Add new tests to the queue via modal
+- **Real-Time Updates** - Automatic polling every 2 seconds to keep queue status current
+- **Proper Routing** - Accessible at `/queue` with full page refresh support
+
+### How to Use
+
+1. Navigate to **Test Queue** from the sidebar (or go to `/queue`)
+2. View current queue status in the status cards at the top
+3. Configure continuous execution, retry settings, and health monitoring in the configuration panels
+4. Add tests to the queue using the "Add Test to Queue" button
+5. Monitor queue status and running tests in real-time
+
+### UI Improvements
+
+- **Interactive Controls** - All enable/disable buttons update immediately
+- **Number Input** - Max concurrent tests input responds to changes in real-time
+- **Live Updates** - Queue status refreshes automatically every 2 seconds
+- **Error Handling** - Clear error messages if operations fail
 
 ---
 
