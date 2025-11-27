@@ -7589,6 +7589,27 @@
                                 role: 'assistant',
                                 content: response.data.response
                             });
+                            
+                            // If a test was created, offer to open it
+                            if (response.data.test_created && response.data.test_created.success) {
+                                const testId = response.data.test_created.test_id;
+                                const testName = response.data.test_created.name;
+                                
+                                // Add a follow-up message with a button to open the test
+                                this.$nextTick(() => {
+                                    // Add a clickable link/button in the chat
+                                    const lastMessage = this.chatMessages[this.chatMessages.length - 1];
+                                    lastMessage.content += `\n\n🔗 [Open Test: ${testName}](#open-test:${testId})`;
+                                    
+                                    // Also show a notification
+                                    setTimeout(() => {
+                                        if (confirm(`Test "${testName}" was created successfully! Would you like to open it now?`)) {
+                                            this.loadTest(testId);
+                                            this.navigateToView('builder');
+                                        }
+                                    }, 500);
+                                });
+                            }
                         }
                         
                         // Scroll to bottom

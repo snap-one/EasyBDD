@@ -388,7 +388,7 @@ python -m easy_bdd run tests/cases/ --suite my_suite
 ### Using the Assistant
 
 1. Click chat icon (💬) in top-right toolbar
-2. Type your question
+2. Type your question or request
 3. Press Enter or click Send
 4. View response
 
@@ -398,14 +398,49 @@ python -m easy_bdd run tests/cases/ --suite my_suite
 - **Context Aware** - Knows your workspace, directory, current test
 - **Message History** - Messages persist across refreshes
 - **Token Tracking** - Shows remaining tokens
+- **Test Creation** - Can automatically create tests from your requests! 🎉
+
+### Creating Tests with AI
+
+The AI Assistant can now create complete tests for you automatically!
+
+**How to Create a Test:**
+1. Open the AI Assistant
+2. Ask it to create a test, for example:
+   - "Create a test that logs into example.com"
+   - "Make a test for API testing"
+   - "Generate a test that fills out a form"
+3. The AI will generate a complete YAML test
+4. The test is automatically created
+5. You'll be prompted to open it in the Test Builder
+
+**What You Get:**
+- Complete test with proper structure
+- All required fields (name, description, steps)
+- Correct action syntax
+- Variables if needed
+- Ready to run!
+
+**Tips for Best Results:**
+- Be specific about what you want the test to do
+- Mention if it's UI or API testing
+- Include URLs, selectors, or endpoints if you have them
+- The AI will generate appropriate steps
 
 ### Example Queries
 
+**General Questions:**
 - "How do I create a login test?"
 - "What actions are available for API testing?"
 - "Help me fix this error: [paste error]"
 - "Show me examples of form submission"
 - "What's the best way to handle waits?"
+
+**Test Creation:**
+- "Create a login test for my website"
+- "Make a test that tests the user registration API"
+- "Generate a test that validates form submission"
+- "Create a test that opens a page and takes a screenshot"
 
 ---
 

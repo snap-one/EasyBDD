@@ -5394,6 +5394,7 @@ class ChatResponse(BaseModel):
     tokens_used: int
     tokens_remaining: int
     error: Optional[str] = None
+    test_created: Optional[Dict[str, Any]] = None  # Test creation result if a test was created
 
 
 def check_token_limit():
@@ -5465,7 +5466,31 @@ async def chat_assistant(
         client = OpenAI(api_key=api_key)
         
         # Build system message with context
-        system_content = "You are a helpful assistant for the Easy BDD testing framework. Help users create, debug, and understand test cases. Be concise and practical."
+        system_content = """You are a helpful assistant for the Easy BDD testing framework. Help users create, debug, and understand test cases. Be concise and practical.
+
+IMPORTANT: When a user asks you to create a test, you should:
+1. Generate a complete YAML test definition
+2. Wrap the YAML in a code block with ```yaml at the start and ``` at the end
+3. Include all required fields: name, description, steps
+4. Use proper action syntax (e.g., browser.open, browser.click, browser.fill, API request, etc.)
+5. Include variables if needed
+6. Add appropriate tags
+
+Example test structure:
+```yaml
+name: Test Name
+description: Test description
+tags: [tag1, tag2]
+variables:
+  url: https://example.com
+steps:
+  - action: browser.open
+    url: ${url}
+  - action: browser.click
+    selector: button#submit
+```
+
+When you provide a test in YAML format, the system will automatically create it for the user."""
         
         # Add context if provided
         if message.context:
@@ -5527,7 +5552,7 @@ async def chat_assistant(
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",  # Free tier compatible model
                 messages=messages,
-                max_tokens=500,  # Limit response size
+                max_tokens=2000,  # Increased for test generation (allows full YAML test definitions)
                 temperature=0.7,
             )
         except Exception as api_error:
@@ -5535,6 +5560,80 @@ async def chat_assistant(
             raise api_error
         
         assistant_response = response.choices[0].message.content
+        
+        # Check if the response contains a YAML test definition
+        test_created = None
+        yaml_test = None
+        
+        # Look for YAML code blocks in the response
+        import re
+        yaml_pattern = r'```yaml\s*\n(.*?)\n```'
+        yaml_matches = re.findall(yaml_pattern, assistant_response, re.DOTALL)
+        
+        if not yaml_matches:
+            # Also try without the yaml marker
+            yaml_pattern = r'```\s*\n(.*?)\n```'
+            yaml_matches = re.findall(yaml_pattern, assistant_response, re.DOTALL)
+            # Check if it looks like YAML (starts with name: or has action:)
+            for match in yaml_matches:
+                if 'name:' in match or 'action:' in match:
+                    yaml_test = match
+                    break
+        else:
+            yaml_test = yaml_matches[0]
+        
+        # If we found YAML, try to create the test
+        if yaml_test:
+            try:
+                # Parse the YAML
+                test_data = yaml.safe_load(yaml_test)
+                
+                if test_data and isinstance(test_data, dict) and test_data.get("name"):
+                    # Use convert_yaml_to_test to properly parse the YAML
+                    test_def = convert_yaml_to_test(yaml_test)
+                    
+                    # Get workspace from context if available
+                    workspace = None
+                    if message.context and message.context.get("workspace"):
+                        workspace = message.context["workspace"]
+                    
+                    # Create the test
+                    filename = test_def.name.lower().replace(" ", "_").replace("/", "_")
+                    filename = "".join(c for c in filename if c.isalnum() or c == "_")
+                    filename = f"{filename}.yaml"
+                    
+                    if workspace:
+                        target_dir = tests_directory / workspace
+                    else:
+                        target_dir = tests_directory
+                    
+                    test_path = target_dir / filename
+                    
+                    # Check if file already exists, add timestamp if needed
+                    if test_path.exists():
+                        import time
+                        filename = f"{filename.rsplit('.', 1)[0]}_{int(time.time())}.yaml"
+                        test_path = target_dir / filename
+                    
+                    yaml_content = convert_test_to_yaml(test_def)
+                    test_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(test_path, "w") as f:
+                        f.write(yaml_content)
+                    
+                    test_created = {
+                        "success": True,
+                        "test_id": str(test_path.relative_to(tests_directory)),
+                        "path": str(test_path),
+                        "name": test_def.name,
+                        "workspace": workspace,
+                    }
+                    
+                    # Update the response to mention the test was created
+                    assistant_response += f"\n\n✅ **Test Created!** I've created the test '{test_def.name}'. You can find it in your test list."
+            except Exception as e:
+                # If test creation fails, just log it but don't fail the chat response
+                print(f"[Chat Assistant] Failed to create test from YAML: {e}")
+                assistant_response += f"\n\n⚠️ **Note:** I generated a test definition, but there was an error creating it: {str(e)}. You can copy the YAML above and create it manually."
         
         # Estimate tokens used (request + response)
         response_tokens = estimate_tokens(assistant_response)
@@ -5551,7 +5650,8 @@ async def chat_assistant(
             response=assistant_response,
             tokens_used=chat_token_tracker["tokens_used"],
             tokens_remaining=max(0, chat_token_tracker["free_tier_limit"] - chat_token_tracker["tokens_used"]),
-            error=None
+            error=None,
+            test_created=test_created
         )
         
     except Exception as e:

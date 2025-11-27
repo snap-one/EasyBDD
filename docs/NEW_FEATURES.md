@@ -40,9 +40,9 @@ The Metrics & Analytics dashboard now supports time-based filtering to analyze t
 
 ---
 
-## 🤖 AI Assistant with Persistent Context
+## 🤖 AI Assistant with Persistent Context & Test Creation
 
-The AI Assistant is now persistent across all pages and maintains context about your workspace, directory, and current state.
+The AI Assistant is now persistent across all pages, maintains context about your workspace, directory, and current state, and can **create tests automatically**!
 
 ### Features
 
@@ -50,6 +50,7 @@ The AI Assistant is now persistent across all pages and maintains context about 
 - **Message History** - Chat messages persist across page refreshes
 - **Context Awareness** - Automatically includes workspace, directory, current test, and view information
 - **Auto-Updates** - Context updates automatically when you change views, workspaces, or tests
+- **Test Creation** - Can automatically create tests from natural language requests! 🎉
 
 ### How to Use
 
@@ -60,6 +61,29 @@ The AI Assistant is now persistent across all pages and maintains context about 
    - Click **Save**
 3. **Start Chatting** - Type your question or request in the chat input
 4. **Navigate Freely** - The chat panel stays open as you navigate between pages
+
+### Creating Tests with AI
+
+You can now ask the AI Assistant to create tests for you! Simply describe what you want:
+
+**Example Requests:**
+- "Create a test that logs into a website"
+- "Make a test for API testing with GET and POST requests"
+- "Generate a test that fills out a form and submits it"
+- "Create a test that opens example.com and takes a screenshot"
+
+**How It Works:**
+1. Ask the AI to create a test in natural language
+2. The AI generates a complete YAML test definition
+3. The system automatically detects the YAML and creates the test
+4. You'll be prompted to open the test in the Test Builder
+5. The test is saved to your current workspace (if set)
+
+**What Gets Created:**
+- Complete test with name, description, and tags
+- Properly formatted steps with correct action syntax
+- Variables if needed
+- Ready to run immediately!
 
 ### Context Information
 
@@ -75,11 +99,18 @@ The AI Assistant automatically includes:
 
 ### Example Queries
 
+**General Questions:**
 - "How do I create a test that logs into a website?"
 - "What actions are available for API testing?"
 - "Help me fix the failing test in my current workspace"
 - "Show me examples of browser automation"
 - "What's the best way to handle form submissions?"
+
+**Test Creation:**
+- "Create a login test for my website"
+- "Make a test that tests the API endpoints"
+- "Generate a test that validates form submission"
+- "Create a test suite for user registration"
 
 ### Token Management
 
@@ -87,6 +118,7 @@ The AI Assistant automatically includes:
 - Token usage is tracked and displayed in the chat panel
 - Low token warnings appear when tokens are running low
 - Token status updates automatically after each message
+- Test creation uses more tokens (up to 2000 tokens per response) to allow full test definitions
 
 ---
 

@@ -4461,12 +4461,12 @@ class TestRunner:
     
     def _extract_system_resources(self, device_update: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Extract system resources from device update in an OS-agnostic way.
+        Extract system resources from device update with OS detection.
         
-        Handles different data structures from various operating systems:
+        First detects the operating system, then uses OS-specific extraction methods:
         - Linux: /proc/stat, /proc/meminfo style data
-        - Windows: WMI-style data
-        - Embedded: Custom structures
+        - Windows: WMI-style data, Performance Counters
+        - Embedded: Custom structures (Araknis, SnapAV, etc.)
         - OvrC: Nested params structures
         
         Args:
@@ -4485,16 +4485,415 @@ class TestRunner:
             update_params = device_update
         
         # Debug: Log the structure if verbose
-        import os
-        if os.getenv("DEBUG_RESOURCES", "false").lower() == "true":
+        import os as os_module
+        if os_module.getenv("DEBUG_RESOURCES", "false").lower() == "true":
             import json
             print(f"      🔍 Debug: Device update structure (first level keys): {list(update_params.keys())[:10]}")
             print(f"      🔍 Debug: Full update (truncated): {json.dumps(update_params, indent=2)[:500]}")
         
+        # Step 1: Detect Operating System
+        detected_os = self._detect_os_from_update(update_params)
+        
+        # Debug OS detection
+        if os_module.getenv("DEBUG_RESOURCES", "false").lower() == "true":
+            print(f"      🔍 Debug: Detected OS: {detected_os}")
+        
         resources = {}
         found_resources = False
         
-        # Recursive function to search for resource data
+        # Step 2: Use OS-specific extraction methods
+        if detected_os == "linux":
+            resources, found_resources = self._extract_linux_resources(update_params)
+        elif detected_os == "windows":
+            resources, found_resources = self._extract_windows_resources(update_params)
+        elif detected_os == "embedded" or detected_os == "ovrc":
+            resources, found_resources = self._extract_embedded_resources(update_params)
+        else:
+            # Fallback to generic extraction
+            resources, found_resources = self._extract_generic_resources(update_params)
+        
+        # Debug: Log what we found before calculation
+        import os as os_module
+        if os_module.getenv("DEBUG_RESOURCES", "false").lower() == "true":
+            print(f"      🔍 Debug: Extracted resources before calculation: {resources}")
+        
+        # Calculate percentages and finalize resources
+        # Always call calculate_resource_percentages, even if resources is empty
+        # It will handle empty dicts gracefully
+        if resources:
+            resources = self._calculate_resource_percentages(resources)
+        else:
+            resources = {}
+        
+        # Also store the raw update for reference
+        result = {
+            "resources": resources,
+            "resources_found": found_resources or bool(resources),
+            "detected_os": detected_os,
+            "raw_update": device_update,
+            "device_online": True,
+            "timestamp": device_update.get("timestamp") or device_update.get("_received_at")
+        }
+        
+        # Debug: Log final result
+        if os_module.getenv("DEBUG_RESOURCES", "false").lower() == "true":
+            print(f"      🔍 Debug: Final result resources: {result.get('resources')}")
+            if result.get("resources"):
+                cpu = result["resources"].get("cpu", {})
+                mem = result["resources"].get("memory", {})
+                print(f"      🔍 Debug: CPU data: {cpu}")
+                print(f"      🔍 Debug: Memory data: {mem}")
+        
+        return result
+    
+    def _detect_os_from_update(self, update_params: Dict[str, Any]) -> str:
+        """
+        Detect operating system from device update data.
+        
+        Returns:
+            'linux', 'windows', 'embedded', 'ovrc', or 'unknown'
+        """
+        def search_for_os_indicators(data, path="", depth=0, max_depth=5):
+            """Recursively search for OS indicators"""
+            if depth > max_depth:
+                return None
+            
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    key_lower = str(key).lower()
+                    
+                    # Check for explicit OS fields
+                    if key_lower in ["os", "operating_system", "operatingsystem", "platform", "system", "os_type", "ostype"]:
+                        if isinstance(value, str):
+                            value_lower = value.lower()
+                            if "linux" in value_lower:
+                                return "linux"
+                            elif "windows" in value_lower or "win" in value_lower:
+                                return "windows"
+                            elif "embedded" in value_lower or "firmware" in value_lower:
+                                return "embedded"
+                    
+                    # Check for Linux-specific indicators
+                    if any(indicator in key_lower for indicator in ["proc", "/proc", "meminfo", "stat", "loadavg", "uptime"]):
+                        return "linux"
+                    
+                    # Check for Windows-specific indicators
+                    if any(indicator in key_lower for indicator in ["wmi", "performance", "counter", "win32", "powershell"]):
+                        return "windows"
+                    
+                    # Check for OvrC/embedded indicators
+                    if any(indicator in key_lower for indicator in ["ovrc", "araknis", "snapav", "firmware", "device_type"]):
+                        return "embedded"
+                    
+                    # Recursively search nested structures
+                    if isinstance(value, (dict, list)):
+                        result = search_for_os_indicators(value, f"{path}.{key}", depth + 1, max_depth)
+                        if result:
+                            return result
+            
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, (dict, list)):
+                        result = search_for_os_indicators(item, path, depth + 1, max_depth)
+                        if result:
+                            return result
+            
+            return None
+        
+        # Search for OS indicators
+        detected = search_for_os_indicators(update_params)
+        
+        # Default to 'ovrc' if we're dealing with OvrC device updates
+        if not detected:
+            # Check if this looks like an OvrC update structure
+            if "params" in update_params or "method" in update_params:
+                detected = "ovrc"
+            else:
+                detected = "unknown"
+        
+        return detected
+    
+    def _extract_linux_resources(self, update_params: Dict[str, Any]) -> tuple:
+        """Extract resources from Linux-style data structures"""
+        resources = {}
+        found = False
+        
+        def find_linux_resources(data, path="", depth=0, max_depth=10):
+            found_res = {}
+            if depth > max_depth:
+                return found_res
+            
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if value is None:
+                        continue
+                    key_lower = str(key).lower()
+                    current_path = f"{path}.{key}" if path else key
+                    
+                    # Linux CPU patterns: /proc/stat, /proc/loadavg
+                    if any(pattern in key_lower for pattern in ["cpu", "loadavg", "load_avg", "cpuload"]):
+                        if isinstance(value, (int, float)):
+                            if "cpu" not in found_res:
+                                found_res["cpu"] = {}
+                            if "load" in key_lower or "loadavg" in key_lower:
+                                found_res["cpu"]["load"] = float(value)
+                            else:
+                                found_res["cpu"]["usage_percent"] = float(value)
+                            found_res["cpu"]["source"] = current_path
+                        elif isinstance(value, dict):
+                            if "cpu" not in found_res:
+                                found_res["cpu"] = {}
+                            for k, v in value.items():
+                                if isinstance(v, (int, float)):
+                                    found_res["cpu"][k] = float(v)
+                            found_res["cpu"]["source"] = current_path
+                    
+                    # Linux memory patterns: /proc/meminfo
+                    if any(pattern in key_lower for pattern in ["meminfo", "mem", "memory"]):
+                        if isinstance(value, dict):
+                            if "memory" not in found_res:
+                                found_res["memory"] = {}
+                            # Look for MemTotal, MemFree, MemAvailable
+                            for k, v in value.items():
+                                k_lower = str(k).lower()
+                                if isinstance(v, (int, float)):
+                                    if "total" in k_lower or "memtotal" in k_lower:
+                                        found_res["memory"]["total"] = int(v)
+                                    elif "free" in k_lower or "memfree" in k_lower:
+                                        found_res["memory"]["free"] = int(v)
+                                    elif "available" in k_lower or "memavailable" in k_lower:
+                                        found_res["memory"]["available"] = int(v)
+                                    elif "used" in k_lower or "memused" in k_lower:
+                                        found_res["memory"]["used"] = int(v)
+                            if found_res["memory"]:
+                                found_res["memory"]["source"] = current_path
+                    
+                    # Recursively search
+                    if isinstance(value, (dict, list)):
+                        nested = find_linux_resources(value, current_path, depth + 1, max_depth)
+                        found_res.update(nested)
+            
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, (dict, list)):
+                        nested = find_linux_resources(item, path, depth + 1, max_depth)
+                        found_res.update(nested)
+            
+            return found_res
+        
+        extracted = find_linux_resources(update_params)
+        if extracted:
+            resources.update(extracted)
+            found = True
+        
+        return resources, found
+    
+    def _extract_windows_resources(self, update_params: Dict[str, Any]) -> tuple:
+        """Extract resources from Windows-style data structures (WMI, Performance Counters)"""
+        resources = {}
+        found = False
+        
+        def find_windows_resources(data, path="", depth=0, max_depth=10):
+            found_res = {}
+            if depth > max_depth:
+                return found_res
+            
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if value is None:
+                        continue
+                    key_lower = str(key).lower()
+                    current_path = f"{path}.{key}" if path else key
+                    
+                    # Windows CPU patterns: Processor, CPUUsage, PercentProcessorTime
+                    if any(pattern in key_lower for pattern in ["processor", "cpu", "cpuusage", "percentprocessortime", "processortime"]):
+                        if isinstance(value, (int, float)):
+                            if "cpu" not in found_res:
+                                found_res["cpu"] = {}
+                            if "percent" in key_lower or "usage" in key_lower or "time" in key_lower:
+                                found_res["cpu"]["usage_percent"] = float(value)
+                            else:
+                                found_res["cpu"]["usage_percent"] = float(value)
+                            found_res["cpu"]["source"] = current_path
+                        elif isinstance(value, dict):
+                            if "cpu" not in found_res:
+                                found_res["cpu"] = {}
+                            for k, v in value.items():
+                                if isinstance(v, (int, float)):
+                                    k_lower = str(k).lower()
+                                    if "percent" in k_lower or "usage" in k_lower:
+                                        found_res["cpu"]["usage_percent"] = float(v)
+                                    else:
+                                        found_res["cpu"][k] = float(v)
+                            found_res["cpu"]["source"] = current_path
+                    
+                    # Windows memory patterns: Memory, TotalPhysicalMemory, AvailablePhysicalMemory
+                    if any(pattern in key_lower for pattern in ["memory", "physicalmemory", "totalphysical", "availablephysical", "freephysical"]):
+                        if isinstance(value, (int, float)):
+                            if "memory" not in found_res:
+                                found_res["memory"] = {}
+                            if "total" in key_lower:
+                                found_res["memory"]["total"] = int(value)
+                            elif "free" in key_lower or "available" in key_lower:
+                                found_res["memory"]["free"] = int(value)
+                            elif "used" in key_lower:
+                                found_res["memory"]["used"] = int(value)
+                            found_res["memory"]["source"] = current_path
+                        elif isinstance(value, dict):
+                            if "memory" not in found_res:
+                                found_res["memory"] = {}
+                            for k, v in value.items():
+                                if isinstance(v, (int, float)):
+                                    k_lower = str(k).lower()
+                                    if "total" in k_lower:
+                                        found_res["memory"]["total"] = int(v)
+                                    elif "free" in k_lower or "available" in k_lower:
+                                        found_res["memory"]["free"] = int(v)
+                                    elif "used" in k_lower:
+                                        found_res["memory"]["used"] = int(v)
+                            if found_res["memory"]:
+                                found_res["memory"]["source"] = current_path
+                    
+                    # Recursively search
+                    if isinstance(value, (dict, list)):
+                        nested = find_windows_resources(value, current_path, depth + 1, max_depth)
+                        found_res.update(nested)
+            
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, (dict, list)):
+                        nested = find_windows_resources(item, path, depth + 1, max_depth)
+                        found_res.update(nested)
+            
+            return found_res
+        
+        extracted = find_windows_resources(update_params)
+        if extracted:
+            resources.update(extracted)
+            found = True
+        
+        return resources, found
+    
+    def _extract_embedded_resources(self, update_params: Dict[str, Any]) -> tuple:
+        """Extract resources from embedded/OvrC-style data structures"""
+        resources = {}
+        found = False
+        
+        def find_embedded_resources(data, path="", depth=0, max_depth=10):
+            found_res = {}
+            if depth > max_depth:
+                return found_res
+            
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if value is None:
+                        continue
+                    key_lower = str(key).lower()
+                    current_path = f"{path}.{key}" if path else key
+                    
+                    # Embedded CPU patterns - very flexible
+                    cpu_patterns = ["cpu", "cpuload", "cpu_load", "cpuusage", "cpu_usage", 
+                                   "cpupercent", "cpu_percent", "cpuutil", "cpu_util",
+                                   "load", "loadavg", "load_avg", "processor", "usage"]
+                    if any(pattern in key_lower for pattern in cpu_patterns):
+                        if isinstance(value, (int, float)):
+                            if "cpu" not in found_res:
+                                found_res["cpu"] = {}
+                            # Store the value - we'll determine what it represents
+                            if "percent" in key_lower or "usage" in key_lower or "util" in key_lower:
+                                found_res["cpu"]["usage_percent"] = float(value)
+                            elif "load" in key_lower:
+                                found_res["cpu"]["load"] = float(value)
+                            else:
+                                # Default: assume it's usage_percent if it's a reasonable value
+                                val = float(value)
+                                if 0 <= val <= 100:
+                                    found_res["cpu"]["usage_percent"] = val
+                                elif 0 <= val <= 1:
+                                    found_res["cpu"]["usage_percent"] = val  # Will be converted to percentage later
+                                else:
+                                    found_res["cpu"]["usage_percent"] = val
+                            found_res["cpu"]["source"] = current_path
+                        elif isinstance(value, dict):
+                            if "cpu" not in found_res:
+                                found_res["cpu"] = {}
+                            for k, v in value.items():
+                                if isinstance(v, (int, float)):
+                                    k_lower = str(k).lower()
+                                    # Store with appropriate key
+                                    if "percent" in k_lower or "usage" in k_lower or "util" in k_lower:
+                                        found_res["cpu"]["usage_percent"] = float(v)
+                                    elif "load" in k_lower:
+                                        found_res["cpu"]["load"] = float(v)
+                                    else:
+                                        # Store as-is, will be processed later
+                                        found_res["cpu"][k] = float(v)
+                            found_res["cpu"]["source"] = current_path
+                    
+                    # Embedded memory patterns - very flexible
+                    mem_patterns = ["memory", "mem", "ram", "physicalmemory", "totalmemory",
+                                   "usedmemory", "freememory", "availablememory",
+                                   "memtotal", "memfree", "memused", "memavailable"]
+                    if any(pattern in key_lower for pattern in mem_patterns):
+                        if isinstance(value, (int, float)):
+                            if "memory" not in found_res:
+                                found_res["memory"] = {}
+                            # Determine what type of memory value this is
+                            if "total" in key_lower or "memtotal" in key_lower:
+                                found_res["memory"]["total"] = int(value)
+                            elif "free" in key_lower or "available" in key_lower or "memfree" in key_lower or "memavailable" in key_lower:
+                                found_res["memory"]["free"] = int(value)
+                            elif "used" in key_lower or "memused" in key_lower:
+                                found_res["memory"]["used"] = int(value)
+                            else:
+                                # If we can't determine, store as total (common case)
+                                found_res["memory"]["total"] = int(value)
+                            found_res["memory"]["source"] = current_path
+                        elif isinstance(value, dict):
+                            if "memory" not in found_res:
+                                found_res["memory"] = {}
+                            for k, v in value.items():
+                                if isinstance(v, (int, float)):
+                                    k_lower = str(k).lower()
+                                    # Store with appropriate key
+                                    if "total" in k_lower or "memtotal" in k_lower:
+                                        found_res["memory"]["total"] = int(v)
+                                    elif "free" in k_lower or "available" in k_lower or "memfree" in k_lower or "memavailable" in k_lower:
+                                        found_res["memory"]["free"] = int(v)
+                                    elif "used" in k_lower or "memused" in k_lower:
+                                        found_res["memory"]["used"] = int(v)
+                                    else:
+                                        # Store as-is for later processing
+                                        found_res["memory"][k] = int(v) if isinstance(v, (int, float)) and v > 1000 else float(v)
+                            if found_res["memory"]:
+                                found_res["memory"]["source"] = current_path
+                    
+                    # Recursively search
+                    if isinstance(value, (dict, list)):
+                        nested = find_embedded_resources(value, current_path, depth + 1, max_depth)
+                        found_res.update(nested)
+            
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, (dict, list)):
+                        nested = find_embedded_resources(item, path, depth + 1, max_depth)
+                        found_res.update(nested)
+            
+            return found_res
+        
+        extracted = find_embedded_resources(update_params)
+        if extracted:
+            resources.update(extracted)
+            found = True
+        
+        return resources, found
+    
+    def _extract_generic_resources(self, update_params: Dict[str, Any]) -> tuple:
+        """Generic fallback extraction method"""
+        # Use the original generic extraction logic as fallback
+        resources = {}
+        found_resources = False
+        
         def find_resource_data(data, path="", depth=0, max_depth=10):
             """Recursively search for CPU, memory, disk, network data"""
             if depth > max_depth:
@@ -4688,16 +5087,135 @@ class TestRunner:
                     if 0 <= usage <= 1:
                         disk_data["usage_percent"] = usage * 100
         
-        # Also store the raw update for reference
-        result = {
-            "resources": resources,
-            "resources_found": found_resources or bool(resources),
-            "raw_update": device_update,
-            "device_online": True,
-            "timestamp": device_update.get("timestamp") or device_update.get("_received_at")
-        }
+        return resources, found_resources
+    
+    def _calculate_resource_percentages(self, resources: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate percentages for CPU, memory, and disk resources"""
+        import os as os_module
+        debug = os_module.getenv("DEBUG_RESOURCES", "false").lower() == "true"
         
-        return result
+        if not resources:
+            return {}
+        
+        if debug:
+            print(f"      🔍 Debug: Calculating percentages for resources: {resources}")
+        
+        # CPU: If we have usage but it's 0-1 range, convert to 0-100
+        if "cpu" in resources:
+            cpu_data = resources["cpu"]
+            if isinstance(cpu_data, dict):
+                if debug:
+                    print(f"      🔍 Debug: CPU data before calculation: {cpu_data}")
+                
+                # Check if we have usage_percent
+                if "usage_percent" in cpu_data:
+                    usage = cpu_data["usage_percent"]
+                    if debug:
+                        print(f"      🔍 Debug: Found usage_percent: {usage}")
+                    # If value is between 0-1, assume it's a fraction and convert to percentage
+                    if 0 <= usage <= 1:
+                        cpu_data["usage_percent"] = usage * 100
+                        if debug:
+                            print(f"      🔍 Debug: Converted 0-1 range to percentage: {cpu_data['usage_percent']}")
+                    # Ensure it's a float
+                    cpu_data["usage_percent"] = float(cpu_data["usage_percent"])
+                # If we have load but no usage_percent, try to convert
+                elif "load" in cpu_data:
+                    load = cpu_data["load"]
+                    if isinstance(load, (int, float)):
+                        if debug:
+                            print(f"      🔍 Debug: Found load value: {load}")
+                        if 0 <= load <= 1:
+                            cpu_data["usage_percent"] = load * 100
+                        else:
+                            cpu_data["usage_percent"] = float(load)
+                        if debug:
+                            print(f"      🔍 Debug: Converted load to usage_percent: {cpu_data['usage_percent']}")
+                # If we have any numeric value in CPU data, try to use it
+                else:
+                    # Look for any numeric value that could be CPU usage
+                    for key, value in cpu_data.items():
+                        if key not in ["source"] and isinstance(value, (int, float)):
+                            if debug:
+                                print(f"      🔍 Debug: Found numeric CPU value {key}: {value}")
+                            if 0 <= value <= 1:
+                                cpu_data["usage_percent"] = value * 100
+                            elif value > 1 and value <= 100:
+                                cpu_data["usage_percent"] = float(value)
+                            elif value > 100:
+                                # Might be in 0-1000 range or similar, normalize
+                                cpu_data["usage_percent"] = float(value) / 10.0 if value > 100 else float(value)
+                            if debug:
+                                print(f"      🔍 Debug: Set usage_percent to: {cpu_data['usage_percent']}")
+                            break
+                
+                # Log CPU percentage for visibility
+                if "usage_percent" in cpu_data:
+                    print(f"      💻 CPU Usage: {cpu_data['usage_percent']:.2f}%")
+                elif debug:
+                    print(f"      🔍 Debug: No usage_percent calculated for CPU. Available keys: {list(cpu_data.keys())}")
+        
+        # Memory: Calculate percentage from used/total if we have both
+        if "memory" in resources:
+            mem_data = resources["memory"]
+            if isinstance(mem_data, dict):
+                if debug:
+                    print(f"      🔍 Debug: Memory data before calculation: {mem_data}")
+                
+                total = mem_data.get("total") or mem_data.get("total_memory") or mem_data.get("memtotal")
+                used = mem_data.get("used") or mem_data.get("used_memory") or mem_data.get("memused")
+                free = mem_data.get("free") or mem_data.get("free_memory") or mem_data.get("memfree") or mem_data.get("available") or mem_data.get("available_memory") or mem_data.get("memavailable")
+                
+                if debug:
+                    print(f"      🔍 Debug: Memory values - total: {total}, used: {used}, free: {free}")
+                
+                # Calculate used if we have total and free
+                if total and free and not used:
+                    used = total - free
+                    mem_data["used"] = used
+                    if debug:
+                        print(f"      🔍 Debug: Calculated used from total-free: {used}")
+                
+                # Calculate percentage if we have total and used
+                if total and used and total > 0:
+                    usage_percent = (used / total) * 100
+                    mem_data["usage_percent"] = round(usage_percent, 2)
+                    print(f"      💾 Memory Usage: {mem_data['usage_percent']:.2f}% ({used}/{total} bytes)")
+                    if debug:
+                        print(f"      🔍 Debug: Calculated memory percentage: {usage_percent}%")
+                # If we have usage_percent but it's 0-1 range, convert
+                elif "usage_percent" in mem_data:
+                    usage = mem_data["usage_percent"]
+                    if 0 <= usage <= 1:
+                        mem_data["usage_percent"] = usage * 100
+                    print(f"      💾 Memory Usage: {mem_data['usage_percent']:.2f}%")
+                elif debug:
+                    print(f"      🔍 Debug: Cannot calculate memory percentage. Missing total or used. Available keys: {list(mem_data.keys())}")
+        
+        # Disk: Calculate percentage from used/total if we have both
+        if "disk" in resources:
+            disk_data = resources["disk"]
+            if isinstance(disk_data, dict):
+                total = disk_data.get("total") or disk_data.get("total_size") or disk_data.get("size")
+                used = disk_data.get("used") or disk_data.get("used_size")
+                free = disk_data.get("free") or disk_data.get("free_size") or disk_data.get("available")
+                
+                # Calculate used if we have total and free
+                if total and free and not used:
+                    used = total - free
+                    disk_data["used"] = used
+                
+                # Calculate percentage if we have total and used
+                if total and used and total > 0:
+                    usage_percent = (used / total) * 100
+                    disk_data["usage_percent"] = round(usage_percent, 2)
+                # If we have usage_percent but it's 0-1 range, convert
+                elif "usage_percent" in disk_data:
+                    usage = disk_data["usage_percent"]
+                    if 0 <= usage <= 1:
+                        disk_data["usage_percent"] = usage * 100
+        
+        return resources
 
     def _replace_variables(self, data, variables: dict):
         """Replace ${variable} placeholders in data"""

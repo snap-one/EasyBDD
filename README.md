@@ -26,7 +26,7 @@ A powerful, user-friendly YAML-based BDD testing framework that supports multipl
 - **🗑️ Safe Deletions** - Confirmation dialogs for deleting variables and steps
 - **📊 Metrics & Analytics Dashboard** - Comprehensive metrics page with test health, execution trends, coverage analysis, and resource insights
 - **📅 Time Period Filtering** - Filter metrics by 7 days, 2 weeks, 3 weeks, 1 month, or 1 quarter
-- **🤖 AI Assistant** - Persistent AI chat assistant with workspace/directory context awareness
+- **🤖 AI Assistant** - Persistent AI chat assistant with workspace/directory context awareness and **automatic test creation**
 - **♻️ Test Rerun** - Rerun tests directly from results pages
 - **✏️ In-Suite Test Editing** - Edit tests during suite creation/editing with context preservation
 - **🗺️ Routing Support** - Proper URL routing with page refresh support and deep linking
@@ -40,7 +40,7 @@ A powerful, user-friendly YAML-based BDD testing framework that supports multipl
 
 - **Metrics & Analytics Dashboard** - Comprehensive metrics page with test health monitoring (failing tests, flaky tests, stale tests), execution trends (time trends, failure rates, peak hours), test coverage analysis (by workspace, action type, complexity), quick insights (velocity, streaks, recent failures), and resource storage tracking
 - **Time Period Filtering** - Filter metrics by 7 days, 2 weeks, 3 weeks, 1 month, or 1 quarter for trend analysis
-- **AI Assistant** - Persistent AI chat assistant that maintains context across pages, including workspace, directory, current test, and view information
+- **AI Assistant** - Persistent AI chat assistant that maintains context across pages, including workspace, directory, current test, and view information. **Can automatically create tests from natural language requests!**
 - **Test Rerun** - Rerun tests directly from results pages with one click
 - **In-Suite Test Editing** - Edit tests while creating/editing suites without losing context
 - **Routing & Page Refresh** - Proper URL routing with state persistence, allowing page refreshes without errors
