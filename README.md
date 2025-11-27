@@ -35,7 +35,7 @@ A powerful, user-friendly YAML-based BDD testing framework that supports multipl
 - **📈 System Resource Auto-Detection** - Automatic CPU, memory, disk, and network monitoring
 - **🎬 Demo Test Suite** - Ready-to-run demo tests for UI and API testing
 
-**[📖 Full Test Builder Guide](docs/TEST_BUILDER.md)** | **[🆕 New Features Guide](docs/NEW_FEATURES.md)** | **Quick Start**: `python frontend/start_builder.py` → http://localhost:8000
+**[📖 Full Test Builder Guide](docs/TEST_BUILDER.md)** | **[🆕 New Features Guide](docs/NEW_FEATURES.md)** | **[🚀 Server Deployment Guide](docs/SERVER_DEPLOYMENT.md)** | **Quick Start**: `python frontend/start_builder.py` → http://localhost:8000
 
 ### 🆕 Recent Features
 
