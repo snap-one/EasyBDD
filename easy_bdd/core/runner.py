@@ -4503,16 +4503,36 @@ class TestRunner:
         resources = {}
         found_resources = False
         
-        # Step 2: Use OS-specific extraction methods
+        # Step 2: Use OS-specific extraction methods, but ALWAYS fall back to generic
+        # Try OS-specific first, then generic as backup
+        resources = {}
+        found_resources = False
+        
         if detected_os == "linux":
             resources, found_resources = self._extract_linux_resources(update_params)
         elif detected_os == "windows":
             resources, found_resources = self._extract_windows_resources(update_params)
         elif detected_os == "embedded" or detected_os == "ovrc":
             resources, found_resources = self._extract_embedded_resources(update_params)
+        
+        # ALWAYS also try generic extraction as a fallback/backup
+        # This ensures we catch resources even if OS-specific extraction misses them
+        generic_resources, generic_found = self._extract_generic_resources(update_params)
+        
+        # Merge generic results with OS-specific results (generic takes precedence if OS-specific found nothing)
+        if not found_resources or not resources:
+            # If OS-specific didn't find anything, use generic
+            resources = generic_resources
+            found_resources = generic_found
         else:
-            # Fallback to generic extraction
-            resources, found_resources = self._extract_generic_resources(update_params)
+            # Merge both - generic might have found additional data
+            for key in ["cpu", "memory", "disk", "network"]:
+                if key in generic_resources and key not in resources:
+                    resources[key] = generic_resources[key]
+                elif key in generic_resources and key in resources:
+                    # Merge dictionaries
+                    if isinstance(resources[key], dict) and isinstance(generic_resources[key], dict):
+                        resources[key].update(generic_resources[key])
         
         # Debug: Log what we found before calculation
         import os as os_module
@@ -4520,12 +4540,10 @@ class TestRunner:
             print(f"      🔍 Debug: Extracted resources before calculation: {resources}")
         
         # Calculate percentages and finalize resources
-        # Always call calculate_resource_percentages, even if resources is empty
-        # It will handle empty dicts gracefully
-        if resources:
-            resources = self._calculate_resource_percentages(resources)
-        else:
-            resources = {}
+        # ALWAYS call calculate_resource_percentages to ensure percentages are calculated
+        # Even if resources is empty, it will handle it gracefully
+        # This ensures we always have usage_percent values if any resource data exists
+        resources = self._calculate_resource_percentages(resources) if resources else {}
         
         # Also store the raw update for reference
         result = {
@@ -4896,7 +4914,7 @@ class TestRunner:
         resources = {}
         found_resources = False
         
-        def find_resource_data(data, path="", depth=0, max_depth=10):
+        def find_resource_data(data, path="", depth=0, max_depth=15):
             """Recursively search for CPU, memory, disk, network data"""
             if depth > max_depth:
                 return {}
@@ -4910,24 +4928,36 @@ class TestRunner:
                     current_path = f"{path}.{key}" if path else key
                     key_lower = str(key).lower()
                     
-                    # CPU detection - multiple patterns for different OSes
-                    cpu_patterns = ["cpu", "processor", "load", "usage", "utilization", 
-                                   "cpuusage", "cpuload", "cpu_usage", "cpu_load",
-                                   "processorusage", "processorload", "cpuloadavg", "cpu_load_avg",
-                                   "cpupercent", "cpu_percent", "cpuutil", "cpu_util"]
+                    # CPU detection - EXTENSIVE patterns for ALL operating systems
+                    cpu_patterns = [
+                        "cpu", "processor", "load", "usage", "utilization", "util",
+                        "cpuusage", "cpuload", "cpu_usage", "cpu_load", "cpuutil", "cpu_util",
+                        "processorusage", "processorload", "cpuloadavg", "cpu_load_avg",
+                        "cpupercent", "cpu_percent", "cpuutilization", "cpu_utilization",
+                        "percentcpu", "percent_cpu", "cpupct", "cpu_pct",
+                        "loadavg", "load_avg", "loadaverage", "load_average",
+                        "systemload", "system_load", "cpuloadavg1m", "cpuloadavg5m",
+                        "processorusage", "processor_usage", "processorutilization"
+                    ]
                     if any(pattern in key_lower for pattern in cpu_patterns):
-                        if isinstance(value, (int, float)):
+                        if isinstance(value, (int, float)) and value >= 0:
                             # Update existing CPU or create new
                             if "cpu" not in found:
                                 found["cpu"] = {}
                             # Store the value - we'll calculate percentage later if needed
-                            if "usage" in key_lower or "utilization" in key_lower or "percent" in key_lower:
+                            if "usage" in key_lower or "utilization" in key_lower or "util" in key_lower or "percent" in key_lower or "pct" in key_lower:
                                 found["cpu"]["usage_percent"] = float(value)
                             elif "load" in key_lower:
                                 found["cpu"]["load"] = float(value)
                             else:
-                                # Default to usage_percent
-                                found["cpu"]["usage_percent"] = float(value)
+                                # Default to usage_percent - try to interpret the value
+                                val = float(value)
+                                if 0 <= val <= 1:
+                                    found["cpu"]["usage_percent"] = val  # Will be converted to percentage
+                                elif 0 <= val <= 100:
+                                    found["cpu"]["usage_percent"] = val
+                                else:
+                                    found["cpu"]["usage_percent"] = val  # Store as-is, will be normalized
                             found["cpu"]["source"] = current_path
                             found_resources = True
                         elif isinstance(value, dict):
@@ -4936,20 +4966,44 @@ class TestRunner:
                                 found["cpu"] = {}
                             cpu_data = {}
                             for k, v in value.items():
-                                if isinstance(v, (int, float)):
-                                    cpu_data[k] = float(v)
+                                if isinstance(v, (int, float)) and v >= 0:
+                                    k_lower = str(k).lower()
+                                    if "usage" in k_lower or "utilization" in k_lower or "util" in k_lower or "percent" in k_lower or "pct" in k_lower:
+                                        cpu_data["usage_percent"] = float(v)
+                                    elif "load" in k_lower:
+                                        cpu_data["load"] = float(v)
+                                    else:
+                                        cpu_data[k] = float(v)
                             if cpu_data:
                                 found["cpu"].update(cpu_data)
                                 found["cpu"]["source"] = current_path
                                 found_resources = True
+                        elif isinstance(value, list):
+                            # Sometimes CPU data is in a list (e.g., load averages)
+                            for item in value:
+                                if isinstance(item, (int, float)) and item >= 0:
+                                    if "cpu" not in found:
+                                        found["cpu"] = {}
+                                    if "load" in key_lower:
+                                        found["cpu"]["load"] = float(item)
+                                    else:
+                                        found["cpu"]["usage_percent"] = float(item)
+                                    found["cpu"]["source"] = current_path
+                                    found_resources = True
+                                    break
                     
-                    # Memory detection - multiple patterns
-                    mem_patterns = ["memory", "mem", "ram", "physicalmemory", "physical_memory",
-                                   "totalmemory", "total_memory", "usedmemory", "used_memory",
-                                   "freememory", "free_memory", "availablememory", "available_memory",
-                                   "memtotal", "memfree", "memavailable", "memused"]
+                    # Memory detection - EXTENSIVE patterns for ALL operating systems
+                    mem_patterns = [
+                        "memory", "mem", "ram", "physicalmemory", "physical_memory", "physical",
+                        "totalmemory", "total_memory", "usedmemory", "used_memory", "usagememory",
+                        "freememory", "free_memory", "availablememory", "available_memory",
+                        "memtotal", "memfree", "memavailable", "memused", "memusage",
+                        "totalram", "usedram", "freeram", "availableram",
+                        "systemmemory", "system_memory", "totalphysical", "availablephysical",
+                        "freephysical", "usedphysical", "physicalmem", "physical_mem"
+                    ]
                     if any(pattern in key_lower for pattern in mem_patterns):
-                        if isinstance(value, (int, float)):
+                        if isinstance(value, (int, float)) and value > 0:
                             # Single value - merge with existing memory data
                             if "memory" not in found:
                                 found["memory"] = {}
@@ -4957,8 +5011,12 @@ class TestRunner:
                                 found["memory"]["free"] = int(value)
                             elif "used" in key_lower or "usage" in key_lower:
                                 found["memory"]["used"] = int(value)
-                            else:
+                            elif "total" in key_lower:
                                 found["memory"]["total"] = int(value)
+                            else:
+                                # If we can't determine, assume it's total if it's a large number (> 1MB)
+                                if value > 1048576:  # > 1MB
+                                    found["memory"]["total"] = int(value)
                             found["memory"]["source"] = current_path
                             found_resources = True
                         elif isinstance(value, dict):
@@ -4967,8 +5025,19 @@ class TestRunner:
                                 found["memory"] = {}
                             mem_data = {}
                             for k, v in value.items():
-                                if isinstance(v, (int, float)):
-                                    mem_data[k] = int(v) if "total" in k.lower() or "free" in k.lower() or "used" in k.lower() else float(v)
+                                if isinstance(v, (int, float)) and v >= 0:
+                                    k_lower = str(k).lower()
+                                    if "total" in k_lower or "memtotal" in k_lower:
+                                        mem_data["total"] = int(v)
+                                    elif "free" in k_lower or "available" in k_lower or "memfree" in k_lower or "memavailable" in k_lower:
+                                        mem_data["free"] = int(v)
+                                    elif "used" in k_lower or "usage" in k_lower or "memused" in k_lower or "memusage" in k_lower:
+                                        mem_data["used"] = int(v)
+                                    elif "percent" in k_lower or "pct" in k_lower:
+                                        mem_data["usage_percent"] = float(v)
+                                    else:
+                                        # Store as-is - might be useful later
+                                        mem_data[k] = int(v) if v > 1000 else float(v)
                             if mem_data:
                                 found["memory"].update(mem_data)
                                 found["memory"]["source"] = current_path
@@ -5023,6 +5092,7 @@ class TestRunner:
                     resources[key] = value
         
         # Calculate percentages from raw values if needed
+        # This is a fallback - _calculate_resource_percentages will also do this, but we do it here too for safety
         # CPU: If we have usage but it's 0-1 range, convert to 0-100
         if "cpu" in resources:
             cpu_data = resources["cpu"]
@@ -5034,6 +5104,7 @@ class TestRunner:
                     if 0 <= usage <= 1:
                         cpu_data["usage_percent"] = usage * 100
                     # If value is already > 1, assume it's already a percentage
+                    cpu_data["usage_percent"] = float(cpu_data["usage_percent"])
                 # If we have load but no usage_percent, try to convert
                 elif "load" in cpu_data:
                     load = cpu_data["load"]
@@ -5042,14 +5113,33 @@ class TestRunner:
                             cpu_data["usage_percent"] = load * 100
                         else:
                             cpu_data["usage_percent"] = float(load)
+                # If we have any numeric value, try to use it
+                else:
+                    for k, v in cpu_data.items():
+                        if k != "source" and isinstance(v, (int, float)) and v >= 0:
+                            if 0 <= v <= 1:
+                                cpu_data["usage_percent"] = v * 100
+                            elif v > 1 and v <= 100:
+                                cpu_data["usage_percent"] = float(v)
+                            break
         
         # Memory: Calculate percentage from used/total if we have both
         if "memory" in resources:
             mem_data = resources["memory"]
             if isinstance(mem_data, dict):
-                total = mem_data.get("total") or mem_data.get("total_memory") or mem_data.get("memtotal")
-                used = mem_data.get("used") or mem_data.get("used_memory") or mem_data.get("memused")
-                free = mem_data.get("free") or mem_data.get("free_memory") or mem_data.get("memfree") or mem_data.get("available") or mem_data.get("available_memory") or mem_data.get("memavailable")
+                # Try multiple patterns for total, used, free
+                total = (mem_data.get("total") or mem_data.get("total_memory") or 
+                        mem_data.get("memtotal") or mem_data.get("total_ram") or
+                        mem_data.get("physicalmemory") or mem_data.get("physical_memory"))
+                used = (mem_data.get("used") or mem_data.get("used_memory") or 
+                       mem_data.get("memused") or mem_data.get("used_ram") or
+                       mem_data.get("usedphysical") or mem_data.get("used_physical"))
+                free = (mem_data.get("free") or mem_data.get("free_memory") or 
+                       mem_data.get("memfree") or mem_data.get("free_ram") or
+                       mem_data.get("available") or mem_data.get("available_memory") or 
+                       mem_data.get("memavailable") or mem_data.get("available_ram") or
+                       mem_data.get("freephysical") or mem_data.get("free_physical") or
+                       mem_data.get("availablephysical") or mem_data.get("available_physical"))
                 
                 # Calculate used if we have total and free
                 if total and free and not used:
@@ -5065,6 +5155,7 @@ class TestRunner:
                     usage = mem_data["usage_percent"]
                     if 0 <= usage <= 1:
                         mem_data["usage_percent"] = usage * 100
+                    mem_data["usage_percent"] = float(mem_data["usage_percent"])
         
         # Disk: Calculate percentage from used/total if we have both
         if "disk" in resources:
@@ -5137,25 +5228,40 @@ class TestRunner:
                 else:
                     # Look for any numeric value that could be CPU usage
                     for key, value in cpu_data.items():
-                        if key not in ["source"] and isinstance(value, (int, float)):
+                        if key not in ["source"] and isinstance(value, (int, float)) and value >= 0:
                             if debug:
                                 print(f"      🔍 Debug: Found numeric CPU value {key}: {value}")
                             if 0 <= value <= 1:
                                 cpu_data["usage_percent"] = value * 100
                             elif value > 1 and value <= 100:
                                 cpu_data["usage_percent"] = float(value)
-                            elif value > 100:
-                                # Might be in 0-1000 range or similar, normalize
-                                cpu_data["usage_percent"] = float(value) / 10.0 if value > 100 else float(value)
+                            elif value > 100 and value <= 1000:
+                                # Might be in 0-1000 range (e.g., 0-1000 = 0-100%), normalize
+                                cpu_data["usage_percent"] = float(value) / 10.0
+                            elif value > 1000:
+                                # Very large value, might be in different units, try to normalize
+                                cpu_data["usage_percent"] = min(100.0, float(value) / 100.0)
+                            else:
+                                cpu_data["usage_percent"] = float(value)
                             if debug:
                                 print(f"      🔍 Debug: Set usage_percent to: {cpu_data['usage_percent']}")
                             break
+                    
+                    # If still no usage_percent, set a default of 0 to ensure the key exists
+                    if "usage_percent" not in cpu_data:
+                        cpu_data["usage_percent"] = 0.0
+                        if debug:
+                            print(f"      🔍 Debug: No CPU usage found, defaulting to 0%")
                 
                 # Log CPU percentage for visibility
-                if "usage_percent" in cpu_data:
+                if "usage_percent" in cpu_data and cpu_data["usage_percent"] is not None:
                     print(f"      💻 CPU Usage: {cpu_data['usage_percent']:.2f}%")
                 elif debug:
                     print(f"      🔍 Debug: No usage_percent calculated for CPU. Available keys: {list(cpu_data.keys())}")
+                else:
+                    # Even if not in debug mode, ensure we have a value
+                    if "usage_percent" not in cpu_data:
+                        cpu_data["usage_percent"] = 0.0
         
         # Memory: Calculate percentage from used/total if we have both
         if "memory" in resources:
@@ -5164,9 +5270,19 @@ class TestRunner:
                 if debug:
                     print(f"      🔍 Debug: Memory data before calculation: {mem_data}")
                 
-                total = mem_data.get("total") or mem_data.get("total_memory") or mem_data.get("memtotal")
-                used = mem_data.get("used") or mem_data.get("used_memory") or mem_data.get("memused")
-                free = mem_data.get("free") or mem_data.get("free_memory") or mem_data.get("memfree") or mem_data.get("available") or mem_data.get("available_memory") or mem_data.get("memavailable")
+                # Try multiple patterns for total, used, free
+                total = (mem_data.get("total") or mem_data.get("total_memory") or 
+                        mem_data.get("memtotal") or mem_data.get("total_ram") or
+                        mem_data.get("physicalmemory") or mem_data.get("physical_memory"))
+                used = (mem_data.get("used") or mem_data.get("used_memory") or 
+                       mem_data.get("memused") or mem_data.get("used_ram") or
+                       mem_data.get("usedphysical") or mem_data.get("used_physical"))
+                free = (mem_data.get("free") or mem_data.get("free_memory") or 
+                       mem_data.get("memfree") or mem_data.get("free_ram") or
+                       mem_data.get("available") or mem_data.get("available_memory") or 
+                       mem_data.get("memavailable") or mem_data.get("available_ram") or
+                       mem_data.get("freephysical") or mem_data.get("free_physical") or
+                       mem_data.get("availablephysical") or mem_data.get("available_physical"))
                 
                 if debug:
                     print(f"      🔍 Debug: Memory values - total: {total}, used: {used}, free: {free}")
@@ -5190,9 +5306,22 @@ class TestRunner:
                     usage = mem_data["usage_percent"]
                     if 0 <= usage <= 1:
                         mem_data["usage_percent"] = usage * 100
+                    mem_data["usage_percent"] = float(mem_data["usage_percent"])
                     print(f"      💾 Memory Usage: {mem_data['usage_percent']:.2f}%")
                 elif debug:
                     print(f"      🔍 Debug: Cannot calculate memory percentage. Missing total or used. Available keys: {list(mem_data.keys())}")
+                else:
+                    # Even if not in debug mode, ensure we have a value if we have any memory data
+                    if mem_data and "usage_percent" not in mem_data:
+                        # Try to calculate from any available data
+                        if total and free:
+                            used = total - free
+                            if total > 0:
+                                mem_data["usage_percent"] = round((used / total) * 100, 2)
+                                mem_data["used"] = used
+                                print(f"      💾 Memory Usage: {mem_data['usage_percent']:.2f}% (calculated from total-free)")
+                        else:
+                            mem_data["usage_percent"] = 0.0
         
         # Disk: Calculate percentage from used/total if we have both
         if "disk" in resources:
