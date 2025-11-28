@@ -7691,19 +7691,23 @@
                     return filtered;
                 },
                 testsByWorkspace() {
-                    // Group tests by workspace for the test.run selector
+                    // Group tests by workspace for the test.run selector and schedule modal
                     const grouped = {};
                     this.tests.forEach(test => {
-                        const workspace = test.workspace || 'Root';
+                        const workspace = test.workspace || 'Uncategorized';
                         if (!grouped[workspace]) {
                             grouped[workspace] = [];
                         }
-                        // Calculate relative path from tests/cases/
+                        // Use full path (tests/cases/...) for scheduling and API calls
                         let path = test.path || test.id || '';
-                        if (path.startsWith('tests/cases/')) {
-                            path = path.replace('tests/cases/', '');
-                        } else if (path.startsWith('cases/')) {
-                            path = path.replace('cases/', '');
+                        // Ensure path is in the correct format
+                        if (!path.startsWith('tests/cases/') && !path.startsWith('tests/')) {
+                            // Reconstruct full path if it's been normalized
+                            if (test.workspace) {
+                                path = `tests/cases/${test.workspace}/${path}`;
+                            } else {
+                                path = `tests/cases/${path}`;
+                            }
                         }
                         grouped[workspace].push({
                             ...test,
