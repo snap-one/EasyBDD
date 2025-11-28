@@ -1572,6 +1572,103 @@ def get_hardware_stats() -> Dict[str, Any]:
             # CPU cores
             stats["cpu"]["cores"] = os.cpu_count() or 1
 
+            # CPU usage - try to get from system commands
+            try:
+                if platform.system() == "Linux":
+                    # Use top or /proc/stat
+                    try:
+                        result = subprocess.run(
+                            ["top", "-bn1"], capture_output=True, text=True, timeout=2
+                        )
+                        if result.returncode == 0:
+                            # Parse top output for CPU usage
+                            for line in result.stdout.split("\n"):
+                                if "%Cpu(s)" in line or "Cpu(s)" in line:
+                                    parts = line.split(",")
+                                    for part in parts:
+                                        if "id" in part.lower():
+                                            try:
+                                                idle = float(part.split()[0])
+                                                stats["cpu"]["usage_percent"] = round(100.0 - idle, 1)
+                                            except (ValueError, IndexError):
+                                                pass
+                                    break
+                    except Exception:
+                        # Try /proc/stat
+                        try:
+                            with open("/proc/stat", "r") as f:
+                                line = f.readline()
+                                if line.startswith("cpu "):
+                                    values = line.split()
+                                    if len(values) >= 8:
+                                        # Calculate CPU usage from /proc/stat
+                                        user = float(values[1])
+                                        nice = float(values[2])
+                                        system = float(values[3])
+                                        idle = float(values[4])
+                                        iowait = float(values[5])
+                                        total = user + nice + system + idle + iowait
+                                        if total > 0:
+                                            used = user + nice + system
+                                            stats["cpu"]["usage_percent"] = round((used / total) * 100, 1)
+                        except Exception:
+                            pass
+                elif platform.system() == "Darwin":  # macOS
+                    # Use top command
+                    try:
+                        result = subprocess.run(
+                            ["top", "-l", "1", "-n", "0"], capture_output=True, text=True, timeout=2
+                        )
+                        if result.returncode == 0:
+                            for line in result.stdout.split("\n"):
+                                if "CPU usage" in line:
+                                    try:
+                                        # Parse "CPU usage: X% user, Y% sys, Z% idle"
+                                        parts = line.split("CPU usage:")[1].split(",")
+                                        user_pct = float(parts[0].replace("%", "").strip())
+                                        sys_pct = float(parts[1].replace("%", "").replace("sys", "").strip())
+                                        stats["cpu"]["usage_percent"] = round(user_pct + sys_pct, 1)
+                                    except (ValueError, IndexError):
+                                        pass
+                                    break
+                    except Exception:
+                        # Try iostat
+                        try:
+                            result = subprocess.run(
+                                ["iostat", "-c", "1", "1"], capture_output=True, text=True, timeout=2
+                            )
+                            if result.returncode == 0:
+                                lines = result.stdout.split("\n")
+                                if len(lines) >= 3:
+                                    # Parse iostat output
+                                    parts = lines[2].split()
+                                    if len(parts) >= 3:
+                                        try:
+                                            user = float(parts[0])
+                                            sys = float(parts[1])
+                                            stats["cpu"]["usage_percent"] = round(user + sys, 1)
+                                        except (ValueError, IndexError):
+                                            pass
+                        except Exception:
+                            pass
+                elif platform.system() == "Windows":
+                    # Use wmic
+                    try:
+                        result = subprocess.run(
+                            ["wmic", "cpu", "get", "loadpercentage"], 
+                            capture_output=True, text=True, timeout=2
+                        )
+                        if result.returncode == 0:
+                            for line in result.stdout.split("\n"):
+                                line = line.strip()
+                                if line and line.isdigit():
+                                    stats["cpu"]["usage_percent"] = float(line)
+                                    break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             # Memory (platform-specific)
             if platform.system() == "Linux":
                 try:
@@ -1613,9 +1710,107 @@ def get_hardware_stats() -> Dict[str, Any]:
                         ["vm_stat"], capture_output=True, text=True, timeout=2
                     )
                     if result.returncode == 0:
-                        # Parse vm_stat output (simplified)
-                        # This is a basic implementation
-                        pass
+                        # Parse vm_stat output
+                        page_size = 4096  # Default page size on macOS
+                        free_pages = 0
+                        inactive_pages = 0
+                        active_pages = 0
+                        wired_pages = 0
+                        speculative_pages = 0
+                        
+                        for line in result.stdout.split("\n"):
+                            if "Pages free:" in line:
+                                try:
+                                    free_pages = int(line.split(":")[1].replace(".", "").strip())
+                                except (ValueError, IndexError):
+                                    pass
+                            elif "Pages inactive:" in line:
+                                try:
+                                    inactive_pages = int(line.split(":")[1].replace(".", "").strip())
+                                except (ValueError, IndexError):
+                                    pass
+                            elif "Pages active:" in line:
+                                try:
+                                    active_pages = int(line.split(":")[1].replace(".", "").strip())
+                                except (ValueError, IndexError):
+                                    pass
+                            elif "Pages wired down:" in line:
+                                try:
+                                    wired_pages = int(line.split(":")[1].replace(".", "").strip())
+                                except (ValueError, IndexError):
+                                    pass
+                            elif "Pages speculative:" in line:
+                                try:
+                                    speculative_pages = int(line.split(":")[1].replace(".", "").strip())
+                                except (ValueError, IndexError):
+                                    pass
+                        
+                        # Calculate total memory using sysctl
+                        try:
+                            total_result = subprocess.run(
+                                ["sysctl", "-n", "hw.memsize"], 
+                                capture_output=True, text=True, timeout=2
+                            )
+                            if total_result.returncode == 0:
+                                total_bytes = int(total_result.stdout.strip())
+                                stats["memory"]["total_gb"] = round(total_bytes / (1024**3), 2)
+                                
+                                # Calculate used memory
+                                used_pages = active_pages + wired_pages + speculative_pages
+                                used_bytes = used_pages * page_size
+                                stats["memory"]["used_gb"] = round(used_bytes / (1024**3), 2)
+                                
+                                # Calculate available memory
+                                available_pages = free_pages + inactive_pages
+                                available_bytes = available_pages * page_size
+                                stats["memory"]["available_gb"] = round(available_bytes / (1024**3), 2)
+                                
+                                # Calculate usage percentage
+                                if stats["memory"]["total_gb"] > 0:
+                                    stats["memory"]["usage_percent"] = round(
+                                        (stats["memory"]["used_gb"] / stats["memory"]["total_gb"]) * 100,
+                                        1
+                                    )
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            elif platform.system() == "Windows":
+                try:
+                    # Use wmic for memory
+                    result = subprocess.run(
+                        ["wmic", "computersystem", "get", "TotalPhysicalMemory"],
+                        capture_output=True, text=True, timeout=2
+                    )
+                    if result.returncode == 0:
+                        for line in result.stdout.split("\n"):
+                            line = line.strip()
+                            if line and line.isdigit():
+                                total_bytes = int(line)
+                                stats["memory"]["total_gb"] = round(total_bytes / (1024**3), 2)
+                                break
+                    
+                    # Get available memory
+                    result = subprocess.run(
+                        ["wmic", "os", "get", "FreePhysicalMemory"],
+                        capture_output=True, text=True, timeout=2
+                    )
+                    if result.returncode == 0:
+                        for line in result.stdout.split("\n"):
+                            line = line.strip()
+                            if line and line.isdigit():
+                                free_kb = int(line)
+                                stats["memory"]["available_gb"] = round(free_kb / (1024**2), 2)
+                                stats["memory"]["used_gb"] = round(
+                                    stats["memory"]["total_gb"] - stats["memory"]["available_gb"],
+                                    2
+                                )
+                                if stats["memory"]["total_gb"] > 0:
+                                    stats["memory"]["usage_percent"] = round(
+                                        (stats["memory"]["used_gb"] / stats["memory"]["total_gb"]) * 100,
+                                        1
+                                    )
+                                break
                 except Exception:
                     pass
 
@@ -1630,16 +1825,6 @@ def get_hardware_stats() -> Dict[str, Any]:
                 )
             except Exception:
                 pass
-
-            # CPU usage (platform-specific, less accurate)
-            if platform.system() == "Linux":
-                try:
-                    result = subprocess.run(
-                        ["top", "-bn1"], capture_output=True, text=True, timeout=2
-                    )
-                    # Parse top output (simplified)
-                except Exception:
-                    pass
     except Exception as e:
         print(f"Error getting hardware stats: {e}")
 
