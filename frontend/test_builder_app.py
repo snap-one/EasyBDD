@@ -6367,6 +6367,181 @@ async def health_monitor():
         await asyncio.sleep(health_monitoring["check_interval"])
 
 
+async def scheduler_polling():
+    """Poll for scheduled tests and add them to the queue"""
+    global scheduled_tests, scheduler_enabled, scheduler_poll_interval
+    
+    while True:
+        try:
+            if scheduler_enabled:
+                now = datetime.now()
+                
+                # Check each scheduled test
+                for schedule in scheduled_tests[:]:  # Copy list to avoid modification during iteration
+                    if not schedule.get("enabled", True):
+                        continue
+                    
+                    schedule_id = schedule.get("id")
+                    next_run = schedule.get("next_run")
+                    schedule_type = schedule.get("schedule_type", "once")  # once, daily, weekly, cron
+                    cron_expression = schedule.get("cron_expression")
+                    
+                    # Check if it's time to run
+                    if next_run and datetime.fromisoformat(next_run) <= now:
+                        print(f"[SCHEDULER] Time to run scheduled test: {schedule_id}")
+                        
+                        # Add test to queue
+                        test_item = {
+                            "test_id": str(uuid4()),
+                            "test_path": Path(schedule["test_path"]),
+                            "request": TestExecutionRequest(
+                                test_path=schedule["test_path"],
+                                headless=schedule.get("headless", True),
+                                tags=schedule.get("tags", []),
+                                variables=schedule.get("variables", {})
+                            ),
+                            "retry_count": 0,
+                            "queued_at": datetime.now().isoformat(),
+                            "scheduled": True,
+                            "schedule_id": schedule_id,
+                        }
+                        
+                        test_queue.append(test_item)
+                        
+                        # Update next run time based on schedule type
+                        if schedule_type == "once":
+                            # Disable one-time schedules after running
+                            schedule["enabled"] = False
+                            schedule["next_run"] = None
+                            schedule["last_run"] = datetime.now().isoformat()
+                        elif schedule_type == "daily":
+                            # Run daily at the same time
+                            next_run_dt = datetime.fromisoformat(next_run) + timedelta(days=1)
+                            schedule["next_run"] = next_run_dt.isoformat()
+                            schedule["last_run"] = datetime.now().isoformat()
+                        elif schedule_type == "weekly":
+                            # Run weekly
+                            next_run_dt = datetime.fromisoformat(next_run) + timedelta(weeks=1)
+                            schedule["next_run"] = next_run_dt.isoformat()
+                            schedule["last_run"] = datetime.now().isoformat()
+                        elif schedule_type == "cron" and cron_expression:
+                            # Parse cron expression and calculate next run
+                            next_run_dt = parse_cron_next_run(cron_expression, now)
+                            if next_run_dt:
+                                schedule["next_run"] = next_run_dt.isoformat()
+                                schedule["last_run"] = datetime.now().isoformat()
+                            else:
+                                # Invalid cron, disable
+                                schedule["enabled"] = False
+                        elif schedule_type == "interval":
+                            # Run at regular intervals (e.g., every 2 hours)
+                            interval_minutes = schedule.get("interval_minutes", 60)
+                            next_run_dt = datetime.fromisoformat(next_run) + timedelta(minutes=interval_minutes)
+                            schedule["next_run"] = next_run_dt.isoformat()
+                            schedule["last_run"] = datetime.now().isoformat()
+                        
+                        _save_scheduled_tests()
+            
+            # Wait before next check
+            await asyncio.sleep(scheduler_poll_interval)
+            
+        except Exception as e:
+            print(f"[SCHEDULER] Error in scheduler polling: {e}")
+            await asyncio.sleep(60)  # Wait before retrying
+
+
+def parse_cron_next_run(cron_expr: str, from_time: datetime) -> Optional[datetime]:
+    """
+    Parse a simple cron expression and return the next run time.
+    Supports: minute hour day month day_of_week
+    Examples:
+    - "0 9 * * *" = Every day at 9:00 AM
+    - "0 9 * * 1" = Every Monday at 9:00 AM
+    - "*/15 * * * *" = Every 15 minutes
+    """
+    try:
+        parts = cron_expr.strip().split()
+        if len(parts) != 5:
+            return None
+        
+        minute, hour, day, month, day_of_week = parts
+        
+        # Start from the next minute
+        current = from_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
+        
+        # Try to find next run time within the next year
+        for _ in range(525600):  # Max 1 year of minutes
+            # Check if minute matches
+            if not matches_cron_field(str(current.minute), minute):
+                current += timedelta(minutes=1)
+                continue
+            
+            # Check if hour matches
+            if not matches_cron_field(str(current.hour), hour):
+                current += timedelta(minutes=60 - current.minute)
+                continue
+            
+            # Check if day of month matches
+            if not matches_cron_field(str(current.day), day):
+                current += timedelta(days=1)
+                current = current.replace(hour=0, minute=0)
+                continue
+            
+            # Check if month matches
+            if not matches_cron_field(str(current.month), month):
+                current += timedelta(days=32 - current.day)
+                current = current.replace(day=1, hour=0, minute=0)
+                continue
+            
+            # Check if day of week matches (0=Monday, 6=Sunday)
+            weekday = (current.weekday() + 1) % 7  # Convert to 0=Sunday, 6=Saturday for cron
+            if not matches_cron_field(str(weekday), day_of_week):
+                current += timedelta(days=1)
+                current = current.replace(hour=0, minute=0)
+                continue
+            
+            return current
+        
+        return None
+        
+    except Exception as e:
+        print(f"[SCHEDULER] Error parsing cron expression '{cron_expr}': {e}")
+        return None
+
+
+def matches_cron_field(value: str, pattern: str) -> bool:
+    """Check if a value matches a cron field pattern"""
+    if pattern == "*":
+        return True
+    
+    # Handle ranges: 1-5
+    if "-" in pattern:
+        start, end = pattern.split("-")
+        return int(start) <= int(value) <= int(end)
+    
+    # Handle lists: 1,3,5
+    if "," in pattern:
+        return value in pattern.split(",")
+    
+    # Handle step: */5 or 0-30/5
+    if "/" in pattern:
+        if pattern.startswith("*/"):
+            step = int(pattern[2:])
+            return int(value) % step == 0
+        else:
+            range_part, step_part = pattern.split("/")
+            step = int(step_part)
+            if "-" in range_part:
+                start, end = range_part.split("-")
+                if int(start) <= int(value) <= int(end):
+                    return (int(value) - int(start)) % step == 0
+            else:
+                return int(value) % step == 0
+    
+    # Exact match
+    return value == pattern
+
+
 # ==================== SCHEDULER API ENDPOINTS ====================
 
 class ScheduledTestRequest(BaseModel):
