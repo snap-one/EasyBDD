@@ -7054,7 +7054,7 @@
                 const savedContainerWidth = parseInt(localStorage.getItem('testBuilder_containerWidth') || '1000');
                 const savedChatPanelWidth = parseInt(localStorage.getItem('testBuilder_chatPanelWidth') || '450');
 
-                // Restore chat panel state from localStorage
+                // Restore chat panel state from localStorage (default to false - closed)
                 const savedChatPanelState = localStorage.getItem('testBuilder_chatPanelOpen');
                 const savedChatMessages = localStorage.getItem('testBuilder_chatMessages');
                 
@@ -7062,7 +7062,7 @@
                     view: savedView,
                     containerWidth: savedContainerWidth,
                     isResizing: false,
-                    showChatPanel: savedChatPanelState === 'true', // Restore chat panel state
+                    showChatPanel: false, // Always start closed - don't restore from localStorage on initial load
                     chatPanelWidth: savedChatPanelWidth,
                     isResizingChatPanel: false,
                     chatMessages: savedChatMessages ? JSON.parse(savedChatMessages) : [],
@@ -7628,18 +7628,17 @@
                         overlay.remove();
                     });
                 }
-                // Always remove chat panels on mount (but only if showChatPanel is false)
-                // BUT wait a bit to ensure Vue has rendered first
+                // Always remove chat panels on mount (since we start with showChatPanel = false)
                 this.$nextTick(() => {
                     setTimeout(() => {
-                        if (!this.showChatPanel) {
-                            const existingChatPanels = document.querySelectorAll('.chat-panel-overlay');
-                            if (existingChatPanels.length > 0) {
-                                console.log(`Removing ${existingChatPanels.length} chat panel overlays on mount (after Vue render)`);
-                                existingChatPanels.forEach(panel => panel.remove());
-                            }
+                        const existingChatPanels = document.querySelectorAll('.chat-panel-overlay');
+                        if (existingChatPanels.length > 0) {
+                            console.log(`Removing ${existingChatPanels.length} chat panel overlays on mount`);
+                            existingChatPanels.forEach(panel => panel.remove());
                         }
-                    }, 500);
+                        // Ensure content margin is reset
+                        this.updateContentMargin();
+                    }, 100);
                 });
 
                 await this.loadFolders();
@@ -7998,75 +7997,62 @@
                     }
                 },
                 toggleChatPanel() {
-                    console.log('toggleChatPanel called, current state:', this.showChatPanel);
                     const newState = !this.showChatPanel;
-                    console.log('Setting showChatPanel to:', newState);
-                    
-                    // Use Vue.set or direct assignment
                     this.showChatPanel = newState;
                     
                     // Persist chat panel state to localStorage
                     localStorage.setItem('testBuilder_chatPanelOpen', String(newState));
                     
-                    console.log('After assignment, showChatPanel is:', this.showChatPanel);
+                    // Force Vue to update
+                    this.$forceUpdate();
                     
-                    // Toggle body class for content adjustment
-                    if (this.showChatPanel) {
-                        document.body.classList.add('chat-panel-open');
-                        // Update margin based on current width
-                        this.$nextTick(() => {
+                    // Use $nextTick to ensure DOM updates
+                    this.$nextTick(() => {
+                        if (newState) {
+                            // Opening panel
+                            document.body.classList.add('chat-panel-open');
+                            this.loadChatTokenStatus();
+                            this.updateChatContext();
                             this.updateContentMargin();
-                        });
-                    } else {
-                        document.body.classList.remove('chat-panel-open');
-                        // Update margin immediately and after Vue updates
-                        this.updateContentMargin();
-                        this.$nextTick(() => {
-                            this.updateContentMargin();
-                        });
-                    }
-                    
-                    if (this.showChatPanel) {
-                        // Load token status when opening
-                        console.log('Opening chat panel, loading token status...');
-                        this.loadChatTokenStatus();
-                        
-                        // Update context when opening
-                        this.updateChatContext();
-                        
-                        // Wait for Vue to render, then check
-                        this.$nextTick(() => {
+                            
+                            // Wait a bit for Vue to render, then check
                             setTimeout(() => {
-                                console.log('Checking for chat panel in DOM (after delay)...');
                                 const panel = document.querySelector('.chat-panel-overlay');
-                                const panelAlt = document.querySelector('[class*="chat-panel"]');
-                                const input = document.querySelector('.chat-input-container input');
-                                console.log('Panel found (overlay):', !!panel);
-                                console.log('Panel found (any chat-panel):', !!panelAlt);
-                                console.log('Input found:', !!input);
-                                console.log('showChatPanel in Vue:', this.showChatPanel);
-                                
-                                if (panel) {
-                                    const styles = window.getComputedStyle(panel);
-                                    console.log('Panel styles - display:', styles.display, 'visibility:', styles.visibility, 'opacity:', styles.opacity);
-                                    console.log('Panel position:', styles.position, 'z-index:', styles.zIndex);
-                                } else {
-                                    console.error('Panel NOT found in DOM! Attempting to manually create it...');
-                                    // Manually create the panel as a fallback
+                                if (!panel) {
+                                    console.error('Panel NOT found in DOM! Creating manually...');
                                     this.createChatPanelManually();
+                                } else {
+                                    const input = document.querySelector('.chat-input-container input');
+                                    if (input) {
+                                        setTimeout(() => input.focus(), 100);
+                                    }
+                                    this.scrollChatToBottom();
                                 }
-                                
-                                if (input) {
-                                    setTimeout(() => input.focus(), 100);
-                                }
-                                this.scrollChatToBottom();
-                            }, 200);
-                        });
-                    } else {
-                        // Clear chat input when closing
-                        console.log('Closing chat panel');
-                        this.chatInput = '';
-                    }
+                            }, 100);
+                        } else {
+                            // Closing panel
+                            document.body.classList.remove('chat-panel-open');
+                            this.chatInput = '';
+                            
+                            // Remove any manual panels
+                            const manualPanel = document.querySelector('.chat-panel-overlay[data-manual]');
+                            if (manualPanel) {
+                                manualPanel.remove();
+                            }
+                            
+                            // Remove all chat panel overlays
+                            const allPanels = document.querySelectorAll('.chat-panel-overlay');
+                            allPanels.forEach(panel => panel.remove());
+                            
+                            // Reset content margin
+                            this.updateContentMargin();
+                            
+                            // Force another update after removing panels
+                            this.$nextTick(() => {
+                                this.updateContentMargin();
+                            });
+                        }
+                    });
                 },
                 startResizeChatPanel(e) {
                     e.preventDefault();
