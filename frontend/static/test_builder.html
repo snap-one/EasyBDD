@@ -3683,7 +3683,16 @@
                          title="Drag to resize or double-click to reset"></div>
                     <div class="card">
                         <div class="card-header">
-                            <h2>{{ selectedFolder ? folders.find(f => f.path === selectedFolder)?.name || 'Tests' : 'All Tests' }}</h2>
+                            <div style="display: flex; align-items: center; gap: 1rem; flex: 1;">
+                                <h2 style="margin: 0;">{{ selectedFolder ? folders.find(f => f.path === selectedFolder)?.name || 'Tests' : 'All Tests' }}</h2>
+                                <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-secondary); font-size: 0.875rem;">
+                                    <i class="fas fa-folder"></i>
+                                    <span>{{ getGroupedTestWorkspaces().length }} workspace{{ getGroupedTestWorkspaces().length !== 1 ? 's' : '' }}</span>
+                                    <span style="margin: 0 0.5rem;">•</span>
+                                    <i class="fas fa-list"></i>
+                                    <span>{{ tests.length }} test{{ tests.length !== 1 ? 's' : '' }}</span>
+                                </div>
+                            </div>
                             <button class="btn btn-primary" @click="createNewTest">
                                 <i class="fas fa-plus"></i> New Test
                             </button>
@@ -3698,29 +3707,93 @@
                                 </button>
                             </div>
                             <div v-else class="test-list">
-                                <div v-for="test in tests" :key="test.id" class="test-item" @click="loadTest(test.id)">
-                                    <div class="test-item-icon">🧪</div>
-                                    <div class="test-item-content">
-                                        <div class="test-item-name">
-                                            {{ test.name }}
-                                            <span v-if="test.workspace" class="badge badge-workspace">📁 {{ test.workspace }}</span>
-                                        </div>
-                                        <div class="test-item-meta">
-                                            <span><i class="fas fa-list-ol"></i> {{ test.step_count }} steps</span>
-                                            <span><i class="fas fa-tags"></i> {{ test.tags.join(', ') || 'No tags' }}</span>
-                                            <span v-if="test.folder"><i class="fas fa-folder"></i> {{ test.folder }}</span>
-                                        </div>
+                                <!-- Group by Workspace (similar to TestRail project structure) -->
+                                <div v-for="workspace in getGroupedTestWorkspaces()" :key="workspace" class="workspace-group" style="margin-bottom: 2rem;">
+                                    <div class="workspace-header" 
+                                         @click="toggleWorkspaceCollapse(workspace)"
+                                         style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; padding: 0.75rem 1rem; background: var(--bg-secondary); border-radius: 0.5rem; cursor: pointer; transition: background 0.2s;"
+                                         @mouseover="$event.currentTarget.style.background = 'var(--bg-hover)'"
+                                         @mouseleave="$event.currentTarget.style.background = 'var(--bg-secondary)'">
+                                        <i class="fas" :class="isWorkspaceCollapsed(workspace) ? 'fa-chevron-right' : 'fa-chevron-down'" 
+                                           style="color: var(--primary); transition: transform 0.2s;"></i>
+                                        <i class="fas fa-folder" style="color: var(--primary); font-size: 1.1rem;"></i>
+                                        <h3 style="margin: 0; font-size: 1rem; font-weight: 600; color: var(--text-primary); flex: 1;">
+                                            {{ workspace || 'Uncategorized' }}
+                                        </h3>
+                                        <span class="badge badge-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">
+                                            {{ getWorkspaceTests(workspace).length }} test{{ getWorkspaceTests(workspace).length !== 1 ? 's' : '' }}
+                                        </span>
                                     </div>
-                                    <div class="test-item-actions" @click.stop>
-                                        <button class="btn btn-icon btn-secondary" @click="loadTest(test.id)" title="Edit Test">
-                                            <i class="fas fa-edit"></i>
-                                        </button>
-                                        <button class="btn btn-icon btn-secondary" @click="duplicateTest(test.id)" title="Duplicate Test">
-                                            <i class="fas fa-copy"></i>
-                                        </button>
-                                        <button class="btn btn-icon btn-danger" @click="deleteTest(test.id)" title="Delete Test">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
+                                    <div v-show="!isWorkspaceCollapsed(workspace)" class="workspace-tests" style="margin-left: 1.5rem;">
+                                        <!-- Show directory structure if folder path exists -->
+                                        <div v-for="folderPath in getWorkspaceFolderPaths(workspace)" :key="folderPath" 
+                                             class="folder-group" style="margin-bottom: 1rem;">
+                                            <div class="folder-header" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; color: var(--text-secondary); font-size: 0.875rem; font-weight: 500;">
+                                                <i class="fas fa-folder-open" style="color: var(--text-muted);"></i>
+                                                <span>{{ folderPath || '/' }}</span>
+                                            </div>
+                                            <div class="folder-tests" style="margin-left: 1rem;">
+                                                <div v-for="test in getWorkspaceTestsInFolder(workspace, folderPath)" 
+                                                     :key="test.id" 
+                                                     class="test-item" 
+                                                     @click="loadTest(test.id)"
+                                                     style="margin-bottom: 0.5rem;">
+                                                    <div class="test-item-icon">🧪</div>
+                                                    <div class="test-item-content">
+                                                        <div class="test-item-name">
+                                                            {{ test.name }}
+                                                        </div>
+                                                        <div class="test-item-meta">
+                                                            <span><i class="fas fa-list-ol"></i> {{ test.step_count }} steps</span>
+                                                            <span v-if="test.tags && test.tags.length > 0"><i class="fas fa-tags"></i> {{ test.tags.join(', ') }}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="test-item-actions" @click.stop>
+                                                        <button class="btn btn-icon btn-secondary" @click="loadTest(test.id)" title="Edit Test">
+                                                            <i class="fas fa-edit"></i>
+                                                        </button>
+                                                        <button class="btn btn-icon btn-secondary" @click="duplicateTest(test.id)" title="Duplicate Test">
+                                                            <i class="fas fa-copy"></i>
+                                                        </button>
+                                                        <button class="btn btn-icon btn-danger" @click="deleteTest(test.id)" title="Delete Test">
+                                                            <i class="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <!-- Tests without folder path (root of workspace) -->
+                                        <div v-if="getWorkspaceTestsInFolder(workspace, null).length > 0" class="folder-group" style="margin-bottom: 1rem;">
+                                            <div class="folder-tests">
+                                                <div v-for="test in getWorkspaceTestsInFolder(workspace, null)" 
+                                                     :key="test.id" 
+                                                     class="test-item" 
+                                                     @click="loadTest(test.id)"
+                                                     style="margin-bottom: 0.5rem;">
+                                                    <div class="test-item-icon">🧪</div>
+                                                    <div class="test-item-content">
+                                                        <div class="test-item-name">
+                                                            {{ test.name }}
+                                                        </div>
+                                                        <div class="test-item-meta">
+                                                            <span><i class="fas fa-list-ol"></i> {{ test.step_count }} steps</span>
+                                                            <span v-if="test.tags && test.tags.length > 0"><i class="fas fa-tags"></i> {{ test.tags.join(', ') }}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="test-item-actions" @click.stop>
+                                                        <button class="btn btn-icon btn-secondary" @click="loadTest(test.id)" title="Edit Test">
+                                                            <i class="fas fa-edit"></i>
+                                                        </button>
+                                                        <button class="btn btn-icon btn-secondary" @click="duplicateTest(test.id)" title="Duplicate Test">
+                                                            <i class="fas fa-copy"></i>
+                                                        </button>
+                                                        <button class="btn btn-icon btn-danger" @click="deleteTest(test.id)" title="Delete Test">
+                                                            <i class="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
