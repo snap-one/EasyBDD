@@ -425,6 +425,25 @@
             display: flex;
             gap: 0.75rem;
             max-width: 80%;
+            user-select: text !important;
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
+            cursor: text;
+        }
+        
+        .chat-messages {
+            user-select: text !important;
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
+        }
+        
+        .chat-message {
+            user-select: text !important;
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
         }
 
         .chat-message-user .chat-message-content {
@@ -3101,7 +3120,7 @@
         .chat-panel {
             width: 450px;
             min-width: 300px;
-            max-width: min(90vw, calc(100vw - 320px));
+            max-width: min(1200px, calc(100vw - 320px));
             background: var(--bg-main);
             border-left: 1px solid var(--border);
             display: flex;
@@ -3118,20 +3137,30 @@
             left: 0;
             top: 0;
             bottom: 0;
-            width: 4px;
+            width: 6px;
             cursor: ew-resize;
             background: transparent;
             z-index: 10;
+            user-select: none;
+            -webkit-user-select: none;
         }
 
         .chat-panel-resize-handle:hover {
             background: var(--primary);
-            opacity: 0.5;
+            opacity: 0.6;
+            width: 6px;
         }
 
         .chat-panel-resize-handle.resizing {
             background: var(--primary);
-            opacity: 0.8;
+            opacity: 0.9;
+            width: 6px;
+        }
+        
+        /* Make chat panel resizable with better visual feedback */
+        .chat-panel {
+            resize: horizontal;
+            overflow: hidden;
         }
 
         /* Adjust main content when chat panel is open */
@@ -6852,8 +6881,18 @@
                         <p style="color: var(--text-secondary);">Start a conversation with the AI Assistant</p>
                         <p style="font-size: 0.875rem; color: var(--text-muted); margin-top: 0.5rem;">Ask questions about your tests, get help with test automation, or request explanations.</p>
                     </div>
-                    <div v-for="(message, index) in chatMessages" :key="index" class="chat-message" :class="'chat-message-' + message.role">
-                        <div class="chat-message-content" v-html="formatChatMessage(message.content)"></div>
+                    <div v-for="(message, index) in chatMessages" :key="index" class="chat-message" :class="'chat-message-' + message.role" style="position: relative; padding-right: 2rem;">
+                        <div class="chat-message-content" v-html="formatChatMessage(message.content)" @dblclick="copyMessageToClipboard(message.content)"></div>
+                        <button 
+                            class="btn btn-icon btn-sm btn-secondary" 
+                            @click.stop="copyMessageToClipboard(message.content)"
+                            title="Copy message"
+                            style="opacity: 0.5; position: absolute; top: 0; right: 0; transition: opacity 0.2s; z-index: 5;"
+                            @mouseenter="$event.target.style.opacity = '1'"
+                            @mouseleave="$event.target.style.opacity = '0.5'"
+                        >
+                            <i class="fas fa-copy"></i>
+                        </button>
                     </div>
                     <div v-if="chatLoading" class="chat-message chat-message-assistant">
                         <div class="chat-message-content">
@@ -8038,14 +8077,25 @@
                     const screenWidth = window.innerWidth;
                     const sidebarWidth = 280; // Approximate sidebar width
                     
+                    // Prevent text selection during resize
+                    document.body.style.userSelect = 'none';
+                    document.body.style.webkitUserSelect = 'none';
+                    
                     const doResize = (e) => {
                         if (!this.isResizingChatPanel) return;
                         const deltaX = startX - e.clientX; // Inverted because we're resizing from the left
                         // Calculate max width based on screen size
-                        const maxWidth = Math.min(800, screenWidth - sidebarWidth - 50); // Leave 50px margin
-                        const newWidth = Math.max(300, Math.min(maxWidth, startWidth + deltaX));
+                        const maxWidth = Math.min(1200, screenWidth - sidebarWidth - 50); // Increased max width, leave 50px margin
+                        const minWidth = 300;
+                        const newWidth = Math.max(minWidth, Math.min(maxWidth, startWidth + deltaX));
                         this.chatPanelWidth = newWidth;
                         this.updateContentMargin();
+                        
+                        // Update panel width immediately
+                        const panel = document.querySelector('.chat-panel');
+                        if (panel) {
+                            panel.style.width = newWidth + 'px';
+                        }
                     };
                     
                     const stopResize = () => {
@@ -8054,6 +8104,8 @@
                         document.removeEventListener('mousemove', doResize);
                         document.removeEventListener('mouseup', stopResize);
                         document.body.style.cursor = '';
+                        document.body.style.userSelect = '';
+                        document.body.style.webkitUserSelect = '';
                     };
                     
                     document.addEventListener('mousemove', doResize);
@@ -8307,6 +8359,41 @@
                         .replace(/\*(.*?)\*/g, '<em>$1</em>')
                         .replace(/`(.*?)`/g, '<code>$1</code>')
                         .replace(/\n/g, '<br>');
+                },
+                async copyMessageToClipboard(text) {
+                    try {
+                        // Strip HTML tags for plain text copy
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = text;
+                        const plainText = tempDiv.textContent || tempDiv.innerText || text;
+                        
+                        // Use modern Clipboard API if available
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                            await navigator.clipboard.writeText(plainText);
+                        } else {
+                            // Fallback for older browsers
+                            const textArea = document.createElement('textarea');
+                            textArea.value = plainText;
+                            textArea.style.position = 'fixed';
+                            textArea.style.left = '-999999px';
+                            textArea.style.top = '-999999px';
+                            document.body.appendChild(textArea);
+                            textArea.focus();
+                            textArea.select();
+                            document.execCommand('copy');
+                            textArea.remove();
+                        }
+                        
+                        // Show feedback
+                        const originalText = this.chatInput;
+                        this.chatInput = '✓ Copied!';
+                        setTimeout(() => {
+                            this.chatInput = originalText;
+                        }, 1000);
+                    } catch (error) {
+                        console.error('Failed to copy message:', error);
+                        alert('Failed to copy message. Please try selecting the text manually.');
+                    }
                 },
                 startResize(e) {
                     this.isResizing = true;
