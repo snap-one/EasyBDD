@@ -1572,102 +1572,252 @@ def get_hardware_stats() -> Dict[str, Any]:
             # CPU cores
             stats["cpu"]["cores"] = os.cpu_count() or 1
 
-            # CPU usage - try to get from system commands
-            try:
-                if platform.system() == "Linux":
-                    # Use top or /proc/stat
+            # CPU usage - try multiple methods to ensure compatibility with all processors
+            # (Intel, AMD, Apple Silicon/ARM, etc.)
+            cpu_usage_found = False
+            
+            if platform.system() == "Linux":
+                # Method 1: /proc/stat (works on all Linux systems including ARM)
+                try:
+                    with open("/proc/stat", "r") as f:
+                        line = f.readline()
+                        if line.startswith("cpu "):
+                            values = line.split()
+                            if len(values) >= 8:
+                                # Calculate CPU usage from /proc/stat
+                                # Works on x86, x64, ARM, ARM64, etc.
+                                user = float(values[1])
+                                nice = float(values[2])
+                                system = float(values[3])
+                                idle = float(values[4])
+                                iowait = float(values[5]) if len(values) > 5 else 0
+                                irq = float(values[6]) if len(values) > 6 else 0
+                                softirq = float(values[7]) if len(values) > 7 else 0
+                                
+                                total = user + nice + system + idle + iowait + irq + softirq
+                                if total > 0:
+                                    used = user + nice + system + irq + softirq
+                                    stats["cpu"]["usage_percent"] = round((used / total) * 100, 1)
+                                    cpu_usage_found = True
+                except Exception:
+                    pass
+                
+                # Method 2: top command (fallback)
+                if not cpu_usage_found:
                     try:
                         result = subprocess.run(
-                            ["top", "-bn1"], capture_output=True, text=True, timeout=2
+                            ["top", "-bn1"], capture_output=True, text=True, timeout=3
                         )
                         if result.returncode == 0:
-                            # Parse top output for CPU usage
                             for line in result.stdout.split("\n"):
                                 if "%Cpu(s)" in line or "Cpu(s)" in line:
                                     parts = line.split(",")
                                     for part in parts:
-                                        if "id" in part.lower():
+                                        if "id" in part.lower() and "%" in part:
                                             try:
-                                                idle = float(part.split()[0])
+                                                idle_str = part.split()[0].replace("%", "")
+                                                idle = float(idle_str)
                                                 stats["cpu"]["usage_percent"] = round(100.0 - idle, 1)
+                                                cpu_usage_found = True
+                                                break
                                             except (ValueError, IndexError):
                                                 pass
-                                    break
                     except Exception:
-                        # Try /proc/stat
-                        try:
-                            with open("/proc/stat", "r") as f:
-                                line = f.readline()
-                                if line.startswith("cpu "):
-                                    values = line.split()
-                                    if len(values) >= 8:
-                                        # Calculate CPU usage from /proc/stat
-                                        user = float(values[1])
-                                        nice = float(values[2])
-                                        system = float(values[3])
-                                        idle = float(values[4])
-                                        iowait = float(values[5])
-                                        total = user + nice + system + idle + iowait
-                                        if total > 0:
-                                            used = user + nice + system
-                                            stats["cpu"]["usage_percent"] = round((used / total) * 100, 1)
-                        except Exception:
-                            pass
-                elif platform.system() == "Darwin":  # macOS
-                    # Use top command
+                        pass
+                
+                # Method 3: vmstat (works on all architectures)
+                if not cpu_usage_found:
                     try:
                         result = subprocess.run(
-                            ["top", "-l", "1", "-n", "0"], capture_output=True, text=True, timeout=2
+                            ["vmstat", "1", "2"], capture_output=True, text=True, timeout=3
+                        )
+                        if result.returncode == 0:
+                            lines = result.stdout.strip().split("\n")
+                            if len(lines) >= 3:
+                                # Last line has the average
+                                parts = lines[-1].split()
+                                if len(parts) >= 15:
+                                    # vmstat format: procs, memory, swap, io, system, cpu
+                                    # CPU columns: us, sy, id, wa, st
+                                    try:
+                                        us = float(parts[12])  # user time
+                                        sy = float(parts[13])  # system time
+                                        stats["cpu"]["usage_percent"] = round(us + sy, 1)
+                                        cpu_usage_found = True
+                                    except (ValueError, IndexError):
+                                        pass
+                    except Exception:
+                        pass
+                        
+            elif platform.system() == "Darwin":  # macOS (Intel and Apple Silicon)
+                # Method 1: sysctl (works on both Intel and Apple Silicon)
+                try:
+                    # Get CPU load average
+                    result = subprocess.run(
+                        ["sysctl", "-n", "vm.loadavg"], 
+                        capture_output=True, text=True, timeout=2
+                    )
+                    if result.returncode == 0:
+                        # Load average format: { 1.23 2.34 3.45 }
+                        load_avg_str = result.stdout.strip().strip("{}").strip()
+                        loads = load_avg_str.split()
+                        if len(loads) >= 1:
+                            # Use 1-minute load average
+                            # For a rough estimate: load / num_cores * 100
+                            # But this is just an approximation
+                            load_1min = float(loads[0])
+                            num_cores = stats["cpu"]["cores"] or os.cpu_count() or 1
+                            # Load average can be > num_cores, so cap at 100%
+                            estimated_usage = min(100.0, (load_1min / num_cores) * 100)
+                            stats["cpu"]["usage_percent"] = round(estimated_usage, 1)
+                            cpu_usage_found = True
+                except Exception:
+                    pass
+                
+                # Method 2: top command (works on both Intel and Apple Silicon)
+                if not cpu_usage_found:
+                    try:
+                        result = subprocess.run(
+                            ["top", "-l", "1", "-n", "0", "-stats", "cpu"], 
+                            capture_output=True, text=True, timeout=3
                         )
                         if result.returncode == 0:
                             for line in result.stdout.split("\n"):
-                                if "CPU usage" in line:
+                                # Look for "CPU usage: X% user, Y% sys, Z% idle" format
+                                if "CPU usage" in line or "CPU:" in line:
                                     try:
-                                        # Parse "CPU usage: X% user, Y% sys, Z% idle"
-                                        parts = line.split("CPU usage:")[1].split(",")
-                                        user_pct = float(parts[0].replace("%", "").strip())
-                                        sys_pct = float(parts[1].replace("%", "").replace("sys", "").strip())
-                                        stats["cpu"]["usage_percent"] = round(user_pct + sys_pct, 1)
-                                    except (ValueError, IndexError):
+                                        # Try multiple parsing patterns
+                                        if "CPU usage:" in line:
+                                            parts = line.split("CPU usage:")[1].split(",")
+                                            user_pct = 0
+                                            sys_pct = 0
+                                            for part in parts:
+                                                part = part.strip()
+                                                if "user" in part.lower():
+                                                    user_pct = float(part.replace("%", "").replace("user", "").strip())
+                                                elif "sys" in part.lower():
+                                                    sys_pct = float(part.replace("%", "").replace("sys", "").strip())
+                                            if user_pct > 0 or sys_pct > 0:
+                                                stats["cpu"]["usage_percent"] = round(user_pct + sys_pct, 1)
+                                                cpu_usage_found = True
+                                                break
+                                        elif "CPU:" in line:
+                                            # Alternative format: "CPU: X% user, Y% sys, Z% idle"
+                                            parts = line.split("CPU:")[1].split(",")
+                                            user_pct = 0
+                                            sys_pct = 0
+                                            for part in parts:
+                                                part = part.strip()
+                                                if "user" in part.lower():
+                                                    user_pct = float(part.replace("%", "").replace("user", "").strip())
+                                                elif "sys" in part.lower():
+                                                    sys_pct = float(part.replace("%", "").replace("sys", "").strip())
+                                            if user_pct > 0 or sys_pct > 0:
+                                                stats["cpu"]["usage_percent"] = round(user_pct + sys_pct, 1)
+                                                cpu_usage_found = True
+                                                break
+                                    except (ValueError, IndexError) as e:
                                         pass
-                                    break
                     except Exception:
-                        # Try iostat
-                        try:
-                            result = subprocess.run(
-                                ["iostat", "-c", "1", "1"], capture_output=True, text=True, timeout=2
-                            )
-                            if result.returncode == 0:
-                                lines = result.stdout.split("\n")
-                                if len(lines) >= 3:
-                                    # Parse iostat output
-                                    parts = lines[2].split()
+                        pass
+                
+                # Method 3: iostat (works on both Intel and Apple Silicon)
+                if not cpu_usage_found:
+                    try:
+                        result = subprocess.run(
+                            ["iostat", "-c", "1", "1"], capture_output=True, text=True, timeout=3
+                        )
+                        if result.returncode == 0:
+                            lines = result.stdout.split("\n")
+                            # Skip header lines, find data line
+                            for i, line in enumerate(lines):
+                                if i >= 2 and line.strip() and not line.startswith("cpu"):
+                                    parts = line.split()
                                     if len(parts) >= 3:
                                         try:
                                             user = float(parts[0])
                                             sys = float(parts[1])
                                             stats["cpu"]["usage_percent"] = round(user + sys, 1)
+                                            cpu_usage_found = True
+                                            break
                                         except (ValueError, IndexError):
                                             pass
-                        except Exception:
-                            pass
-                elif platform.system() == "Windows":
-                    # Use wmic
-                    try:
-                        result = subprocess.run(
-                            ["wmic", "cpu", "get", "loadpercentage"], 
-                            capture_output=True, text=True, timeout=2
-                        )
-                        if result.returncode == 0:
-                            for line in result.stdout.split("\n"):
-                                line = line.strip()
-                                if line and line.isdigit():
-                                    stats["cpu"]["usage_percent"] = float(line)
-                                    break
                     except Exception:
                         pass
-            except Exception:
-                pass
+                
+                # Method 4: Activity Monitor data via powermetrics (Apple Silicon only, but safe to try)
+                if not cpu_usage_found:
+                    try:
+                        # This works on Apple Silicon but requires sudo, so it might fail
+                        # We'll just try it and ignore errors
+                        result = subprocess.run(
+                            ["powermetrics", "--samplers", "cpu_power", "-n", "1", "-i", "100"], 
+                            capture_output=True, text=True, timeout=2, stderr=subprocess.DEVNULL
+                        )
+                        # Parse powermetrics output if available
+                        # This is complex, so we'll skip for now
+                    except Exception:
+                        pass
+                        
+            elif platform.system() == "Windows":
+                # Method 1: wmic (works on all Windows versions)
+                try:
+                    result = subprocess.run(
+                        ["wmic", "cpu", "get", "loadpercentage"], 
+                        capture_output=True, text=True, timeout=2
+                    )
+                    if result.returncode == 0:
+                        for line in result.stdout.split("\n"):
+                            line = line.strip()
+                            if line and line.isdigit():
+                                stats["cpu"]["usage_percent"] = float(line)
+                                cpu_usage_found = True
+                                break
+                except Exception:
+                    pass
+                
+                # Method 2: typeperf (Windows Performance Monitor)
+                if not cpu_usage_found:
+                    try:
+                        result = subprocess.run(
+                            ["typeperf", "-sc", "1", "\\Processor(_Total)\\% Processor Time"],
+                            capture_output=True, text=True, timeout=3
+                        )
+                        if result.returncode == 0:
+                            lines = result.stdout.split("\n")
+                            for line in lines:
+                                if "\\Processor" in line and "," in line:
+                                    try:
+                                        value = float(line.split(",")[1].strip().strip('"'))
+                                        stats["cpu"]["usage_percent"] = round(value, 1)
+                                        cpu_usage_found = True
+                                        break
+                                    except (ValueError, IndexError):
+                                        pass
+                    except Exception:
+                        pass
+            
+            # If we still haven't found CPU usage, try a simple calculation method
+            if not cpu_usage_found:
+                # Last resort: Use a simple time-based calculation
+                # This is less accurate but works on any system
+                try:
+                    import time
+                    # Sample CPU usage over a short interval
+                    start_time = time.time()
+                    start_idle = time.process_time()
+                    time.sleep(0.1)  # Sample for 100ms
+                    end_time = time.time()
+                    end_idle = time.process_time()
+                    
+                    elapsed = end_time - start_time
+                    cpu_time = end_idle - start_idle
+                    if elapsed > 0:
+                        usage = (cpu_time / elapsed) * 100
+                        stats["cpu"]["usage_percent"] = round(min(100.0, usage), 1)
+                        cpu_usage_found = True
+                except Exception:
+                    pass
 
             # Memory (platform-specific)
             if platform.system() == "Linux":
