@@ -12803,6 +12803,66 @@ Would you like to enter a selector manually?
                     const workspaces = [...new Set(this.results.map(r => r.workspace || 'uncategorized'))];
                     return workspaces.sort();
                 },
+                getGroupedTestWorkspaces() {
+                    // Get unique workspaces from current tests
+                    const workspaces = [...new Set(this.tests.map(t => t.workspace || 'Uncategorized'))];
+                    return workspaces.sort();
+                },
+                getWorkspaceTests(workspace) {
+                    // Get all tests for a specific workspace
+                    return this.tests.filter(t => (t.workspace || 'Uncategorized') === workspace);
+                },
+                getWorkspaceFolderPaths(workspace) {
+                    // Get unique folder paths within a workspace
+                    const workspaceTests = this.getWorkspaceTests(workspace);
+                    const folderPaths = [...new Set(workspaceTests
+                        .map(t => {
+                            // Extract folder path relative to workspace
+                            if (!t.folder) return null;
+                            // If folder starts with workspace name, remove it
+                            if (t.folder.startsWith(workspace + '/')) {
+                                return t.folder.substring(workspace.length + 1);
+                            }
+                            return t.folder;
+                        })
+                        .filter(f => f !== null && f !== '')
+                    )];
+                    return folderPaths.sort();
+                },
+                getWorkspaceTestsInFolder(workspace, folderPath) {
+                    // Get tests in a specific folder within a workspace
+                    const workspaceTests = this.getWorkspaceTests(workspace);
+                    if (!folderPath) {
+                        // Return tests without a folder (root of workspace)
+                        return workspaceTests.filter(t => !t.folder || t.folder === workspace);
+                    }
+                    // Return tests in the specified folder
+                    return workspaceTests.filter(t => {
+                        if (!t.folder) return false;
+                        // Check if folder matches (with or without workspace prefix)
+                        const normalizedFolder = t.folder.startsWith(workspace + '/') 
+                            ? t.folder.substring(workspace.length + 1)
+                            : t.folder;
+                        return normalizedFolder === folderPath;
+                    });
+                },
+                isWorkspaceCollapsed(workspace) {
+                    // Check if workspace is collapsed (default: expanded)
+                    const collapsedWorkspaces = JSON.parse(localStorage.getItem('testBuilder_collapsedWorkspaces') || '[]');
+                    return collapsedWorkspaces.includes(workspace);
+                },
+                toggleWorkspaceCollapse(workspace) {
+                    // Toggle workspace collapse state
+                    const collapsedWorkspaces = JSON.parse(localStorage.getItem('testBuilder_collapsedWorkspaces') || '[]');
+                    const index = collapsedWorkspaces.indexOf(workspace);
+                    if (index > -1) {
+                        collapsedWorkspaces.splice(index, 1);
+                    } else {
+                        collapsedWorkspaces.push(workspace);
+                    }
+                    localStorage.setItem('testBuilder_collapsedWorkspaces', JSON.stringify(collapsedWorkspaces));
+                    this.$forceUpdate();
+                },
                 getWorkspaceResults(workspace) {
                     let filtered = this.results.filter(r => (r.workspace || 'uncategorized') === workspace);
 
