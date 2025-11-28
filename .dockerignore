@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+
+# Reports
+reports/
+*.html
+*.json
+*.xml
+*.csv
+*.webm
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Archive
+archive/
+
+# Test data (will be mounted as volume)
+tests/cases/
+tests/data/
+tests/features/
+
+# Config (will be mounted as volume if needed)
+config/
+environments/
+collections/
+test_suites/
+
+# Scheduled tests
+scheduled_tests.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.egg-info/
+easy_bdd_framework.egg-info/
+

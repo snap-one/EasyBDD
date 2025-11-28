@@ -29,6 +29,7 @@ Examples:
   python -m easy_bdd run                              # Run all tests
   python -m easy_bdd run tests/cases/login.yaml      # Run specific test
   python -m easy_bdd run --tags browser,api          # Run tests with tags
+  python -m easy_bdd docker-run tests/cases/login.yaml  # Run test in Docker
   python -m easy_bdd generate tests/cases/           # Generate Gherkin only
         """,
     )
@@ -106,6 +107,43 @@ Examples:
         "--strict", action="store_true", help="Treat warnings as errors"
     )
     
+    # Docker-run command
+    docker_parser = subparsers.add_parser(
+        "docker-run", help="Build Docker image, run test in container, then cleanup"
+    )
+    docker_parser.add_argument(
+        "test_path",
+        help="Path to test file (e.g., tests/cases/login.yaml)",
+    )
+    docker_parser.add_argument(
+        "--image-name",
+        default="easy-bdd:latest",
+        help="Docker image name (default: easy-bdd:latest)",
+    )
+    docker_parser.add_argument(
+        "--no-build",
+        action="store_true",
+        help="Skip building the image (use existing image)",
+    )
+    docker_parser.add_argument(
+        "--keep-container",
+        action="store_true",
+        help="Keep container after execution (don't auto-remove)",
+    )
+    docker_parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run browser in headless mode",
+    )
+    docker_parser.add_argument(
+        "--tags",
+        help="Comma-separated list of tags to filter tests",
+    )
+    docker_parser.add_argument(
+        "--export-results",
+        help="Export test results to file (mounted from host)",
+    )
+
     # Edit-test command
     edit_parser = subparsers.add_parser(
         "edit-test", help="Open a test file in the default editor"
@@ -138,6 +176,8 @@ Examples:
             return convert_recording(args)
         elif args.command == "validate":
             return validate_tests(args)
+        elif args.command == "docker-run":
+            return docker_run(args)
         elif args.command == "edit-test":
             return edit_test(args)
     except Exception as e:
@@ -379,6 +419,135 @@ def run_tests(args) -> int:
             )
 
     return 0 if result.success else 1
+
+
+def docker_run(args) -> int:
+    """Build Docker image, run test in container, then cleanup"""
+    import subprocess
+    import shutil
+    import os
+    from pathlib import Path
+
+    # Check if Docker is available
+    if not shutil.which("docker"):
+        print("Error: Docker is not installed or not in PATH", file=sys.stderr)
+        return 1
+
+    # Get project root (parent of easy_bdd package)
+    project_root = Path(__file__).parent.parent.parent
+    test_path = Path(args.test_path)
+    
+    # Resolve test path relative to project root
+    if not test_path.is_absolute():
+        test_path = project_root / test_path
+    
+    if not test_path.exists():
+        print(f"Error: Test file '{test_path}' does not exist", file=sys.stderr)
+        return 1
+
+    image_name = args.image_name
+    container_name = f"easy-bdd-{os.urandom(4).hex()}"
+    
+    try:
+        # Step 1: Build Docker image (unless --no-build is specified)
+        if not args.no_build:
+            print(f"Building Docker image '{image_name}'...")
+            build_cmd = [
+                "docker", "build",
+                "-t", image_name,
+                "-f", str(project_root / "Dockerfile"),
+                str(project_root)
+            ]
+            
+            result = subprocess.run(build_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"Error building Docker image: {result.stderr}", file=sys.stderr)
+                return 1
+            print("✓ Docker image built successfully")
+        else:
+            print(f"Using existing Docker image '{image_name}'...")
+            # Verify image exists
+            check_cmd = ["docker", "image", "inspect", image_name]
+            result = subprocess.run(check_cmd, capture_output=True)
+            if result.returncode != 0:
+                print(f"Error: Docker image '{image_name}' not found", file=sys.stderr)
+                return 1
+
+        # Step 2: Prepare volume mounts
+        # Mount tests directory
+        tests_dir = project_root / "tests"
+        reports_dir = project_root / "reports"
+        reports_dir.mkdir(exist_ok=True)
+        
+        # Get relative test path for container
+        test_path_in_container = test_path.relative_to(project_root)
+        
+        # Build docker run command
+        run_cmd = [
+            "docker", "run",
+            "--name", container_name,
+            "--rm" if not args.keep_container else "",
+            "-v", f"{tests_dir}:/app/tests:ro",  # Mount tests as read-only
+            "-v", f"{reports_dir}:/app/reports",  # Mount reports for output
+        ]
+        
+        # Remove empty strings from list
+        run_cmd = [arg for arg in run_cmd if arg]
+        
+        # Add environment variables
+        if args.headless:
+            run_cmd.extend(["-e", "HEADLESS=true"])
+        
+        # Build the test execution command inside container
+        container_test_cmd = ["python", "-m", "easy_bdd", "run", str(test_path_in_container)]
+        
+        if args.headless:
+            container_test_cmd.append("--headless")
+        
+        if args.tags:
+            container_test_cmd.extend(["--tags", args.tags])
+        
+        if args.export_results:
+            container_test_cmd.extend(["--export-results", args.export_results])
+        
+        # Add the image and command
+        run_cmd.append(image_name)
+        run_cmd.extend(container_test_cmd)
+        
+        # Step 3: Run the container
+        print(f"\nRunning test '{test_path_in_container}' in Docker container...")
+        print(f"Container name: {container_name}")
+        print(f"Command: {' '.join(container_test_cmd)}\n")
+        
+        result = subprocess.run(run_cmd, cwd=project_root)
+        exit_code = result.returncode
+        
+        # Step 4: Cleanup (if not keeping container)
+        if not args.keep_container:
+            # Container is auto-removed with --rm flag, but clean up if it still exists
+            cleanup_cmd = ["docker", "rm", "-f", container_name]
+            subprocess.run(cleanup_cmd, capture_output=True)  # Ignore errors
+        else:
+            print(f"\nContainer '{container_name}' kept running. Remove manually with:")
+            print(f"  docker rm -f {container_name}")
+        
+        if exit_code == 0:
+            print("\n✓ Test execution completed successfully")
+        else:
+            print(f"\n✗ Test execution failed with exit code {exit_code}")
+        
+        return exit_code
+        
+    except KeyboardInterrupt:
+        print("\n\nInterrupted by user. Cleaning up...")
+        # Force remove container
+        subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
+        return 130
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        # Try to cleanup on error
+        subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
+        return 1
 
 
 def generate_features(args) -> int:

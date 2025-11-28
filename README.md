@@ -34,6 +34,7 @@ A powerful, user-friendly YAML-based BDD testing framework that supports multipl
 - **🚨 Error Pages** - Custom error pages for 404, 500, 503, and other HTTP errors
 - **📈 System Resource Auto-Detection** - Automatic CPU, memory, disk, and network monitoring
 - **🎬 Demo Test Suite** - Ready-to-run demo tests for UI and API testing
+- **🐳 Docker Support** - Run tests in isolated Docker containers with automatic build and cleanup
 
 **[📖 Full Test Builder Guide](docs/TEST_BUILDER.md)** | **[🆕 New Features Guide](docs/NEW_FEATURES.md)** | **[🚀 Server Deployment Guide](docs/SERVER_DEPLOYMENT.md)** | **Quick Start**: `python frontend/start_builder.py` → http://localhost:8000
 
@@ -192,6 +193,37 @@ python -m easy_bdd run tests/cases/
 # Run with specific tags
 python -m easy_bdd run --tags demo
 ```
+
+### Running Tests in Docker
+
+Run tests in an isolated Docker container:
+
+```bash
+# Build image and run test (auto-cleanup)
+python -m easy_bdd docker-run tests/cases/login.yaml
+
+# Run with headless browser
+python -m easy_bdd docker-run tests/cases/login.yaml --headless
+
+# Run with tags
+python -m easy_bdd docker-run tests/cases/login.yaml --tags browser,api
+
+# Use existing image (skip build)
+python -m easy_bdd docker-run tests/cases/login.yaml --no-build
+
+# Keep container after execution
+python -m easy_bdd docker-run tests/cases/login.yaml --keep-container
+
+# Custom image name
+python -m easy_bdd docker-run tests/cases/login.yaml --image-name my-easy-bdd:v1.0
+```
+
+The `docker-run` command will:
+1. **Build** the Docker image (unless `--no-build` is used)
+2. **Run** the test in an isolated container
+3. **Clean up** the container automatically (unless `--keep-container` is used)
+
+Test results are automatically saved to the `reports/` directory on your host machine.
 
 ## 📚 Documentation
 
