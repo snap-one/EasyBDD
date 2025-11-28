@@ -4982,7 +4982,7 @@
                             <p style="color: var(--text-secondary); margin-top: 0.5rem;">Schedule tests to run automatically at specific times</p>
                         </div>
                         <div style="display: flex; gap: 0.75rem;">
-                            <button class="btn btn-primary" @click="showCreateScheduleModal = true">
+                            <button class="btn btn-primary" @click="openCreateScheduleModal()">
                                 <i class="fas fa-plus"></i> Schedule Test
                             </button>
                             <button class="btn btn-secondary" @click="loadScheduledTests()">
@@ -5029,7 +5029,7 @@
                                 <div class="empty-state-icon">⏰</div>
                                 <h3 class="empty-state-title">No Scheduled Tests</h3>
                                 <p class="empty-state-text">Schedule tests to run automatically at specific times</p>
-                                <button class="btn btn-primary" @click="showCreateScheduleModal = true">
+                                <button class="btn btn-primary" @click="openCreateScheduleModal()">
                                     <i class="fas fa-plus"></i> Schedule Test
                                 </button>
                             </div>
@@ -16473,6 +16473,13 @@ Would you like to enter a selector manually?
                     };
                     this.showEditScheduleModal = true;
                 },
+                async openCreateScheduleModal() {
+                    // Load tests if not already loaded
+                    if (this.tests.length === 0) {
+                        await this.loadTests();
+                    }
+                    this.showCreateScheduleModal = true;
+                },
                 closeScheduleModal() {
                     this.showCreateScheduleModal = false;
                     this.showEditScheduleModal = false;
@@ -16521,18 +16528,6 @@ Would you like to enter a selector manually?
                     
                     return true;
                 },
-                get testsByWorkspace() {
-                    // Group tests by workspace for the schedule modal
-                    const grouped = {};
-                    this.tests.forEach(test => {
-                        const workspace = test.workspace || 'Uncategorized';
-                        if (!grouped[workspace]) {
-                            grouped[workspace] = [];
-                        }
-                        grouped[workspace].push(test);
-                    });
-                    return grouped;
-                }
             }
         });
 
