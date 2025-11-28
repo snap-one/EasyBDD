@@ -3344,6 +3344,9 @@
                     <button class="nav-button" :class="{active: view === 'queue'}" @click="navigateToView('queue'); loadQueueStatus()">
                         <i class="fas fa-tasks"></i> Test Queue
                     </button>
+                    <button class="nav-button" :class="{active: view === 'scheduled'}" @click="navigateToView('scheduled'); loadScheduledTests()">
+                        <i class="fas fa-clock"></i> Scheduled Tests
+                    </button>
                     <button class="nav-button" :class="{active: view === 'metrics'}" @click="navigateToView('metrics'); loadMetrics()">
                         <i class="fas fa-chart-line"></i> Metrics & Analytics
                     </button>
@@ -4966,6 +4969,220 @@
                             <button class="btn btn-secondary" @click="showAddToQueueModal = false">Cancel</button>
                             <button class="btn btn-primary" @click="addTestToQueue(selectedTestForQueue, queueHeadless)" :disabled="!selectedTestForQueue">
                                 <i class="fas fa-plus"></i> Add to Queue
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scheduled Tests View -->
+                <div v-if="view === 'scheduled'" class="container container-resizable" :style="{ maxWidth: containerWidth + 'px' }">
+                    <div class="queue-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                        <div>
+                            <h2><i class="fas fa-clock"></i> Scheduled Tests</h2>
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem;">Schedule tests to run automatically at specific times</p>
+                        </div>
+                        <div style="display: flex; gap: 0.75rem;">
+                            <button class="btn btn-primary" @click="showCreateScheduleModal = true">
+                                <i class="fas fa-plus"></i> Schedule Test
+                            </button>
+                            <button class="btn btn-secondary" @click="loadScheduledTests()">
+                                <i class="fas fa-sync"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Scheduler Status -->
+                    <div class="card" style="margin-bottom: 1.5rem;">
+                        <div class="card-header">
+                            <h3><i class="fas fa-cog"></i> Scheduler Status</h3>
+                        </div>
+                        <div class="card-body">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <p style="margin: 0;"><strong>Status:</strong> 
+                                        <span :class="schedulerStatus.enabled ? 'badge badge-success' : 'badge badge-secondary'">
+                                            {{ schedulerStatus.enabled ? 'Enabled' : 'Disabled' }}
+                                        </span>
+                                    </p>
+                                    <p style="margin: 0.5rem 0 0 0; color: var(--text-secondary); font-size: 0.875rem;">
+                                        Polling interval: {{ schedulerStatus.poll_interval }}s • 
+                                        {{ schedulerStatus.enabled_tests_count }} of {{ schedulerStatus.scheduled_tests_count }} schedules active
+                                    </p>
+                                </div>
+                                <button class="btn" 
+                                        :class="schedulerStatus.enabled ? 'btn-warning' : 'btn-success'"
+                                        @click="toggleScheduler()">
+                                    <i class="fas" :class="schedulerStatus.enabled ? 'fa-pause' : 'fa-play'"></i>
+                                    {{ schedulerStatus.enabled ? 'Disable' : 'Enable' }} Scheduler
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Scheduled Tests List -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-list"></i> Scheduled Tests</h3>
+                        </div>
+                        <div class="card-body">
+                            <div v-if="scheduledTests.length === 0" class="empty-state">
+                                <div class="empty-state-icon">⏰</div>
+                                <h3 class="empty-state-title">No Scheduled Tests</h3>
+                                <p class="empty-state-text">Schedule tests to run automatically at specific times</p>
+                                <button class="btn btn-primary" @click="showCreateScheduleModal = true">
+                                    <i class="fas fa-plus"></i> Schedule Test
+                                </button>
+                            </div>
+                            <div v-else>
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Test</th>
+                                            <th>Schedule Type</th>
+                                            <th>Next Run</th>
+                                            <th>Last Run</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="schedule in scheduledTests" :key="schedule.id">
+                                            <td>
+                                                <div>
+                                                    <strong>{{ schedule.test_path.split('/').pop() }}</strong>
+                                                    <div v-if="schedule.description" style="font-size: 0.75rem; color: var(--text-secondary);">
+                                                        {{ schedule.description }}
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <span class="badge badge-info">{{ schedule.schedule_type }}</span>
+                                                <div v-if="schedule.schedule_type === 'cron' && schedule.cron_expression" 
+                                                     style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                                                    {{ schedule.cron_expression }}
+                                                </div>
+                                                <div v-else-if="schedule.schedule_type === 'interval' && schedule.interval_minutes" 
+                                                     style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                                                    Every {{ schedule.interval_minutes }} minutes
+                                                </div>
+                                                <div v-else-if="schedule.schedule_time" 
+                                                     style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                                                    {{ schedule.schedule_time }}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <span v-if="schedule.next_run">
+                                                    {{ new Date(schedule.next_run).toLocaleString() }}
+                                                </span>
+                                                <span v-else class="text-muted">N/A</span>
+                                            </td>
+                                            <td>
+                                                <span v-if="schedule.last_run">
+                                                    {{ new Date(schedule.last_run).toLocaleString() }}
+                                                </span>
+                                                <span v-else class="text-muted">Never</span>
+                                            </td>
+                                            <td>
+                                                <span :class="schedule.enabled ? 'badge badge-success' : 'badge badge-secondary'">
+                                                    {{ schedule.enabled ? 'Active' : 'Disabled' }}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <div style="display: flex; gap: 0.5rem;">
+                                                    <button class="btn btn-sm" 
+                                                            :class="schedule.enabled ? 'btn-warning' : 'btn-success'"
+                                                            @click="toggleScheduledTest(schedule.id)"
+                                                            :title="schedule.enabled ? 'Disable' : 'Enable'">
+                                                        <i class="fas" :class="schedule.enabled ? 'fa-pause' : 'fa-play'"></i>
+                                                    </button>
+                                                    <button class="btn btn-sm btn-secondary" 
+                                                            @click="editScheduledTest(schedule)"
+                                                            title="Edit">
+                                                        <i class="fas fa-edit"></i>
+                                                    </button>
+                                                    <button class="btn btn-sm btn-danger" 
+                                                            @click="deleteScheduledTest(schedule.id)"
+                                                            title="Delete">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Create/Edit Schedule Modal -->
+                <div v-if="showCreateScheduleModal || showEditScheduleModal" class="modal-overlay" @click.self="closeScheduleModal()">
+                    <div class="modal-content" style="max-width: 600px;">
+                        <div class="modal-header">
+                            <h2>{{ showEditScheduleModal ? 'Edit Scheduled Test' : 'Schedule Test' }}</h2>
+                            <button class="btn-icon" @click="closeScheduleModal()"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label class="form-label">Test Path *</label>
+                                <select v-model="scheduleForm.test_path" class="form-control" :disabled="showEditScheduleModal">
+                                    <option value="">Select a test...</option>
+                                    <optgroup v-for="(testsInWorkspace, workspace) in testsByWorkspace" :label="workspace" :key="workspace">
+                                        <option v-for="test in testsInWorkspace" :value="test.path" :key="test.id">
+                                            {{ test.name }} ({{ test.path }})
+                                        </option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Schedule Type *</label>
+                                <select v-model="scheduleForm.schedule_type" class="form-control" @change="onScheduleTypeChange()">
+                                    <option value="once">Once (One-time)</option>
+                                    <option value="daily">Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                    <option value="interval">Interval (Every X minutes)</option>
+                                    <option value="cron">Cron Expression</option>
+                                </select>
+                            </div>
+                            <div v-if="scheduleForm.schedule_type === 'once'" class="form-group">
+                                <label class="form-label">Run At (Date & Time) *</label>
+                                <input type="datetime-local" v-model="scheduleForm.schedule_time" class="form-control">
+                            </div>
+                            <div v-else-if="scheduleForm.schedule_type === 'daily' || scheduleForm.schedule_type === 'weekly'" class="form-group">
+                                <label class="form-label">Time (HH:MM) *</label>
+                                <input type="time" v-model="scheduleForm.schedule_time" class="form-control">
+                            </div>
+                            <div v-else-if="scheduleForm.schedule_type === 'interval'" class="form-group">
+                                <label class="form-label">Interval (minutes) *</label>
+                                <input type="number" v-model.number="scheduleForm.interval_minutes" class="form-control" min="1" placeholder="60">
+                            </div>
+                            <div v-else-if="scheduleForm.schedule_type === 'cron'" class="form-group">
+                                <label class="form-label">Cron Expression *</label>
+                                <input type="text" v-model="scheduleForm.cron_expression" class="form-control" 
+                                       placeholder="0 9 * * * (Every day at 9:00 AM)">
+                                <div class="form-help">Format: minute hour day month day_of_week (e.g., "0 9 * * *" = daily at 9 AM)</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Description</label>
+                                <input type="text" v-model="scheduleForm.description" class="form-control" placeholder="Optional description">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <input type="checkbox" v-model="scheduleForm.headless" style="margin-right: 8px;">
+                                    Run in Headless Mode
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <input type="checkbox" v-model="scheduleForm.enabled" style="margin-right: 8px;">
+                                    Enabled
+                                </label>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" @click="closeScheduleModal()">Cancel</button>
+                            <button class="btn btn-primary" @click="saveScheduledTest()" :disabled="!scheduleForm.test_path || !isScheduleFormValid()">
+                                {{ showEditScheduleModal ? 'Update' : 'Create' }} Schedule
                             </button>
                         </div>
                     </div>
@@ -7102,6 +7319,11 @@
                         path: '/queue',
                         name: 'queue',
                         component: { template: '<div></div>' }
+                    },
+                    {
+                        path: '/scheduled',
+                        name: 'scheduled',
+                        component: { template: '<div></div>' }
                     }
                 ];
 
@@ -7394,6 +7616,29 @@
                     selectedTestForQueue: null,
                     showAddToQueueModal: false,
                     queueHeadless: true,
+                    // Scheduled Tests
+                    scheduledTests: [],
+                    schedulerStatus: {
+                        enabled: true,
+                        poll_interval: 60,
+                        scheduled_tests_count: 0,
+                        enabled_tests_count: 0
+                    },
+                    showCreateScheduleModal: false,
+                    showEditScheduleModal: false,
+                    scheduleForm: {
+                        test_path: '',
+                        schedule_type: 'daily',
+                        schedule_time: '',
+                        cron_expression: '',
+                        interval_minutes: 60,
+                        headless: true,
+                        tags: [],
+                        variables: {},
+                        enabled: true,
+                        description: ''
+                    },
+                    editingScheduleId: null,
                     showCreateCollectionModal: false,
                     showEditCollectionModal: false,
                     currentEnvironment: {
@@ -7558,6 +7803,7 @@
                                 '/tests': 'tests',
                                 '/results': 'results',
                                 '/queue': 'queue',
+                                '/scheduled': 'scheduled',
                                 '/suites': 'test-suites',
                                 '/actions': 'actions',
                                 '/templates': 'templates',
@@ -7800,6 +8046,10 @@
                             await this.loadMetrics();
                         } else if (targetView === 'settings') {
                             await this.loadSettings();
+                        } else if (targetView === 'queue') {
+                            await this.loadQueueStatus();
+                        } else if (targetView === 'scheduled') {
+                            await this.loadScheduledTests();
                         }
                     }
                 }
@@ -16129,6 +16379,159 @@ Would you like to enter a selector manually?
                     document.body.appendChild(overlay);
 
                     console.log('Result modal created manually');
+                },
+                // Scheduled Tests Methods
+                async loadScheduledTests() {
+                    try {
+                        const response = await axios.get('/api/tests/schedule');
+                        this.scheduledTests = response.data.scheduled_tests || [];
+                        
+                        // Load scheduler status
+                        const statusResponse = await axios.get('/api/tests/scheduler/status');
+                        this.schedulerStatus = statusResponse.data;
+                    } catch (error) {
+                        console.error('Failed to load scheduled tests:', error);
+                        this.scheduledTests = [];
+                    }
+                },
+                async saveScheduledTest() {
+                    try {
+                        if (!this.scheduleForm.test_path) {
+                            alert('Please select a test');
+                            return;
+                        }
+                        
+                        if (!this.isScheduleFormValid()) {
+                            alert('Please fill in all required fields for the selected schedule type');
+                            return;
+                        }
+                        
+                        if (this.showEditScheduleModal && this.editingScheduleId) {
+                            // Update existing schedule
+                            await axios.put(`/api/tests/schedule/${this.editingScheduleId}`, this.scheduleForm);
+                            alert('✅ Scheduled test updated successfully');
+                        } else {
+                            // Create new schedule
+                            await axios.post('/api/tests/schedule', this.scheduleForm);
+                            alert('✅ Test scheduled successfully');
+                        }
+                        
+                        this.closeScheduleModal();
+                        await this.loadScheduledTests();
+                    } catch (error) {
+                        console.error('Failed to save scheduled test:', error);
+                        alert('Failed to save scheduled test: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async deleteScheduledTest(scheduleId) {
+                    if (!confirm('Are you sure you want to delete this scheduled test?')) return;
+                    
+                    try {
+                        await axios.delete(`/api/tests/schedule/${scheduleId}`);
+                        await this.loadScheduledTests();
+                        alert('✅ Scheduled test deleted successfully');
+                    } catch (error) {
+                        console.error('Failed to delete scheduled test:', error);
+                        alert('Failed to delete scheduled test: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async toggleScheduledTest(scheduleId) {
+                    try {
+                        const response = await axios.post(`/api/tests/schedule/${scheduleId}/toggle`);
+                        await this.loadScheduledTests();
+                    } catch (error) {
+                        console.error('Failed to toggle scheduled test:', error);
+                        alert('Failed to toggle scheduled test: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                async toggleScheduler() {
+                    try {
+                        const enabled = !this.schedulerStatus.enabled;
+                        await axios.post('/api/tests/scheduler/toggle', null, {
+                            params: { enabled: enabled }
+                        });
+                        this.schedulerStatus.enabled = enabled;
+                        await this.loadScheduledTests();
+                    } catch (error) {
+                        console.error('Failed to toggle scheduler:', error);
+                        alert('Failed to toggle scheduler: ' + (error.response?.data?.detail || error.message));
+                    }
+                },
+                editScheduledTest(schedule) {
+                    this.editingScheduleId = schedule.id;
+                    this.scheduleForm = {
+                        test_path: schedule.test_path,
+                        schedule_type: schedule.schedule_type,
+                        schedule_time: schedule.schedule_time || '',
+                        cron_expression: schedule.cron_expression || '',
+                        interval_minutes: schedule.interval_minutes || 60,
+                        headless: schedule.headless !== undefined ? schedule.headless : true,
+                        tags: schedule.tags || [],
+                        variables: schedule.variables || {},
+                        enabled: schedule.enabled !== undefined ? schedule.enabled : true,
+                        description: schedule.description || ''
+                    };
+                    this.showEditScheduleModal = true;
+                },
+                closeScheduleModal() {
+                    this.showCreateScheduleModal = false;
+                    this.showEditScheduleModal = false;
+                    this.editingScheduleId = null;
+                    this.scheduleForm = {
+                        test_path: '',
+                        schedule_type: 'daily',
+                        schedule_time: '',
+                        cron_expression: '',
+                        interval_minutes: 60,
+                        headless: true,
+                        tags: [],
+                        variables: {},
+                        enabled: true,
+                        description: ''
+                    };
+                },
+                onScheduleTypeChange() {
+                    // Reset time-related fields when schedule type changes
+                    if (this.scheduleForm.schedule_type === 'cron') {
+                        this.scheduleForm.schedule_time = '';
+                        this.scheduleForm.interval_minutes = 60;
+                    } else if (this.scheduleForm.schedule_type === 'interval') {
+                        this.scheduleForm.schedule_time = '';
+                        this.scheduleForm.cron_expression = '';
+                    } else if (this.scheduleForm.schedule_type === 'once') {
+                        this.scheduleForm.cron_expression = '';
+                        this.scheduleForm.interval_minutes = 60;
+                    } else {
+                        this.scheduleForm.cron_expression = '';
+                        this.scheduleForm.interval_minutes = 60;
+                    }
+                },
+                isScheduleFormValid() {
+                    if (!this.scheduleForm.test_path) return false;
+                    
+                    if (this.scheduleForm.schedule_type === 'once') {
+                        return !!this.scheduleForm.schedule_time;
+                    } else if (this.scheduleForm.schedule_type === 'daily' || this.scheduleForm.schedule_type === 'weekly') {
+                        return !!this.scheduleForm.schedule_time;
+                    } else if (this.scheduleForm.schedule_type === 'interval') {
+                        return !!this.scheduleForm.interval_minutes && this.scheduleForm.interval_minutes > 0;
+                    } else if (this.scheduleForm.schedule_type === 'cron') {
+                        return !!this.scheduleForm.cron_expression;
+                    }
+                    
+                    return true;
+                },
+                get testsByWorkspace() {
+                    // Group tests by workspace for the schedule modal
+                    const grouped = {};
+                    this.tests.forEach(test => {
+                        const workspace = test.workspace || 'Uncategorized';
+                        if (!grouped[workspace]) {
+                            grouped[workspace] = [];
+                        }
+                        grouped[workspace].push(test);
+                    });
+                    return grouped;
                 }
             }
         });

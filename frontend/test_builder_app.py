@@ -10,10 +10,11 @@ import platform
 import shutil
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
+import re
 
 # Try to import psutil for better hardware stats, fallback to platform-specific methods
 try:
@@ -267,6 +268,12 @@ health_monitoring: Dict[str, Any] = {
     "last_check": None,
     "status": "healthy",
 }
+
+# ==================== TEST SCHEDULING ====================
+scheduled_tests: List[Dict[str, Any]] = []  # List of scheduled test runs
+scheduler_enabled: bool = True  # Enable/disable scheduler
+scheduler_poll_interval: int = 60  # Check for scheduled tests every 60 seconds
+scheduler_task: Optional[asyncio.Task] = None  # Background task for scheduler
 
 # ==================== UTILITY FUNCTIONS ====================
 
@@ -6234,7 +6241,7 @@ async def process_test_queue():
                     
                     # If continuous execution is enabled and queue is empty, check for scheduled tests
                     if continuous_execution_enabled and not test_queue:
-                        # Could add logic here to check for scheduled tests or re-queue completed tests
+                        # Scheduled tests are handled by the scheduler polling function
                         pass
                 else:
                     # No tests in queue, wait a bit
@@ -6360,9 +6367,256 @@ async def health_monitor():
         await asyncio.sleep(health_monitoring["check_interval"])
 
 
+# ==================== SCHEDULER API ENDPOINTS ====================
+
+class ScheduledTestRequest(BaseModel):
+    """Request to create/update a scheduled test"""
+    test_path: str
+    schedule_type: str = Field(..., description="Type: 'once', 'daily', 'weekly', 'interval', or 'cron'")
+    schedule_time: Optional[str] = Field(None, description="ISO datetime for 'once', or time string (HH:MM) for recurring")
+    cron_expression: Optional[str] = Field(None, description="Cron expression (minute hour day month day_of_week)")
+    interval_minutes: Optional[int] = Field(None, description="Interval in minutes for 'interval' type")
+    headless: bool = True
+    tags: List[str] = []
+    variables: Dict[str, Any] = {}
+    enabled: bool = True
+    description: Optional[str] = None
+
+
+@app.post("/api/tests/schedule")
+async def create_scheduled_test(request: ScheduledTestRequest):
+    """Create a new scheduled test"""
+    global scheduled_tests
+    
+    # Calculate next run time
+    next_run = None
+    if request.schedule_type == "once":
+        if request.schedule_time:
+            next_run = datetime.fromisoformat(request.schedule_time).isoformat()
+        else:
+            next_run = datetime.now().isoformat()
+    elif request.schedule_type in ["daily", "weekly"]:
+        if request.schedule_time:
+            # Parse time string (HH:MM)
+            hour, minute = map(int, request.schedule_time.split(":"))
+            now = datetime.now()
+            next_run_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            # If time has passed today, schedule for tomorrow/next week
+            if next_run_dt <= now:
+                if request.schedule_type == "daily":
+                    next_run_dt += timedelta(days=1)
+                else:
+                    next_run_dt += timedelta(weeks=1)
+            next_run = next_run_dt.isoformat()
+        else:
+            # Default to current time + 1 day/week
+            if request.schedule_type == "daily":
+                next_run = (datetime.now() + timedelta(days=1)).isoformat()
+            else:
+                next_run = (datetime.now() + timedelta(weeks=1)).isoformat()
+    elif request.schedule_type == "interval":
+        interval = request.interval_minutes or 60
+        next_run = (datetime.now() + timedelta(minutes=interval)).isoformat()
+    elif request.schedule_type == "cron":
+        if request.cron_expression:
+            next_run_dt = parse_cron_next_run(request.cron_expression, datetime.now())
+            if next_run_dt:
+                next_run = next_run_dt.isoformat()
+            else:
+                raise HTTPException(status_code=400, detail="Invalid cron expression")
+        else:
+            raise HTTPException(status_code=400, detail="cron_expression required for cron schedule type")
+    
+    schedule_id = str(uuid4())
+    schedule = {
+        "id": schedule_id,
+        "test_path": request.test_path,
+        "schedule_type": request.schedule_type,
+        "schedule_time": request.schedule_time,
+        "cron_expression": request.cron_expression,
+        "interval_minutes": request.interval_minutes,
+        "next_run": next_run,
+        "headless": request.headless,
+        "tags": request.tags,
+        "variables": request.variables,
+        "enabled": request.enabled,
+        "description": request.description,
+        "created": datetime.now().isoformat(),
+        "last_run": None,
+    }
+    
+    scheduled_tests.append(schedule)
+    _save_scheduled_tests()
+    
+    return {"schedule_id": schedule_id, "schedule": schedule, "message": "Scheduled test created successfully"}
+
+
+@app.get("/api/tests/schedule")
+async def list_scheduled_tests():
+    """List all scheduled tests"""
+    return {"scheduled_tests": scheduled_tests, "total": len(scheduled_tests)}
+
+
+@app.get("/api/tests/schedule/{schedule_id}")
+async def get_scheduled_test(schedule_id: str):
+    """Get a specific scheduled test"""
+    schedule = next((s for s in scheduled_tests if s["id"] == schedule_id), None)
+    if not schedule:
+        raise HTTPException(status_code=404, detail=f"Scheduled test not found: {schedule_id}")
+    return {"schedule": schedule}
+
+
+@app.put("/api/tests/schedule/{schedule_id}")
+async def update_scheduled_test(schedule_id: str, request: ScheduledTestRequest):
+    """Update a scheduled test"""
+    global scheduled_tests
+    
+    schedule = next((s for s in scheduled_tests if s["id"] == schedule_id), None)
+    if not schedule:
+        raise HTTPException(status_code=404, detail=f"Scheduled test not found: {schedule_id}")
+    
+    # Recalculate next run time
+    next_run = None
+    if request.schedule_type == "once":
+        if request.schedule_time:
+            next_run = datetime.fromisoformat(request.schedule_time).isoformat()
+        else:
+            next_run = datetime.now().isoformat()
+    elif request.schedule_type in ["daily", "weekly"]:
+        if request.schedule_time:
+            hour, minute = map(int, request.schedule_time.split(":"))
+            now = datetime.now()
+            next_run_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if next_run_dt <= now:
+                if request.schedule_type == "daily":
+                    next_run_dt += timedelta(days=1)
+                else:
+                    next_run_dt += timedelta(weeks=1)
+            next_run = next_run_dt.isoformat()
+        else:
+            if request.schedule_type == "daily":
+                next_run = (datetime.now() + timedelta(days=1)).isoformat()
+            else:
+                next_run = (datetime.now() + timedelta(weeks=1)).isoformat()
+    elif request.schedule_type == "interval":
+        interval = request.interval_minutes or 60
+        next_run = (datetime.now() + timedelta(minutes=interval)).isoformat()
+    elif request.schedule_type == "cron":
+        if request.cron_expression:
+            next_run_dt = parse_cron_next_run(request.cron_expression, datetime.now())
+            if next_run_dt:
+                next_run = next_run_dt.isoformat()
+            else:
+                raise HTTPException(status_code=400, detail="Invalid cron expression")
+        else:
+            raise HTTPException(status_code=400, detail="cron_expression required for cron schedule type")
+    
+    # Update schedule
+    schedule.update({
+        "test_path": request.test_path,
+        "schedule_type": request.schedule_type,
+        "schedule_time": request.schedule_time,
+        "cron_expression": request.cron_expression,
+        "interval_minutes": request.interval_minutes,
+        "next_run": next_run,
+        "headless": request.headless,
+        "tags": request.tags,
+        "variables": request.variables,
+        "enabled": request.enabled,
+        "description": request.description,
+        "modified": datetime.now().isoformat(),
+    })
+    
+    _save_scheduled_tests()
+    
+    return {"schedule_id": schedule_id, "schedule": schedule, "message": "Scheduled test updated successfully"}
+
+
+@app.delete("/api/tests/schedule/{schedule_id}")
+async def delete_scheduled_test(schedule_id: str):
+    """Delete a scheduled test"""
+    global scheduled_tests
+    
+    schedule = next((s for s in scheduled_tests if s["id"] == schedule_id), None)
+    if not schedule:
+        raise HTTPException(status_code=404, detail=f"Scheduled test not found: {schedule_id}")
+    
+    scheduled_tests.remove(schedule)
+    _save_scheduled_tests()
+    
+    return {"message": "Scheduled test deleted successfully"}
+
+
+@app.post("/api/tests/schedule/{schedule_id}/toggle")
+async def toggle_scheduled_test(schedule_id: str):
+    """Enable/disable a scheduled test"""
+    global scheduled_tests
+    
+    schedule = next((s for s in scheduled_tests if s["id"] == schedule_id), None)
+    if not schedule:
+        raise HTTPException(status_code=404, detail=f"Scheduled test not found: {schedule_id}")
+    
+    schedule["enabled"] = not schedule.get("enabled", True)
+    _save_scheduled_tests()
+    
+    return {"schedule_id": schedule_id, "enabled": schedule["enabled"], "message": f"Scheduled test {'enabled' if schedule['enabled'] else 'disabled'}"}
+
+
+@app.post("/api/tests/scheduler/toggle")
+async def toggle_scheduler(enabled: bool = Query(True)):
+    """Enable/disable the scheduler"""
+    global scheduler_enabled
+    scheduler_enabled = enabled
+    return {"enabled": scheduler_enabled, "message": f"Scheduler {'enabled' if enabled else 'disabled'}"}
+
+
+@app.get("/api/tests/scheduler/status")
+async def get_scheduler_status():
+    """Get scheduler status"""
+    return {
+        "enabled": scheduler_enabled,
+        "poll_interval": scheduler_poll_interval,
+        "scheduled_tests_count": len(scheduled_tests),
+        "enabled_tests_count": len([s for s in scheduled_tests if s.get("enabled", True)]),
+    }
+
+
+def _save_scheduled_tests():
+    """Save scheduled tests to disk"""
+    schedules_file = Path(__file__).parent.parent / "scheduled_tests.json"
+    try:
+        with open(schedules_file, "w") as f:
+            json.dump(scheduled_tests, f, indent=2)
+    except Exception as e:
+        print(f"[SCHEDULER] Error saving scheduled tests: {e}")
+
+
+def _load_scheduled_tests():
+    """Load scheduled tests from disk"""
+    global scheduled_tests
+    schedules_file = Path(__file__).parent.parent / "scheduled_tests.json"
+    try:
+        if schedules_file.exists():
+            with open(schedules_file, "r") as f:
+                scheduled_tests = json.load(f)
+    except Exception as e:
+        print(f"[SCHEDULER] Error loading scheduled tests: {e}")
+        scheduled_tests = []
+
+
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on server startup"""
+    global scheduler_task
+    
+    # Load scheduled tests from disk
+    _load_scheduled_tests()
+    
+    # Start scheduler polling task
+    if scheduler_enabled:
+        scheduler_task = asyncio.create_task(scheduler_polling())
+        print("[STARTUP] Scheduler polling started")
+    
     # Start queue processor if continuous execution is enabled
     if continuous_execution_enabled:
         asyncio.create_task(process_test_queue())
@@ -6372,6 +6626,24 @@ async def startup_event():
     if health_monitoring["enabled"]:
         asyncio.create_task(health_monitor())
         print("[STARTUP] Health monitor started")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on server shutdown"""
+    global scheduler_task
+    
+    # Save scheduled tests
+    _save_scheduled_tests()
+    
+    # Cancel scheduler task
+    if scheduler_task:
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
+        print("[SHUTDOWN] Scheduler polling stopped")
 
 
 @app.post("/api/tests/queue")
