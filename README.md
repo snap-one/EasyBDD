@@ -246,6 +246,7 @@ Comprehensive guides available in the `/docs` folder:
 
 ### 🔧 Integration Guides
 - **[AWS S3 Integration](docs/aws-s3-integration.md)** - Firmware management and version extraction
+- **[PagerDuty Integration](docs/pagerduty-integration.md)** - Incident management and on-call operations
 - **[OvrC API Integration](docs/TEST_BUILDER.md#ovrc-api-integration)** - WebSocket and HTTP API
 - **[JSON-RPC WebSocket](docs/jsonrpc-websocket.md)** - Device communication protocol
 - **[API Authentication](docs/api-authentication.md)** - OAuth, JWT, API keys

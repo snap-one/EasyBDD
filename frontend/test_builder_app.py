@@ -415,6 +415,7 @@ async def get_documentation(doc_name: str):
         "jsonrpc-websocket": base_dir / "docs" / "jsonrpc-websocket.md",
         "api-authentication": base_dir / "docs" / "api-authentication.md",
         "datalake-logger": base_dir / "docs" / "datalake-logger.md",
+        "pagerduty-integration": base_dir / "docs" / "pagerduty-integration.md",
         "advanced": base_dir / "docs" / "advanced.md",
         "CENTRALIZED_VARIABLES": base_dir / "docs" / "CENTRALIZED_VARIABLES.md",
         "WORKSPACE_MANAGEMENT": base_dir / "docs" / "WORKSPACE_MANAGEMENT.md",
@@ -6828,6 +6829,43 @@ async def startup_event():
     if health_monitoring["enabled"]:
         asyncio.create_task(health_monitor())
         print("[STARTUP] Health monitor started")
+
+
+@app.get("/api/pagerduty/test")
+async def test_pagerduty_connection(
+    api_key: str = Query(..., description="PagerDuty API key"),
+    api_base_url: str = Query("https://api.pagerduty.com", description="PagerDuty API base URL")
+):
+    """Test PagerDuty API connection"""
+    try:
+        from ..services.pagerduty_service import PagerDutyService
+        
+        pd_service = PagerDutyService(api_key=api_key, api_base_url=api_base_url)
+        
+        # Test by listing services (simple API call)
+        services = pd_service.get_services(limit=1)
+        
+        return {
+            "success": True,
+            "message": f"✅ Connection successful! Found {len(services)} service(s)."
+        }
+    except Exception as e:
+        error_msg = str(e)
+        if "401" in error_msg or "403" in error_msg or "Unauthorized" in error_msg:
+            return {
+                "success": False,
+                "message": "❌ Authentication failed. Please check your API key."
+            }
+        elif "404" in error_msg:
+            return {
+                "success": False,
+                "message": "❌ API endpoint not found. Please check your API base URL."
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"❌ Connection failed: {error_msg}"
+            }
 
 
 @app.on_event("shutdown")

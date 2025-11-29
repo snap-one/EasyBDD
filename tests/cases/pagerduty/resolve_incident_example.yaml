@@ -1,0 +1,26 @@
+name: "PagerDuty Resolve Incident Example"
+description: "Example of resolving a PagerDuty incident when issue is fixed"
+tags: ["pagerduty", "incident", "example"]
+
+variables:
+  # Incident ID from a previous test or manually set
+  incident_id: "P123456"  # Replace with actual incident ID
+
+steps:
+  # Simulate checking if issue is fixed
+  - action: browser.open
+    url: "https://example.com/health"
+  
+  - action: test.assert
+    expression: "page_content contains 'Healthy'"
+    message: "Service should be healthy"
+  
+  # Resolve incident if health check passes
+  - action: pagerduty.resolve_incident
+    incident_id: "${incident_id}"
+    resolution: "Service health check passed. Issue resolved automatically by test."
+    store_as: "resolved_incident"
+  
+  - action: log
+    message: "Incident ${incident_id} resolved successfully"
+

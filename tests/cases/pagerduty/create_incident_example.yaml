@@ -1,0 +1,35 @@
+name: "PagerDuty Create Incident Example"
+description: "Example of creating a PagerDuty incident from a test failure"
+tags: ["pagerduty", "incident", "example"]
+
+variables:
+  # Configure your PagerDuty service ID
+  pagerduty_service_id: "P123456"  # Replace with your service ID
+  # API key can be set via environment variable: PAGERDUTY_API_KEY
+
+steps:
+  # Simulate a test that might fail
+  - action: browser.open
+    url: "https://example.com"
+  
+  - action: test.assert
+    expression: "page_content contains 'Expected Text'"
+    message: "Page should contain expected text"
+  
+  # Create incident if assertion fails (in real scenario, use cleanup or conditional)
+  - action: pagerduty.create_incident
+    service_id: "${pagerduty_service_id}"
+    title: "Test Failure: Page Content Missing"
+    description: "Test 'PagerDuty Create Incident Example' failed. Expected text not found on page."
+    severity: "error"
+    urgency: "high"
+    custom_details:
+      test_name: "PagerDuty Create Incident Example"
+      test_path: "tests/cases/pagerduty/create_incident_example.yaml"
+      environment: "test"
+      failure_reason: "Expected text not found"
+    store_as: "incident"
+  
+  - action: log
+    message: "Incident created: ${incident['id']} (${incident['incident_number']})"
+

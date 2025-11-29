@@ -4504,6 +4504,9 @@
                             <button class="docs-link" :class="{active: selectedDoc === 'jsonrpc-websocket'}" @click="selectDoc('jsonrpc-websocket')">
                                 <i class="fas fa-plug"></i> OvrC WebSocket
                             </button>
+                            <button class="docs-link" :class="{active: selectedDoc === 'pagerduty-integration'}" @click="selectDoc('pagerduty-integration')">
+                                <i class="fas fa-bell"></i> PagerDuty
+                            </button>
                             <button class="docs-link" :class="{active: selectedDoc === 'api-authentication'}" @click="selectDoc('api-authentication')">
                                 <i class="fas fa-key"></i> API Authentication
                             </button>
@@ -4693,6 +4696,74 @@
                             <div v-if="openaiTestResult" class="alert" :class="openaiTestResult.success ? 'alert-success' : 'alert-danger'" style="margin-top: 1rem;">
                                 <i class="fas" :class="openaiTestResult.success ? 'fa-check-circle' : 'fa-exclamation-circle'"></i>
                                 {{ openaiTestResult.message }}
+                            </div>
+                        </div>
+
+                        <!-- PagerDuty Configuration Section -->
+                        <div class="settings-section" style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border);">
+                            <h3><i class="fas fa-bell"></i> PagerDuty Configuration</h3>
+                            <p class="text-muted" style="margin-bottom: 1.5rem;">
+                                Configure your PagerDuty API key for incident management. Your API key is stored locally and never shared.
+                                <a href="https://support.pagerduty.com/docs/api-access-keys" target="_blank" style="color: var(--primary);">
+                                    Get your API key <i class="fas fa-external-link-alt" style="font-size: 0.75rem;"></i>
+                                </a>
+                            </p>
+
+                            <div class="form-group">
+                                <label class="form-label form-label-required">PagerDuty API Key</label>
+                                <input
+                                    v-model="pagerdutyConfig.api_key"
+                                    type="password"
+                                    class="form-control"
+                                    placeholder="y+..."
+                                    autocomplete="off"
+                                    style="font-family: monospace;"
+                                >
+                                <div class="form-help">
+                                    Your API key is encrypted and stored locally. It's used only for PagerDuty incident management.
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-top: 1rem;">
+                                <label class="form-label">Default Service ID</label>
+                                <input
+                                    v-model="pagerdutyConfig.service_id"
+                                    type="text"
+                                    class="form-control"
+                                    placeholder="P123456"
+                                    autocomplete="off"
+                                >
+                                <div class="form-help">
+                                    Default service ID to use when creating incidents (optional, can be overridden per action).
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-top: 1rem;">
+                                <label class="form-label">API Base URL</label>
+                                <input
+                                    v-model="pagerdutyConfig.api_base_url"
+                                    type="text"
+                                    class="form-control"
+                                    placeholder="https://api.pagerduty.com"
+                                    autocomplete="off"
+                                >
+                                <div class="form-help">
+                                    PagerDuty API base URL (default: https://api.pagerduty.com)
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 1.5rem;">
+                                <button class="btn btn-primary" @click="savePagerDutyConfig">
+                                    <i class="fas fa-save"></i> Save PagerDuty Configuration
+                                </button>
+                                <button class="btn btn-secondary" @click="testPagerDutyConnection" :disabled="!pagerdutyConfig.api_key">
+                                    <i class="fas fa-paper-plane"></i> Test Connection
+                                </button>
+                            </div>
+
+                            <div v-if="pagerdutyTestResult" class="alert" :class="pagerdutyTestResult.success ? 'alert-success' : 'alert-danger'" style="margin-top: 1rem;">
+                                <i class="fas" :class="pagerdutyTestResult.success ? 'fa-check-circle' : 'fa-exclamation-circle'"></i>
+                                {{ pagerdutyTestResult.message }}
                             </div>
                         </div>
                     </div>
@@ -7587,7 +7658,12 @@
                     },
                     teamsTestResult: null,
                     openaiTestResult: null,
-                    teamsTestResult: null,
+                    pagerdutyConfig: {
+                        api_key: '',
+                        service_id: '',
+                        api_base_url: 'https://api.pagerduty.com'
+                    },
+                    pagerdutyTestResult: null,
                     // Queue management
                     queueStatus: {
                         queue_length: 0,
@@ -12845,6 +12921,7 @@ Would you like to enter a selector manually?
                         'jsonrpc-websocket': 'OvrC WebSocket',
                         'api-authentication': 'API Authentication',
                         'datalake-logger': 'Datalake Logger',
+                        'pagerduty-integration': 'PagerDuty Integration',
                         'advanced': 'Advanced Features',
                         'CENTRALIZED_VARIABLES': 'Variable Management',
                         'WORKSPACE_MANAGEMENT': 'Workspace Management',
@@ -12873,6 +12950,7 @@ Would you like to enter a selector manually?
                         'jsonrpc-websocket': `${baseUrl}/docs/jsonrpc-websocket.md`,
                         'api-authentication': `${baseUrl}/docs/api-authentication.md`,
                         'datalake-logger': `${baseUrl}/docs/datalake-logger.md`,
+                        'pagerduty-integration': `${baseUrl}/docs/pagerduty-integration.md`,
                         'advanced': `${baseUrl}/docs/advanced.md`,
                         'CENTRALIZED_VARIABLES': `${baseUrl}/docs/CENTRALIZED_VARIABLES.md`,
                         'WORKSPACE_MANAGEMENT': `${baseUrl}/docs/WORKSPACE_MANAGEMENT.md`,
@@ -14464,6 +14542,20 @@ Would you like to enter a selector manually?
                     if (savedOpenAIKey) {
                         this.openaiConfig.api_key = savedOpenAIKey;
                     }
+                    
+                    // Load PagerDuty config from localStorage
+                    const savedPagerDutyKey = localStorage.getItem('pagerduty_api_key');
+                    if (savedPagerDutyKey) {
+                        this.pagerdutyConfig.api_key = savedPagerDutyKey;
+                    }
+                    const savedPagerDutyServiceId = localStorage.getItem('pagerduty_service_id');
+                    if (savedPagerDutyServiceId) {
+                        this.pagerdutyConfig.service_id = savedPagerDutyServiceId;
+                    }
+                    const savedPagerDutyBaseUrl = localStorage.getItem('pagerduty_api_base_url');
+                    if (savedPagerDutyBaseUrl) {
+                        this.pagerdutyConfig.api_base_url = savedPagerDutyBaseUrl;
+                    }
                 },
                 async saveTeamsConfig() {
                     try {
@@ -14556,6 +14648,83 @@ Would you like to enter a selector manually?
                     } catch (error) {
                         const errorMsg = error.response?.data?.detail || error.message || 'Unknown error';
                         this.openaiTestResult = {
+                            success: false,
+                            message: '❌ Connection failed: ' + errorMsg
+                        };
+                    }
+                },
+                async savePagerDutyConfig() {
+                    try {
+                        // Save to localStorage
+                        if (this.pagerdutyConfig.api_key) {
+                            localStorage.setItem('pagerduty_api_key', this.pagerdutyConfig.api_key);
+                            if (this.pagerdutyConfig.service_id) {
+                                localStorage.setItem('pagerduty_service_id', this.pagerdutyConfig.service_id);
+                            }
+                            if (this.pagerdutyConfig.api_base_url) {
+                                localStorage.setItem('pagerduty_api_base_url', this.pagerdutyConfig.api_base_url);
+                            }
+                            this.pagerdutyTestResult = {
+                                success: true,
+                                message: '✅ PagerDuty configuration saved successfully!'
+                            };
+                            // Clear result after 3 seconds
+                            setTimeout(() => {
+                                this.pagerdutyTestResult = null;
+                            }, 3000);
+                        } else {
+                            // Remove from localStorage if empty
+                            localStorage.removeItem('pagerduty_api_key');
+                            localStorage.removeItem('pagerduty_service_id');
+                            localStorage.removeItem('pagerduty_api_base_url');
+                            this.pagerdutyTestResult = {
+                                success: true,
+                                message: '✅ PagerDuty configuration removed.'
+                            };
+                            setTimeout(() => {
+                                this.pagerdutyTestResult = null;
+                            }, 3000);
+                        }
+                    } catch (error) {
+                        console.error('Failed to save PagerDuty config:', error);
+                        this.pagerdutyTestResult = {
+                            success: false,
+                            message: 'Failed to save PagerDuty configuration: ' + (error.message || 'Unknown error')
+                        };
+                    }
+                },
+                async testPagerDutyConnection() {
+                    if (!this.pagerdutyConfig.api_key) {
+                        this.pagerdutyTestResult = {
+                            success: false,
+                            message: 'Please enter an API key first.'
+                        };
+                        return;
+                    }
+
+                    try {
+                        // Test by listing services (simple API call)
+                        const response = await axios.get('/api/pagerduty/test', {
+                            params: {
+                                api_key: this.pagerdutyConfig.api_key,
+                                api_base_url: this.pagerdutyConfig.api_base_url || 'https://api.pagerduty.com'
+                            }
+                        });
+
+                        if (response.data.success) {
+                            this.pagerdutyTestResult = {
+                                success: true,
+                                message: '✅ Connection successful! PagerDuty API key is valid.'
+                            };
+                        } else {
+                            this.pagerdutyTestResult = {
+                                success: false,
+                                message: '❌ Connection failed: ' + (response.data.message || 'Unknown error')
+                            };
+                        }
+                    } catch (error) {
+                        const errorMsg = error.response?.data?.detail || error.message || 'Unknown error';
+                        this.pagerdutyTestResult = {
                             success: false,
                             message: '❌ Connection failed: ' + errorMsg
                         };

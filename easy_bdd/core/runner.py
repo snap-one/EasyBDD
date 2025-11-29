@@ -4,6 +4,7 @@ Test runner for executing Easy BDD tests
 
 import contextlib
 import datetime
+import os
 import sys
 import threading
 import time
@@ -966,6 +967,8 @@ class TestRunner:
                 "ovrc": "ovrc",  # OvrC API service
                 "test": "browser",  # test.assert, test.wait use browser context
                 "command": "command",  # Command execution service
+                "pagerduty": "pagerduty",  # PagerDuty incident management
+                "pd": "pagerduty",  # Short alias for PagerDuty
             }
             return service_map.get(service_prefix, "browser")
 
@@ -1019,6 +1022,9 @@ class TestRunner:
                 raise
         elif service_type == "command":
             return CommandService(self.config)
+        elif service_type == "pagerduty":
+            from ..services.pagerduty_service import PagerDutyService
+            return PagerDutyService(logger=print)
         else:
             # For now, return a mock service for other types
             return MockService(service_type)
@@ -1066,6 +1072,14 @@ class TestRunner:
                 or "s3" in action_lower
             ):
                 return self._handle_aws_action(action, step_params, variables)
+
+            # PagerDuty actions (support both formats)
+            if (
+                action_lower.startswith("pagerduty")
+                or action_lower.startswith("pd.")
+                or action_lower.startswith("pagerduty.")
+            ):
+                return self._handle_pagerduty_action(action, step_params, variables)
 
             # Test execution action (run another test as a step)
             if action_lower in ["test.run", "run test", "execute test"]:
@@ -2159,6 +2173,213 @@ class TestRunner:
 
         except Exception as e:
             print(f"      ❌ OvrC HTTP API action failed: {e}")
+            raise
+
+    def _handle_pagerduty_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle PagerDuty incident management actions."""
+        from ..services.pagerduty_service import PagerDutyService
+
+        # Get or create PagerDuty service from variables
+        pd_service = variables.get("_pagerduty_service")
+
+        # Extract parameters
+        params = self._get_params(step_params)
+        action_lower = action.lower()
+
+        try:
+            # Initialize service if needed
+            if not pd_service:
+                api_key = (
+                    params.get("api_key")
+                    or variables.get("pagerduty_api_key")
+                    or os.environ.get("PAGERDUTY_API_KEY")
+                )
+                api_base_url = params.get("api_base_url") or variables.get("pagerduty_api_base_url")
+                pd_service = PagerDutyService(logger=print, api_key=api_key, api_base_url=api_base_url)
+                variables["_pagerduty_service"] = pd_service
+
+            # Create incident
+            if "create" in action_lower and "incident" in action_lower:
+                service_id = params.get("service_id", "")
+                title = params.get("title", "")
+                description = params.get("description", "")
+                severity = params.get("severity", "error")
+                urgency = params.get("urgency")
+                priority_id = params.get("priority_id")
+                assignees = params.get("assignees", [])
+                escalation_policy_id = params.get("escalation_policy_id")
+                custom_details = params.get("custom_details", {})
+
+                if not service_id or not title:
+                    raise ValueError("PagerDuty create incident requires 'service_id' and 'title'")
+
+                result = pd_service.create_incident(
+                    service_id=service_id,
+                    title=title,
+                    description=description,
+                    severity=severity,
+                    urgency=urgency,
+                    priority_id=priority_id,
+                    assignees=assignees if isinstance(assignees, list) else [assignees] if assignees else [],
+                    escalation_policy_id=escalation_policy_id,
+                    custom_details=custom_details,
+                )
+
+                store_as = params.get("store_as", "")
+                if store_as:
+                    variables[store_as] = result
+                    print(f"      💾 Stored incident as: {store_as}")
+                return True
+
+            # Resolve incident
+            elif "resolve" in action_lower and "incident" in action_lower:
+                incident_id = params.get("incident_id", "")
+                resolution = params.get("resolution", "")
+
+                if not incident_id:
+                    raise ValueError("PagerDuty resolve incident requires 'incident_id'")
+
+                result = pd_service.resolve_incident(incident_id=incident_id, resolution=resolution)
+                store_as = params.get("store_as", "")
+                if store_as:
+                    variables[store_as] = result
+                    print(f"      💾 Stored resolved incident as: {store_as}")
+                return True
+
+            # Acknowledge incident
+            elif "acknowledge" in action_lower and "incident" in action_lower:
+                incident_id = params.get("incident_id", "")
+                acknowledger_id = params.get("acknowledger_id")
+
+                if not incident_id:
+                    raise ValueError("PagerDuty acknowledge incident requires 'incident_id'")
+
+                result = pd_service.acknowledge_incident(incident_id=incident_id, acknowledger_id=acknowledger_id)
+                store_as = params.get("store_as", "")
+                if store_as:
+                    variables[store_as] = result
+                    print(f"      💾 Stored acknowledged incident as: {store_as}")
+                return True
+
+            # Get incident
+            elif "get" in action_lower and "incident" in action_lower:
+                incident_id = params.get("incident_id", "")
+
+                if not incident_id:
+                    raise ValueError("PagerDuty get incident requires 'incident_id'")
+
+                result = pd_service.get_incident(incident_id=incident_id)
+                store_as = params.get("store_as", "")
+                if store_as:
+                    variables[store_as] = result
+                    print(f"      💾 Stored incident as: {store_as}")
+                return result is not None
+
+            # List incidents
+            elif "list" in action_lower and "incident" in action_lower:
+                service_ids = params.get("service_ids", [])
+                statuses = params.get("statuses", [])
+                since = params.get("since")
+                until = params.get("until")
+                limit = params.get("limit", 25)
+
+                if isinstance(service_ids, str):
+                    service_ids = [s.strip() for s in service_ids.split(",") if s.strip()]
+                if isinstance(statuses, str):
+                    statuses = [s.strip() for s in statuses.split(",") if s.strip()]
+
+                result = pd_service.list_incidents(
+                    service_ids=service_ids,
+                    statuses=statuses,
+                    since=since,
+                    until=until,
+                    limit=limit,
+                )
+                store_as = params.get("store_as", "")
+                if store_as:
+                    variables[store_as] = result
+                    print(f"      💾 Stored {len(result)} incidents as: {store_as}")
+                return True
+
+            # Update incident
+            elif "update" in action_lower and "incident" in action_lower:
+                incident_id = params.get("incident_id", "")
+                title = params.get("title")
+                description = params.get("description")
+                severity = params.get("severity")
+                urgency = params.get("urgency")
+                priority_id = params.get("priority_id")
+                status = params.get("status")
+                custom_details = params.get("custom_details", {})
+
+                if not incident_id:
+                    raise ValueError("PagerDuty update incident requires 'incident_id'")
+
+                result = pd_service.update_incident(
+                    incident_id=incident_id,
+                    title=title,
+                    description=description,
+                    severity=severity,
+                    urgency=urgency,
+                    priority_id=priority_id,
+                    status=status,
+                    custom_details=custom_details,
+                )
+                store_as = params.get("store_as", "")
+                if store_as:
+                    variables[store_as] = result
+                    print(f"      💾 Stored updated incident as: {store_as}")
+                return True
+
+            # Get on-call users
+            elif "oncall" in action_lower or "on-call" in action_lower:
+                schedule_ids = params.get("schedule_ids", [])
+                escalation_policy_ids = params.get("escalation_policy_ids", [])
+
+                if isinstance(schedule_ids, str):
+                    schedule_ids = [s.strip() for s in schedule_ids.split(",") if s.strip()]
+                if isinstance(escalation_policy_ids, str):
+                    escalation_policy_ids = [s.strip() for s in escalation_policy_ids.split(",") if s.strip()]
+
+                result = pd_service.get_oncall_users(
+                    schedule_ids=schedule_ids,
+                    escalation_policy_ids=escalation_policy_ids,
+                )
+                store_as = params.get("store_as", "")
+                if store_as:
+                    variables[store_as] = result
+                    print(f"      💾 Stored {len(result)} on-call users as: {store_as}")
+                return True
+
+            # Get services
+            elif "get" in action_lower and "service" in action_lower:
+                service_id = params.get("service_id", "")
+                query = params.get("query", "")
+                limit = params.get("limit", 25)
+
+                if service_id:
+                    result = pd_service.get_service(service_id=service_id)
+                else:
+                    result = pd_service.get_services(query=query, limit=limit)
+
+                store_as = params.get("store_as", "")
+                if store_as:
+                    if service_id:
+                        variables[store_as] = result
+                        print(f"      💾 Stored service as: {store_as}")
+                    else:
+                        variables[store_as] = result
+                        print(f"      💾 Stored {len(result)} services as: {store_as}")
+                return result is not None
+
+            else:
+                print(f"      ❌ Unknown PagerDuty action: {action}")
+                raise ValueError(f"Unknown PagerDuty action: {action}")
+
+        except Exception as e:
+            print(f"      ❌ PagerDuty action failed: {e}")
             raise
 
     def _handle_test_run_action(
