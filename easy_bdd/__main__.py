@@ -431,7 +431,31 @@ def docker_run(args) -> int:
     # Check if Docker is available
     if not shutil.which("docker"):
         print("Error: Docker is not installed or not in PATH", file=sys.stderr)
+        print("\nTo install Docker:", file=sys.stderr)
+        print("  macOS: Download Docker Desktop from https://www.docker.com/products/docker-desktop", file=sys.stderr)
+        print("  Linux: sudo apt-get install docker.io  (or use your package manager)", file=sys.stderr)
+        print("  Windows: Download Docker Desktop from https://www.docker.com/products/docker-desktop", file=sys.stderr)
+        print("\nAfter installation, make sure Docker Desktop is running and try again.", file=sys.stderr)
         return 1
+    
+    # Verify Docker daemon is running
+    try:
+        check_daemon = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            timeout=5
+        )
+        if check_daemon.returncode != 0:
+            print("Error: Docker daemon is not running", file=sys.stderr)
+            print("Please start Docker Desktop and try again.", file=sys.stderr)
+            return 1
+    except subprocess.TimeoutExpired:
+        print("Error: Docker daemon is not responding", file=sys.stderr)
+        print("Please start Docker Desktop and try again.", file=sys.stderr)
+        return 1
+    except Exception:
+        # If docker info fails, continue anyway - docker run will fail with a better error
+        pass
 
     # Get project root (parent of easy_bdd package)
     project_root = Path(__file__).parent.parent.parent
