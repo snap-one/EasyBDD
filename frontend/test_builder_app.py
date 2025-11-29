@@ -447,15 +447,21 @@ async def get_documentation(doc_name: str):
             try:
                 # Try to use more advanced extensions if available
                 extensions = [
-                    "fenced_code",
-                    "tables",
-                    "toc",
-                    "codehilite",
-                    "nl2br",
-                    "sane_lists",
+                    "fenced_code",      # Code blocks with syntax highlighting
+                    "tables",           # Table support
+                    "toc",              # Table of contents
+                    "nl2br",            # Newline to <br>
+                    "sane_lists",       # Better list handling
                 ]
+                # Try codehilite if pygments is available, otherwise skip it
+                try:
+                    import pygments
+                    extensions.append("codehilite")
+                except ImportError:
+                    pass
+                
                 md = markdown.Markdown(extensions=extensions)
-            except Exception:
+            except Exception as e:
                 # Fallback to basic extensions
                 try:
                     md = markdown.Markdown(extensions=["fenced_code", "tables", "toc"])
@@ -464,6 +470,9 @@ async def get_documentation(doc_name: str):
                     md = markdown.Markdown()
             
             html_content = md.convert(content)
+            
+            # Reset markdown instance for next conversion
+            md.reset()
 
             # Wrap in a styled HTML document with dark mode
             html_doc = f"""<!DOCTYPE html>
