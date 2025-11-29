@@ -8308,7 +8308,18 @@
                         });
                     } catch (error) {
                         console.error('Chat error:', error);
-                        const errorMsg = error.response?.data?.detail || error.message || 'Failed to get response from AI assistant';
+                        let errorMsg = error.response?.data?.detail || error.message || 'Failed to get response from AI assistant';
+                        
+                        // Format multi-line error messages better
+                        if (errorMsg.includes('\n')) {
+                            errorMsg = errorMsg.split('\n').join('\n\n');
+                        }
+                        
+                        // Check for 503 status code specifically
+                        if (error.response?.status === 503) {
+                            errorMsg = `🔧 **Configuration Required**\n\n${errorMsg}\n\nPlease fix the issue above and try again.`;
+                        }
+                        
                         this.chatMessages.push({
                             role: 'assistant',
                             content: `❌ **Error:** ${errorMsg}`

@@ -5839,7 +5839,7 @@ async def chat_assistant(
     if not OPENAI_AVAILABLE:
         raise HTTPException(
             status_code=503,
-            detail="Chat assistant not available. Install openai package: pip install openai"
+            detail="Chat assistant not available. The 'openai' package is not installed.\n\nTo fix this:\n1. Install the package: pip install openai>=1.0.0\n2. Restart the Test Builder server"
         )
     
     # Check API key - try from request header first, then environment variable
@@ -5855,7 +5855,7 @@ async def chat_assistant(
     if not api_key:
         raise HTTPException(
             status_code=503,
-            detail="OpenAI API key not configured. Please configure it in Settings."
+            detail="OpenAI API key not configured.\n\nTo fix this:\n1. Go to Settings in the Test Builder\n2. Enter your OpenAI API key in the 'OpenAI API Key' field\n3. Or set the OPENAI_API_KEY environment variable\n\nGet your API key from: https://platform.openai.com/api-keys"
         )
     
     # Check token limit
