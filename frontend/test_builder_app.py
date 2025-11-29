@@ -444,7 +444,25 @@ async def get_documentation(doc_name: str):
         # Convert markdown to HTML if markdown library is available
         if MARKDOWN_AVAILABLE:
             # Use markdown extensions for better rendering
-            md = markdown.Markdown(extensions=["fenced_code", "tables", "toc"])
+            try:
+                # Try to use more advanced extensions if available
+                extensions = [
+                    "fenced_code",
+                    "tables",
+                    "toc",
+                    "codehilite",
+                    "nl2br",
+                    "sane_lists",
+                ]
+                md = markdown.Markdown(extensions=extensions)
+            except Exception:
+                # Fallback to basic extensions
+                try:
+                    md = markdown.Markdown(extensions=["fenced_code", "tables", "toc"])
+                except Exception:
+                    # Last resort: basic markdown
+                    md = markdown.Markdown()
+            
             html_content = md.convert(content)
 
             # Wrap in a styled HTML document with dark mode
