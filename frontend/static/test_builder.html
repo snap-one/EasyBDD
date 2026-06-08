@@ -3356,6 +3356,9 @@
                     <button class="nav-button" :class="{active: view === 'variables'}" @click="navigateToView('variables'); loadVariables()">
                         <i class="fas fa-code"></i> Variables
                     </button>
+                    <button class="nav-button" :class="{active: view === 'shared-steps'}" @click="navigateToView('shared-steps'); loadSharedSteps()">
+                        <i class="fas fa-puzzle-piece"></i> Shared Steps
+                    </button>
                     <button class="nav-button" :class="{active: view === 'docs'}" @click="navigateToView('docs')">
                         <i class="fas fa-book"></i> Documentation
                     </button>
@@ -3419,6 +3422,7 @@
                     <h2 v-else-if="view === 'metrics'">Metrics & Analytics</h2>
                     <h2 v-else-if="view === 'variables'">Variables</h2>
                     <h2 v-else-if="view === 'test-suites'">Test Suites</h2>
+                    <h2 v-else-if="view === 'shared-steps'">Shared Steps</h2>
                     <h2 v-else-if="view === 'docs'">Documentation</h2>
                 </div>
                 <div class="toolbar-right">
@@ -3444,6 +3448,12 @@
                     </button>
                     <button v-if="view === 'builder'" class="btn btn-primary" @click="runTest">
                         <i class="fas fa-play"></i> Run Test
+                    </button>
+                    <button v-if="view === 'shared-steps'" class="btn btn-secondary" @click="showMigrateModal = true">
+                        <i class="fas fa-file-import"></i> Import / Migrate
+                    </button>
+                    <button v-if="view === 'shared-steps'" class="btn btn-primary" @click="openCreateSharedStep()">
+                        <i class="fas fa-plus"></i> New Shared Step
                     </button>
                 </div>
             </div>
@@ -4447,6 +4457,233 @@
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===================== SHARED STEPS VIEW ===================== -->
+                <div v-if="view === 'shared-steps'" class="container container-resizable" :style="{ maxWidth: containerWidth + 'px' }">
+
+                    <!-- Scope / search bar -->
+                    <div class="section-header" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; margin-bottom:1rem;">
+                        <select v-model="sharedStepScopeFilter" class="form-control" style="width:180px;" @change="loadSharedSteps()">
+                            <option value="all">All Scopes</option>
+                            <option value="global">Global</option>
+                            <option v-for="ws in folders" :key="ws.path" :value="ws.name">{{ ws.name }}</option>
+                        </select>
+                        <input v-model="sharedStepSearch" class="form-control" placeholder="Search shared steps…" style="flex:1; min-width:160px;" />
+                        <span class="badge badge-secondary">{{ filteredSharedSteps.length }} steps</span>
+                    </div>
+
+                    <!-- Loading -->
+                    <div v-if="sharedStepsLoading" class="text-center" style="padding:3rem;">
+                        <i class="fas fa-spinner fa-spin"></i> Loading…
+                    </div>
+
+                    <!-- Empty state -->
+                    <div v-else-if="filteredSharedSteps.length === 0" class="empty-state">
+                        <i class="fas fa-puzzle-piece" style="font-size:3rem; opacity:0.3; margin-bottom:1rem;"></i>
+                        <h3>No shared steps yet</h3>
+                        <p>Create reusable step sequences (e.g. login, get firmware version) and reference them in any test with <code>shared_step:</code>.</p>
+                        <button class="btn btn-primary" @click="openCreateSharedStep()"><i class="fas fa-plus"></i> Create First Shared Step</button>
+                    </div>
+
+                    <!-- List -->
+                    <div v-else>
+                        <div v-for="step in filteredSharedSteps" :key="step.name + step.scope" class="result-card" style="margin-bottom:0.75rem;">
+                            <div style="display:flex; align-items:flex-start; gap:1rem;">
+                                <div style="flex:1; min-width:0;">
+                                    <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                                        <strong>{{ step.name }}</strong>
+                                        <span class="badge" :class="step.scope === 'global' ? 'badge-primary' : 'badge-secondary'">
+                                            {{ step.scope === 'global' ? 'Global' : step.scope }}
+                                        </span>
+                                        <span v-if="step.parameters && step.parameters.length" class="badge badge-info">
+                                            {{ step.parameters.length }} param{{ step.parameters.length !== 1 ? 's' : '' }}
+                                        </span>
+                                        <span class="badge badge-secondary">{{ (step.steps || []).length }} steps</span>
+                                    </div>
+                                    <div v-if="step.description" style="color:var(--text-muted); font-size:0.875rem; margin-top:0.25rem;">{{ step.description }}</div>
+                                    <div v-if="step.parameters && step.parameters.length" style="margin-top:0.5rem; font-size:0.8rem; color:var(--text-muted);">
+                                        <strong>Params:</strong> {{ step.parameters.join(', ') }}
+                                    </div>
+                                    <!-- Usage hint -->
+                                    <div style="margin-top:0.5rem; font-size:0.75rem; background:var(--bg-tertiary); border-radius:4px; padding:0.35rem 0.6rem; font-family:monospace; color:var(--text-muted);">
+                                        shared_step: {{ step.name }}
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:0.5rem; flex-shrink:0;">
+                                    <button class="btn btn-sm btn-secondary" @click="openEditSharedStep(step)" title="Edit"><i class="fas fa-edit"></i></button>
+                                    <button class="btn btn-sm btn-danger" @click="deleteSharedStep(step.name, step.scope)" title="Delete"><i class="fas fa-trash"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================== CREATE / EDIT SHARED STEP MODAL ================== -->
+                <div v-if="showSharedStepModal" class="modal-overlay" @click.self="showSharedStepModal = false">
+                    <div class="modal" style="max-width:700px; width:95%; max-height:90vh; overflow-y:auto;">
+                        <div class="modal-header">
+                            <h3><i class="fas fa-puzzle-piece"></i> {{ editingSharedStepName ? 'Edit' : 'New' }} Shared Step</h3>
+                            <button class="btn-close" @click="showSharedStepModal = false"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label>Name <span style="color:var(--danger);">*</span></label>
+                                <input v-model="currentSharedStep.name" class="form-control" placeholder="e.g. get_firmware_version" />
+                                <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">Lowercase, underscores. Used as: <code>shared_step: {{ currentSharedStep.name || 'name' }}</code></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Description</label>
+                                <input v-model="currentSharedStep.description" class="form-control" placeholder="What does this shared step do?" />
+                            </div>
+                            <div class="form-group">
+                                <label>Scope</label>
+                                <select v-model="currentSharedStep.scope" class="form-control">
+                                    <option value="global">Global (available to all tests)</option>
+                                    <option v-for="ws in folders" :key="ws.path" :value="ws.name">{{ ws.name }} (workspace only)</option>
+                                </select>
+                            </div>
+
+                            <!-- Parameters -->
+                            <div class="form-group">
+                                <label>Parameters <span style="color:var(--text-muted); font-size:0.8rem;">(reference as <code>${param_name}</code> in steps)</span></label>
+                                <div v-for="(param, idx) in currentSharedStep.parameters" :key="idx" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                                    <input :value="param" @input="currentSharedStep.parameters[idx] = $event.target.value" class="form-control" placeholder="param_name" style="flex:1;" />
+                                    <button class="btn btn-sm btn-danger" @click="currentSharedStep.parameters.splice(idx, 1)"><i class="fas fa-times"></i></button>
+                                </div>
+                                <button class="btn btn-sm btn-secondary" @click="currentSharedStep.parameters.push('')"><i class="fas fa-plus"></i> Add Parameter</button>
+                            </div>
+
+                            <!-- Steps -->
+                            <div class="form-group">
+                                <label>Steps</label>
+                                <div v-for="(step, idx) in currentSharedStep.steps" :key="idx" class="result-card" style="margin-bottom:0.5rem; padding:0.75rem;">
+                                    <div style="display:flex; gap:0.5rem; align-items:flex-start;">
+                                        <div style="flex:1;">
+                                            <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                                                <span style="color:var(--text-muted); font-size:0.8rem; padding-top:0.35rem;">{{ idx + 1 }}.</span>
+                                                <input :value="step.action" @input="step.action = $event.target.value" class="form-control" placeholder="action (e.g. api.request)" />
+                                            </div>
+                                            <textarea :value="sharedStepParamsStr(step)" @input="updateSharedStepParams(idx, $event.target.value)" class="form-control" rows="3" style="font-family:monospace; font-size:0.8rem;" placeholder="key: value&#10;url: ${base_url}/version&#10;store_as: fw_version"></textarea>
+                                        </div>
+                                        <button class="btn btn-sm btn-danger" @click="currentSharedStep.steps.splice(idx, 1)"><i class="fas fa-times"></i></button>
+                                    </div>
+                                </div>
+                                <button class="btn btn-sm btn-secondary" @click="currentSharedStep.steps.push({action: '', parameters: {}})"><i class="fas fa-plus"></i> Add Step</button>
+                            </div>
+
+                            <!-- YAML preview -->
+                            <div class="form-group">
+                                <label>YAML Preview</label>
+                                <pre style="background:var(--bg-tertiary); border-radius:6px; padding:0.75rem; font-size:0.75rem; overflow-x:auto; max-height:200px;">{{ sharedStepYamlPreview }}</pre>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" @click="showSharedStepModal = false">Cancel</button>
+                            <button class="btn btn-primary" @click="saveSharedStep()" :disabled="!currentSharedStep.name.trim()"><i class="fas fa-save"></i> Save Shared Step</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================== MIGRATE / IMPORT MODAL ================== -->
+                <div v-if="showMigrateModal" class="modal-overlay" @click.self="showMigrateModal = false">
+                    <div class="modal" style="max-width:800px; width:95%; max-height:92vh; overflow-y:auto;">
+                        <div class="modal-header">
+                            <h3><i class="fas fa-file-import"></i> Import &amp; Migrate</h3>
+                            <button class="btn-close" @click="showMigrateModal = false"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div class="modal-body">
+
+                            <!-- Source selector -->
+                            <div class="form-group">
+                                <label>Source Format</label>
+                                <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+                                    <label class="radio-option" :class="{selected: migrateSource === 'robot'}" @click="migrateSource = 'robot'">
+                                        <input type="radio" value="robot" v-model="migrateSource" style="display:none;" />
+                                        <i class="fas fa-robot"></i> Robot Framework (.robot)
+                                    </label>
+                                    <label class="radio-option" :class="{selected: migrateSource === 'bdd'}" @click="migrateSource = 'bdd'">
+                                        <input type="radio" value="bdd" v-model="migrateSource" style="display:none;" />
+                                        <i class="fas fa-vial"></i> Previous BDD Framework (.feature / step block)
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- File upload or paste -->
+                            <div class="form-group">
+                                <label>Paste file content or upload</label>
+                                <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                                    <input type="file" :accept="migrateSource === 'robot' ? '.robot,.txt' : '.feature,.txt'" @change="handleMigrateFile" class="form-control" style="flex:1;" />
+                                </div>
+                                <textarea v-model="migrateContent" class="form-control" rows="12" style="font-family:monospace; font-size:0.8rem;" :placeholder="migratePlaceholder"></textarea>
+                            </div>
+
+                            <!-- Save destination -->
+                            <div class="form-group">
+                                <label>Save to workspace <span style="color:var(--text-muted); font-size:0.8rem;">(leave blank to preview only)</span></label>
+                                <select v-model="migrateSaveWorkspace" class="form-control">
+                                    <option value="">Preview only — don't save</option>
+                                    <option v-for="ws in folders" :key="ws.path" :value="ws.name">{{ ws.name }}</option>
+                                </select>
+                            </div>
+
+                            <!-- Results -->
+                            <div v-if="migrateError" class="alert alert-danger" style="margin-top:1rem;">
+                                <i class="fas fa-exclamation-triangle"></i> {{ migrateError }}
+                            </div>
+                            <div v-if="migrateResults" style="margin-top:1rem;">
+                                <div class="metrics-grid" style="grid-template-columns: repeat(3, 1fr); gap:0.75rem; margin-bottom:1rem;">
+                                    <div class="metric-card">
+                                        <div class="metric-content"><div class="metric-label">Tests</div><div class="metric-value">{{ migrateResults.summary.tests }}</div></div>
+                                    </div>
+                                    <div class="metric-card">
+                                        <div class="metric-content"><div class="metric-label">Shared Steps</div><div class="metric-value">{{ migrateResults.summary.shared_steps }}</div></div>
+                                    </div>
+                                    <div class="metric-card">
+                                        <div class="metric-content"><div class="metric-label">Variables</div><div class="metric-value">{{ migrateResults.summary.variables }}</div></div>
+                                    </div>
+                                </div>
+
+                                <!-- Warnings -->
+                                <div v-if="migrateResults.warnings && migrateResults.warnings.length" style="margin-bottom:1rem;">
+                                    <div v-for="w in migrateResults.warnings" :key="w" class="alert" style="background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); border-radius:6px; padding:0.6rem 0.9rem; font-size:0.85rem; margin-bottom:0.5rem;">
+                                        <i class="fas fa-triangle-exclamation" style="color:#f59e0b;"></i> {{ w }}
+                                    </div>
+                                </div>
+
+                                <!-- Saved confirmation -->
+                                <div v-if="migrateResults.saved" class="alert" style="background:rgba(34,197,94,0.1); border:1px solid rgba(34,197,94,0.3); border-radius:6px; padding:0.6rem 0.9rem; margin-bottom:1rem;">
+                                    <i class="fas fa-check-circle" style="color:#22c55e;"></i>
+                                    Saved {{ migrateResults.saved.tests.length }} test(s) to <strong>{{ migrateResults.saved.workspace }}</strong>
+                                </div>
+
+                                <!-- Test preview tabs -->
+                                <div v-if="migrateResults.tests && migrateResults.tests.length">
+                                    <label>Converted Tests</label>
+                                    <div style="display:flex; gap:0.4rem; flex-wrap:wrap; margin-bottom:0.5rem;">
+                                        <button v-for="(t, idx) in migrateResults.tests" :key="t.name"
+                                                class="btn btn-sm" :class="migratePreviewIdx === idx ? 'btn-primary' : 'btn-secondary'"
+                                                @click="migratePreviewIdx = idx">{{ t.display_name }}</button>
+                                    </div>
+                                    <pre v-if="migrateResults.tests[migratePreviewIdx]" style="background:var(--bg-tertiary); border-radius:6px; padding:0.75rem; font-size:0.75rem; overflow:auto; max-height:280px;">{{ migrateResults.tests[migratePreviewIdx].yaml }}</pre>
+                                </div>
+
+                                <!-- Shared steps preview -->
+                                <div v-if="migrateResults.shared_steps_yaml" style="margin-top:1rem;">
+                                    <label>Converted Shared Steps (shared_steps.yaml)</label>
+                                    <pre style="background:var(--bg-tertiary); border-radius:6px; padding:0.75rem; font-size:0.75rem; overflow:auto; max-height:200px;">{{ migrateResults.shared_steps_yaml }}</pre>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" @click="showMigrateModal = false">Close</button>
+                            <button class="btn btn-primary" @click="runMigration()" :disabled="!migrateContent.trim() || migrateLoading">
+                                <i v-if="migrateLoading" class="fas fa-spinner fa-spin"></i>
+                                <i v-else class="fas fa-magic"></i>
+                                {{ migrateLoading ? 'Converting…' : 'Convert' }}
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -7731,7 +7968,24 @@
                         variables: {}
                     },
                     environmentVariablesList: [],
-                    collectionVariablesList: []
+                    collectionVariablesList: [],
+                    // Shared Steps
+                    sharedSteps: [],
+                    sharedStepsLoading: false,
+                    sharedStepScopeFilter: 'all',
+                    sharedStepSearch: '',
+                    showSharedStepModal: false,
+                    currentSharedStep: { name: '', description: '', scope: 'global', parameters: [], steps: [] },
+                    editingSharedStepName: null,
+                    // Migration
+                    showMigrateModal: false,
+                    migrateSource: 'robot',
+                    migrateContent: '',
+                    migrateSaveWorkspace: '',
+                    migrateResults: null,
+                    migratePreviewIdx: 0,
+                    migrateLoading: false,
+                    migrateError: null
                 };
             },
             computed: {
@@ -7765,6 +8019,50 @@
                     }
 
                     return filtered;
+                },
+                filteredSharedSteps() {
+                    let list = this.sharedSteps || [];
+                    if (this.sharedStepScopeFilter !== 'all') {
+                        list = list.filter(s => s.scope === this.sharedStepScopeFilter);
+                    }
+                    if (this.sharedStepSearch && this.sharedStepSearch.trim()) {
+                        const q = this.sharedStepSearch.toLowerCase();
+                        list = list.filter(s =>
+                            s.name.toLowerCase().includes(q) ||
+                            (s.description || '').toLowerCase().includes(q)
+                        );
+                    }
+                    return list;
+                },
+                sharedStepYamlPreview() {
+                    const s = this.currentSharedStep;
+                    if (!s.name) return '';
+                    let lines = [`${s.name}:`];
+                    if (s.description) lines.push(`  description: "${s.description}"`);
+                    if (s.parameters && s.parameters.length) {
+                        lines.push('  parameters:');
+                        s.parameters.forEach(p => lines.push(`    - ${p}`));
+                    }
+                    lines.push('  steps:');
+                    if (!s.steps || !s.steps.length) {
+                        lines.push('    []');
+                    } else {
+                        s.steps.forEach(st => {
+                            lines.push(`    - action: ${st.action || ''}`);
+                            if (st.parameters && typeof st.parameters === 'object') {
+                                Object.entries(st.parameters).forEach(([k, v]) => {
+                                    lines.push(`      ${k}: ${v}`);
+                                });
+                            }
+                        });
+                    }
+                    return lines.join('\n');
+                },
+                migratePlaceholder() {
+                    if (this.migrateSource === 'bdd') {
+                        return `Feature: Device firmware check\n\nScenario: Verify firmware version\n  Given test_id | 12345 |\n  When ---\n  webservice | $baseurl | GET | /api/v1/firmware | {} |\n  | version | in response\n  response_code | 200 |\n  function |{"name":"assert","expression":"@","operator":"match","expected":"^\\\\d+\\\\.\\\\d+"}|gv.log[-1]['response_txt']|\n  browser | {"command": "open", "param": "$baseurl/login"} |\n  sleep | 5 |\n  Then done`;
+                    }
+                    return `*** Settings ***\nLibrary    Browser\nSuite Setup    Open Browser\n\n*** Variables ***\n\${BASE_URL}    https://example.com\n\n*** Keywords ***\nLogin To App\n    [Arguments]    \${username}    \${password}\n    browser.open    \${BASE_URL}\n    browser.fill    selector=#email    value=\${username}\n\n*** Test Cases ***\nVerify Login\n    [Documentation]    Checks login works\n    [Tags]    smoke\n    Login To App    admin    secret`;
                 },
                 testsByWorkspace() {
                     // Group tests by workspace for the test.run selector and schedule modal
@@ -13904,6 +14202,131 @@ Would you like to enter a selector manually?
                         this.loadEnvironments(),
                         this.loadCollections()
                     ]);
+                },
+
+                // ==================== SHARED STEPS ====================
+
+                async loadSharedSteps() {
+                    this.sharedStepsLoading = true;
+                    try {
+                        const scope = this.sharedStepScopeFilter !== 'all' ? this.sharedStepScopeFilter : undefined;
+                        const params = scope ? { scope } : {};
+                        const res = await axios.get('/api/shared-steps', { params });
+                        this.sharedSteps = res.data.shared_steps || [];
+                    } catch (e) {
+                        console.error('Failed to load shared steps', e);
+                        this.sharedSteps = [];
+                    } finally {
+                        this.sharedStepsLoading = false;
+                    }
+                },
+
+                openCreateSharedStep() {
+                    this.editingSharedStepName = null;
+                    this.currentSharedStep = { name: '', description: '', scope: 'global', parameters: [], steps: [] };
+                    this.showSharedStepModal = true;
+                },
+
+                openEditSharedStep(step) {
+                    this.editingSharedStepName = step.name;
+                    this.currentSharedStep = {
+                        name: step.name,
+                        description: step.description || '',
+                        scope: step.scope || 'global',
+                        parameters: [...(step.parameters || [])],
+                        steps: (step.steps || []).map(s => ({ ...s, parameters: { ...(s.parameters || {}) } }))
+                    };
+                    this.showSharedStepModal = true;
+                },
+
+                sharedStepParamsStr(step) {
+                    if (!step.parameters || typeof step.parameters !== 'object') return '';
+                    return Object.entries(step.parameters).map(([k, v]) => `${k}: ${v}`).join('\n');
+                },
+
+                updateSharedStepParams(idx, text) {
+                    const params = {};
+                    text.split('\n').forEach(line => {
+                        const colon = line.indexOf(':');
+                        if (colon > 0) {
+                            const key = line.slice(0, colon).trim();
+                            const val = line.slice(colon + 1).trim();
+                            if (key) params[key] = val;
+                        }
+                    });
+                    this.currentSharedStep.steps[idx].parameters = params;
+                },
+
+                async saveSharedStep() {
+                    const s = this.currentSharedStep;
+                    if (!s.name.trim()) { alert('Name is required'); return; }
+                    // Sanitise name
+                    s.name = s.name.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+                    // Build step list with proper structure
+                    const steps = s.steps.map(st => {
+                        const d = { action: st.action };
+                        if (st.parameters && Object.keys(st.parameters).length) {
+                            Object.assign(d, st.parameters);
+                        }
+                        return d;
+                    });
+                    const payload = { name: s.name, description: s.description, scope: s.scope, parameters: s.parameters.filter(p => p.trim()), steps };
+                    try {
+                        if (this.editingSharedStepName) {
+                            await axios.put(`/api/shared-steps/${encodeURIComponent(this.editingSharedStepName)}`, payload, { params: { scope: s.scope } });
+                        } else {
+                            await axios.post('/api/shared-steps', payload);
+                        }
+                        this.showSharedStepModal = false;
+                        await this.loadSharedSteps();
+                    } catch (e) {
+                        alert('Save failed: ' + (e.response?.data?.detail || e.message));
+                    }
+                },
+
+                async deleteSharedStep(name, scope) {
+                    if (!confirm(`Delete shared step "${name}" from scope "${scope}"?`)) return;
+                    try {
+                        await axios.delete(`/api/shared-steps/${encodeURIComponent(name)}`, { params: { scope } });
+                        await this.loadSharedSteps();
+                    } catch (e) {
+                        alert('Delete failed: ' + (e.response?.data?.detail || e.message));
+                    }
+                },
+
+                // ==================== MIGRATE ====================
+
+                handleMigrateFile(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => { this.migrateContent = e.target.result; };
+                    reader.readAsText(file);
+                },
+
+                async runMigration() {
+                    if (!this.migrateContent.trim()) return;
+                    this.migrateLoading = true;
+                    this.migrateError = null;
+                    this.migrateResults = null;
+                    this.migratePreviewIdx = 0;
+                    try {
+                        const payload = {
+                            content: this.migrateContent,
+                            save_to_workspace: this.migrateSaveWorkspace || null
+                        };
+                        const endpoint = this.migrateSource === 'bdd' ? '/api/migrate/bdd' : '/api/migrate/robot';
+                        const res = await axios.post(endpoint, payload);
+                        this.migrateResults = res.data;
+                        if (this.migrateSaveWorkspace && res.data.saved) {
+                            await this.loadTests();
+                            await this.loadSharedSteps();
+                        }
+                    } catch (e) {
+                        this.migrateError = e.response?.data?.detail || e.message || 'Migration failed';
+                    } finally {
+                        this.migrateLoading = false;
+                    }
                 },
                 async loadEnvironments() {
                     try {

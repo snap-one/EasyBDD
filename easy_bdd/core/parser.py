@@ -21,6 +21,20 @@ class TestStep:
     then_steps: Optional[List["TestStep"]] = None  # Steps if condition true
     else_steps: Optional[List["TestStep"]] = None  # Steps if condition false
     retry_config: Optional[Dict[str, Any]] = None  # Retry configuration
+    # FOR loop
+    for_each: Optional[str] = None   # Expression that yields an iterable
+    loop_var: Optional[str] = None   # Variable name bound to each item
+    loop_steps: Optional[List["TestStep"]] = None  # Body of loop
+    # WHILE loop
+    while_condition: Optional[str] = None  # Loop-continue expression
+    loop_limit: int = 1000           # Safety cap on iterations
+    # TRY/EXCEPT/FINALLY
+    try_steps: Optional[List["TestStep"]] = None
+    except_steps: Optional[List["TestStep"]] = None
+    finally_steps: Optional[List["TestStep"]] = None
+    # Break/continue guards (valid inside any loop body)
+    break_if: Optional[str] = None
+    continue_if: Optional[str] = None
 
     def __post_init__(self):
         # Ensure parameters is a dictionary
@@ -78,10 +92,15 @@ class YAMLParser:
         self.shared_steps: Dict[str, SharedStep] = {}
         self._load_shared_steps()
 
-    def _load_shared_steps(self) -> None:
-        """Load shared steps from shared_steps.yaml"""
-        shared_steps_path = Path("shared_steps.yaml")
-        if shared_steps_path.exists():
+    def _load_shared_steps(self, workspace_dir: Optional[Path] = None) -> None:
+        """Load shared steps: global file first, then workspace-local (overrides global)."""
+        candidates = [Path("shared_steps.yaml")]
+        if workspace_dir is not None:
+            candidates.append(Path(workspace_dir) / "shared_steps.yaml")
+
+        for shared_steps_path in candidates:
+            if not shared_steps_path.exists():
+                continue
             try:
                 with open(shared_steps_path, "r", encoding="utf-8") as f:
                     data = yaml.safe_load(f)
@@ -97,11 +116,13 @@ class YAMLParser:
                             )
                             self.shared_steps[name] = shared_step
             except Exception as e:
-                print(f"Warning: Failed to load shared steps: {e}")
+                print(f"Warning: Failed to load shared steps from {shared_steps_path}: {e}")
 
     def parse_file(self, file_path: Path) -> TestDefinition:
-        """Parse a single YAML test file"""
+        """Parse a single YAML test file, loading workspace-local shared steps if present."""
         file_path = Path(file_path)
+        # Reload workspace-local shared steps (local overrides global)
+        self._load_shared_steps(workspace_dir=file_path.parent)
 
         if not file_path.exists():
             error_info = self._create_test_error_info(
@@ -336,7 +357,54 @@ class YAMLParser:
             if "shared_step" in step_data:
                 shared_steps = self._expand_shared_step(step_data)
                 steps.extend(shared_steps)
-            # Check if this is a conditional step
+
+            # FOR loop
+            elif "for_each" in step_data:
+                loop_steps_data = step_data.get("steps", [])
+                steps.append(
+                    TestStep(
+                        action="for_loop",
+                        parameters={},
+                        for_each=str(step_data["for_each"]),
+                        loop_var=step_data.get("loop_var", "item"),
+                        loop_steps=self._parse_steps(loop_steps_data) if loop_steps_data else [],
+                        loop_limit=int(step_data.get("limit", 1000)),
+                        break_if=step_data.get("break_if"),
+                        continue_if=step_data.get("continue_if"),
+                    )
+                )
+
+            # WHILE loop
+            elif "while" in step_data:
+                loop_steps_data = step_data.get("steps", [])
+                steps.append(
+                    TestStep(
+                        action="while_loop",
+                        parameters={},
+                        while_condition=str(step_data["while"]),
+                        loop_steps=self._parse_steps(loop_steps_data) if loop_steps_data else [],
+                        loop_limit=int(step_data.get("limit", 1000)),
+                        break_if=step_data.get("break_if"),
+                        continue_if=step_data.get("continue_if"),
+                    )
+                )
+
+            # TRY/EXCEPT/FINALLY
+            elif "try" in step_data:
+                try_data = step_data.get("try", [])
+                except_data = step_data.get("except", [])
+                finally_data = step_data.get("finally", [])
+                steps.append(
+                    TestStep(
+                        action="try_except",
+                        parameters={},
+                        try_steps=self._parse_steps(try_data) if try_data else [],
+                        except_steps=self._parse_steps(except_data) if except_data else None,
+                        finally_steps=self._parse_steps(finally_data) if finally_data else None,
+                    )
+                )
+
+            # IF/ELSE conditional
             elif "condition" in step_data or "if" in step_data:
                 condition = step_data.get("condition") or step_data.get("if")
                 then_data = step_data.get("then", [])

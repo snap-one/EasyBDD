@@ -245,6 +245,9 @@ environments_directory.mkdir(exist_ok=True)
 collections_directory = Path(__file__).parent.parent / "collections"
 collections_directory.mkdir(exist_ok=True)
 
+# Shared steps — global file + workspace-local convention
+shared_steps_global_path = Path(__file__).parent.parent / "shared_steps.yaml"
+
 running_tests: Dict[str, Dict] = {}
 test_results: Dict[str, Any] = {}
 websocket_connections: List[WebSocket] = []
@@ -7070,6 +7073,235 @@ async def test_error_403():
 async def test_error_401():
     """Test endpoint to trigger 401 error page"""
     raise HTTPException(status_code=401, detail="Unauthorized - test endpoint")
+
+
+# ==================== SHARED STEPS ====================
+
+
+class SharedStepModel(BaseModel):
+    name: str
+    description: str = ""
+    scope: str = "global"       # "global" or a workspace name
+    parameters: List[str] = []
+    steps: List[Dict[str, Any]] = []
+
+
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _assert_safe_name(value: str, label: str = "scope") -> None:
+    """Reject any name that isn't a simple word (no slashes, dots, etc.)."""
+    if not _SAFE_NAME_RE.fullmatch(value):
+        raise HTTPException(status_code=400, detail=f"Invalid {label}: must match [A-Za-z0-9_-]+")
+
+
+def _shared_steps_path(scope: str) -> Path:
+    """Return the validated YAML file path for the given scope."""
+    if scope == "global":
+        return shared_steps_global_path
+    _assert_safe_name(scope, "scope")
+    candidate = (tests_directory / scope).resolve()
+    # Ensure the resolved path stays inside tests_directory
+    if candidate.parent.resolve() != tests_directory.resolve():
+        raise HTTPException(status_code=400, detail="Invalid scope")
+    return candidate / "shared_steps.yaml"
+
+
+def _load_shared_steps_file(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_shared_steps_file(path: Path, data: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, sort_keys=False, allow_unicode=True)
+
+
+def _all_scopes() -> List[str]:
+    scopes = ["global"]
+    if tests_directory.exists():
+        for d in tests_directory.iterdir():
+            if d.is_dir() and (d / "shared_steps.yaml").exists():
+                scopes.append(d.name)
+    return scopes
+
+
+@app.get("/api/shared-steps")
+async def list_shared_steps(scope: Optional[str] = None):
+    """List shared steps across all scopes or a specific one."""
+    scopes = [scope] if scope else _all_scopes()
+    items = []
+    for sc in scopes:
+        path = _shared_steps_path(sc)
+        data = _load_shared_steps_file(path)
+        for name, body in data.items():
+            if not isinstance(body, dict):
+                continue
+            items.append({
+                "name": name,
+                "description": body.get("description", ""),
+                "scope": sc,
+                "parameters": body.get("parameters", []),
+                "steps": body.get("steps", []),
+            })
+    return {"shared_steps": items, "total": len(items), "scopes": _all_scopes()}
+
+
+@app.post("/api/shared-steps")
+async def create_shared_step(step: SharedStepModel):
+    path = _shared_steps_path(step.scope)
+    data = _load_shared_steps_file(path)
+    if step.name in data:
+        raise HTTPException(status_code=409, detail=f"Shared step '{step.name}' already exists in scope '{step.scope}'")
+    entry: Dict[str, Any] = {"description": step.description}
+    if step.parameters:
+        entry["parameters"] = step.parameters
+    entry["steps"] = step.steps
+    data[step.name] = entry
+    _save_shared_steps_file(path, data)
+    return {"name": step.name, "scope": step.scope, "status": "created"}
+
+
+@app.put("/api/shared-steps/{name}")
+async def update_shared_step(name: str, step: SharedStepModel, scope: str = "global"):
+    path = _shared_steps_path(scope)
+    data = _load_shared_steps_file(path)
+    entry: Dict[str, Any] = {"description": step.description}
+    if step.parameters:
+        entry["parameters"] = step.parameters
+    entry["steps"] = step.steps
+    # Handle rename
+    if step.name != name and name in data:
+        del data[name]
+    data[step.name] = entry
+    _save_shared_steps_file(path, data)
+    return {"name": step.name, "scope": scope, "status": "updated"}
+
+
+@app.delete("/api/shared-steps/{name}")
+async def delete_shared_step(name: str, scope: str = "global"):
+    path = _shared_steps_path(scope)
+    data = _load_shared_steps_file(path)
+    if name not in data:
+        raise HTTPException(status_code=404, detail=f"Shared step '{name}' not found in scope '{scope}'")
+    del data[name]
+    _save_shared_steps_file(path, data)
+    return {"name": name, "scope": scope, "status": "deleted"}
+
+
+# ==================== MIGRATION ====================
+
+
+class MigrateRobotRequest(BaseModel):
+    content: str
+    save_to_workspace: Optional[str] = None   # if set, save immediately
+
+
+@app.post("/api/migrate/robot")
+async def migrate_robot_file(req: MigrateRobotRequest):
+    """Convert a Robot Framework .robot file to Easy BDD YAML test files + shared steps."""
+    try:
+        from robot_migrator import migrate
+    except ImportError:
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).parent))
+            from robot_migrator import migrate
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=f"robot_migrator not available: {e}")
+
+    try:
+        result = migrate(req.content)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Migration failed: {e}")
+
+    if req.save_to_workspace:
+        workspace = req.save_to_workspace.strip("/")
+        _assert_safe_name(workspace, "workspace")
+        target_dir = (tests_directory / workspace).resolve()
+        if target_dir.parent.resolve() != tests_directory.resolve():
+            raise HTTPException(status_code=400, detail="Invalid workspace")
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        saved_tests = []
+        for t in result["tests"]:
+            # Sanitise the generated filename too
+            safe_fname = re.sub(r"[^A-Za-z0-9_-]", "_", t["name"]) + ".yaml"
+            fpath = (target_dir / safe_fname).resolve()
+            if fpath.parent != target_dir:
+                continue  # skip any path that escapes the target dir
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(t["yaml"])
+            saved_tests.append(str(fpath.relative_to(tests_directory)))
+
+        if result["shared_steps"]:
+            sc_path = _shared_steps_path(workspace)
+            existing = _load_shared_steps_file(sc_path)
+            existing.update(result["shared_steps"])
+            _save_shared_steps_file(sc_path, existing)
+
+        result["saved"] = {"tests": saved_tests, "workspace": workspace}
+
+    return result
+
+
+class MigrateBddRequest(BaseModel):
+    content: str
+    save_to_workspace: Optional[str] = None
+
+
+@app.post("/api/migrate/bdd")
+async def migrate_bdd_file(req: MigrateBddRequest):
+    """Convert a mybdd/pytest-bdd pipe-delimited step file to Easy BDD YAML."""
+    try:
+        from bdd_migrator import migrate
+    except ImportError:
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).parent))
+            from bdd_migrator import migrate
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=f"bdd_migrator not available: {e}")
+
+    try:
+        result = migrate(req.content)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Migration failed: {e}")
+
+    if req.save_to_workspace:
+        workspace = req.save_to_workspace.strip("/")
+        _assert_safe_name(workspace, "workspace")
+        target_dir = (tests_directory / workspace).resolve()
+        if target_dir.parent.resolve() != tests_directory.resolve():
+            raise HTTPException(status_code=400, detail="Invalid workspace")
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        saved_tests = []
+        for t in result["tests"]:
+            safe_fname = re.sub(r"[^A-Za-z0-9_-]", "_", t["name"]) + ".yaml"
+            fpath = (target_dir / safe_fname).resolve()
+            if fpath.parent != target_dir:
+                continue
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(t["yaml"])
+            saved_tests.append(str(fpath.relative_to(tests_directory)))
+
+        if result.get("shared_steps"):
+            sc_path = _shared_steps_path(workspace)
+            existing = _load_shared_steps_file(sc_path)
+            existing.update(result["shared_steps"])
+            _save_shared_steps_file(sc_path, existing)
+
+        result["saved"] = {"tests": saved_tests, "workspace": workspace}
+
+    return result
 
 
 # ==================== ERROR HANDLERS ====================

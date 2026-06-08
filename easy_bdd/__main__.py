@@ -3,6 +3,8 @@ Main entry point for the Easy BDD Framework
 Usage: python -m easy_bdd [command] [options]
 """
 
+import os
+import re
 import sys
 import argparse
 from pathlib import Path
@@ -151,6 +153,139 @@ Examples:
     edit_parser.add_argument(
         "test_path", type=str, help="Path to test file to edit"
     )
+
+    # TestRail run command
+    tr_parser = subparsers.add_parser(
+        "testrail-run",
+        help="Execute tests driven by a TestRail run (EASY_BDD: prefix)",
+    )
+    tr_parser.add_argument(
+        "project_id",
+        type=int,
+        help="TestRail project ID to scan for an active EASY_BDD: run",
+    )
+    tr_parser.add_argument(
+        "--run-id",
+        type=int,
+        default=None,
+        help="Target a specific TestRail run ID instead of auto-discovering",
+    )
+    tr_parser.add_argument(
+        "--tests-dir",
+        default="tests/cases",
+        help="Directory to search for local YAML tests (default: tests/cases)",
+    )
+    tr_parser.add_argument(
+        "--artifact-dir",
+        default="reports/testrail",
+        help="Directory for generated artifacts and reports (default: reports/testrail)",
+    )
+    tr_parser.add_argument(
+        "--prefix",
+        default=None,
+        help="TestRail run name prefix to match (default: EASY_BDD:, or TESTRAIL_RUN_PREFIX env var)",
+    )
+    tr_parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-test progress output",
+    )
+
+    # TestRail convert command
+    trc_parser = subparsers.add_parser(
+        "testrail-convert",
+        help="Convert a mybdd-format TestRail suite to Easy BDD YAML test files",
+    )
+    trc_parser.add_argument(
+        "project_id",
+        type=int,
+        help="TestRail project ID",
+    )
+    _src = trc_parser.add_mutually_exclusive_group(required=True)
+    _src.add_argument(
+        "--suite",
+        type=int,
+        dest="source_suite_id",
+        metavar="SUITE_ID",
+        help="Suite ID to convert (mybdd format: Given:/Shared:/Feature: cases)",
+    )
+    _src.add_argument(
+        "--run",
+        type=int,
+        dest="source_run_id",
+        metavar="RUN_ID",
+        help="Run ID to read cases from instead of a suite",
+    )
+    trc_parser.add_argument(
+        "--output-dir",
+        default=None,
+        metavar="PATH",
+        help="Directory to write generated YAML files (default: tests/cases/<suite_slug>)",
+    )
+    trc_parser.add_argument(
+        "--shared-steps-file",
+        default=None,
+        metavar="PATH",
+        help="Path for shared_steps.yaml (default: <output-dir>/shared_steps.yaml)",
+    )
+    trc_parser.add_argument(
+        "--tag",
+        default=None,
+        metavar="TAG",
+        help="Tag to add to every generated test (default: slugified suite name)",
+    )
+    trc_parser.add_argument(
+        "--no-testrail",
+        action="store_true",
+        help="Only write YAML files locally; do NOT create a new TestRail suite",
+    )
+    trc_parser.add_argument(
+        "--no-yaml",
+        action="store_true",
+        help="Only create the TestRail suite; do NOT write local YAML files",
+    )
+    trc_parser.add_argument(
+        "--target-suite",
+        type=int,
+        default=None,
+        metavar="SUITE_ID",
+        help="Write Easy BDD cases into an existing suite instead of creating a new one",
+    )
+    trc_parser.add_argument(
+        "--target-suite-name",
+        default=None,
+        metavar="NAME",
+        help="Name for the new TestRail suite (default: 'EASY_BDD: <source name>')",
+    )
+    trc_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be written without creating any files or TestRail cases",
+    )
+    trc_parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-case progress output",
+    )
+
+    # TestRail list command
+    trl_parser = subparsers.add_parser(
+        "testrail-list",
+        help="List TestRail projects and active EASY_BDD: runs",
+    )
+    trl_parser.add_argument(
+        "project_id",
+        type=int,
+        nargs="?",
+        default=None,
+        help="Show runs for a specific project (omit to list all projects)",
+    )
+    trl_parser.add_argument(
+        "--prefix",
+        default=None,
+        help="Run name prefix to filter by (default: EASY_BDD:, or TESTRAIL_RUN_PREFIX env var)",
+    )
+
     convert_parser.add_argument(
         "--output", help="Output file path (default: auto-generated)"
     )
@@ -180,6 +315,12 @@ Examples:
             return docker_run(args)
         elif args.command == "edit-test":
             return edit_test(args)
+        elif args.command == "testrail-run":
+            return testrail_run(args)
+        elif args.command == "testrail-list":
+            return testrail_list(args)
+        elif args.command == "testrail-convert":
+            return testrail_convert(args)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -801,6 +942,168 @@ def validate_tests(args) -> int:
     else:
         print("\\n✅ Validation PASSED")
         return 0
+
+
+def testrail_convert(args) -> int:
+    """Convert a mybdd-format TestRail suite to Easy BDD YAML test files."""
+    from .services.testrail_service import TestRailService, TestRailError
+    from .core.suite_converter import BddSuiteConverter
+
+    try:
+        tr = TestRailService()
+    except TestRailError as e:
+        print(f"TestRail configuration error: {e}", file=sys.stderr)
+        print("Set TESTRAIL_URL, TESTRAIL_USERNAME, and TESTRAIL_API_KEY in your .env file.",
+              file=sys.stderr)
+        return 1
+
+    # Resolve output directory
+    output_dir: Path = None
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+    else:
+        # Auto: tests/cases/<suite_slug>/
+        if args.source_suite_id:
+            try:
+                suite_info = tr.get_suite(args.source_suite_id)
+                slug = re.sub(r"[^A-Za-z0-9_\-]", "_", suite_info.get("name", "")).lower().strip("_")
+            except Exception:
+                slug = f"suite_{args.source_suite_id}"
+        else:
+            slug = f"run_{args.source_run_id}"
+        output_dir = Path("tests") / "cases" / slug
+
+    shared_path = Path(args.shared_steps_file) if args.shared_steps_file else None
+
+    mode = "DRY-RUN" if args.dry_run else "LIVE"
+    src_desc = f"suite {args.source_suite_id}" if args.source_suite_id else f"run {args.source_run_id}"
+    print(f"\n[Convert] {mode} — {src_desc} → {output_dir}")
+    print()
+
+    create_tr = not args.no_testrail
+    converter = BddSuiteConverter(tr)
+    result = converter.convert(
+        project_id=args.project_id,
+        source_suite_id=args.source_suite_id,
+        source_run_id=args.source_run_id,
+        output_dir=output_dir,
+        shared_steps_path=shared_path,
+        suite_tag=args.tag,
+        write_yaml=not args.no_yaml,
+        create_testrail_suite=create_tr,
+        target_suite_id=args.target_suite,
+        target_suite_name=args.target_suite_name,
+        dry_run=args.dry_run,
+        verbose=not args.quiet,
+    )
+
+    result.print_summary()
+    return 1 if result.errors > 0 else 0
+
+
+def testrail_list(args) -> int:
+    """List TestRail projects or active EASY_BDD: runs for a project."""
+    from .services.testrail_service import TestRailService, TestRailError
+
+    try:
+        tr = TestRailService()
+    except TestRailError as e:
+        print(f"TestRail configuration error: {e}", file=sys.stderr)
+        return 1
+
+    prefix = args.prefix or os.getenv("TESTRAIL_RUN_PREFIX", "EASY_BDD:")
+
+    if args.project_id is None:
+        # List all projects
+        try:
+            projects = tr.get_projects()
+        except Exception as e:
+            print(f"Error fetching projects: {e}", file=sys.stderr)
+            return 1
+        if not projects:
+            print("No TestRail projects found.")
+            return 0
+        print(f"\n{'ID':<8} {'Name'}")
+        print("-" * 50)
+        for p in projects:
+            print(f"{p['id']:<8} {p['name']}")
+        print(f"\nUse 'easy_bdd testrail-list <project_id>' to see active runs.")
+    else:
+        # List runs for a specific project
+        import time
+        created_after = int(time.time()) - 30 * 86400
+        try:
+            runs = tr.get_runs(args.project_id, created_after=created_after)
+        except Exception as e:
+            print(f"Error fetching runs: {e}", file=sys.stderr)
+            return 1
+
+        matching = [r for r in runs if r.get("name", "").startswith(prefix)]
+        all_runs = runs
+
+        print(f"\nProject {args.project_id} — runs matching '{prefix}' (last 30 days):\n")
+        if not matching:
+            print(f"  No runs with prefix '{prefix}' found.")
+            print(f"\nAll runs in project ({len(all_runs)} total):")
+            for r in all_runs[:10]:
+                untested = r.get("untested_count", 0)
+                retest = r.get("retest_count", 0)
+                print(f"  [{r['id']}] {r['name']}  (untested={untested} retest={retest})")
+        else:
+            print(f"{'ID':<8} {'Untested':<10} {'Retest':<8} {'Name'}")
+            print("-" * 60)
+            for r in matching:
+                untested = r.get("untested_count", 0)
+                retest = r.get("retest_count", 0)
+                print(f"{r['id']:<8} {untested:<10} {retest:<8} {r['name']}")
+        print()
+
+    return 0
+
+
+def testrail_run(args) -> int:
+    """Discover and execute tests driven by a TestRail EASY_BDD: run."""
+    from .core.config import ConfigManager
+    from .core.variable_manager import GlobalConfigManager
+    from .core.testrail_runner import TestRailRunner
+    from .services.testrail_service import TestRailService, TestRailError
+
+    try:
+        config_manager = GlobalConfigManager()
+    except Exception:
+        config_manager = GlobalConfigManager()
+
+    try:
+        tr = TestRailService()
+    except TestRailError as e:
+        print(f"TestRail configuration error: {e}", file=sys.stderr)
+        print(
+            "Set TESTRAIL_URL, TESTRAIL_USERNAME, and TESTRAIL_API_KEY in your .env file.",
+            file=sys.stderr,
+        )
+        return 1
+
+    runner = TestRailRunner(
+        config_manager=config_manager,
+        testrail=tr,
+        tests_dir=Path(args.tests_dir),
+        artifact_dir=Path(args.artifact_dir),
+        run_prefix=args.prefix,
+    )
+
+    print(f"\nScanning TestRail project {args.project_id} for an active run...")
+    result = runner.run(
+        project_id=args.project_id,
+        run_id=args.run_id,
+        verbose=not args.quiet,
+    )
+
+    if result.get("skipped"):
+        print(f"\nSkipped: {result.get('reason', 'no run found')}")
+        return 0
+
+    failed = result.get("failed", 0)
+    return 1 if failed > 0 else 0
 
 
 if __name__ == "__main__":

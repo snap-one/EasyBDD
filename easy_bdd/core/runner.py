@@ -32,6 +32,14 @@ from .variable_manager import GlobalConfigManager
 # from ..actions import action_registry
 
 
+class _BreakSignal(Exception):
+    """Raised by a 'break' step to exit the nearest enclosing loop."""
+
+
+class _ContinueSignal(Exception):
+    """Raised by a 'continue' step to skip to the next loop iteration."""
+
+
 @dataclass
 class TestResult:
     """Test execution result"""
@@ -57,6 +65,9 @@ class TestRunner:
         self.config = config
         self.parser = YAMLParser()
         self.generator = GherkinGenerator()
+        from .connection_pool import ConnectionPool
+        self._connection_pool = ConnectionPool()
+        self._eval_state: dict = {}
 
         # Load custom actions
         # Load action modules if available
@@ -952,6 +963,10 @@ class TestRunner:
         """Determine which service type to use for an action"""
         action_lower = action.lower()
 
+        # Control-flow pseudo-actions need no service
+        if action_lower in ("for_loop", "while_loop", "try_except", "break", "continue"):
+            return "eval"
+
         # Handle dot notation (e.g., browser.click, aws.get_latest)
         if "." in action_lower:
             service_prefix = action_lower.split(".")[0]
@@ -969,6 +984,9 @@ class TestRunner:
                 "command": "command",  # Command execution service
                 "pagerduty": "pagerduty",  # PagerDuty incident management
                 "pd": "pagerduty",  # Short alias for PagerDuty
+                "serial": "serial",  # Serial port communication
+                "telnet": "telnet",  # Telnet communication
+                "eval": "eval",  # Session-stateful Python eval
             }
             return service_map.get(service_prefix, "browser")
 
@@ -1025,6 +1043,14 @@ class TestRunner:
         elif service_type == "pagerduty":
             from ..services.pagerduty_service import PagerDutyService
             return PagerDutyService(logger=print)
+        elif service_type == "serial":
+            from ..services.serial_service import SerialService
+            return SerialService(self._connection_pool)
+        elif service_type == "telnet":
+            from ..services.telnet_service import TelnetService
+            return TelnetService(self._connection_pool)
+        elif service_type == "eval":
+            return None  # eval actions are handled directly in _execute_custom_action
         else:
             # For now, return a mock service for other types
             return MockService(service_type)
@@ -1095,6 +1121,18 @@ class TestRunner:
                 cmd_type in action_lower for cmd_type in command_types
             ):
                 return self._handle_command_action(action, step_params, variables)
+
+            # Serial port actions
+            if action_lower.startswith("serial"):
+                return self._handle_serial_action(action, step_params, variables)
+
+            # Telnet actions
+            if action_lower.startswith("telnet"):
+                return self._handle_telnet_action(action, step_params, variables)
+
+            # Eval actions (session-stateful Python execution)
+            if action_lower.startswith("eval"):
+                return self._handle_eval_action(action, step_params, variables)
 
             # Check if we have custom actions defined
             if hasattr(self.config, "get_custom_action"):
@@ -1193,6 +1231,150 @@ class TestRunner:
         except Exception as e:
             print(f"      ✗ Condition evaluation failed: {e}")
             raise ValueError(f"Invalid condition '{condition}': {e}")
+
+    # ------------------------------------------------------------------ #
+    # Control flow: FOR / WHILE / TRY                                      #
+    # ------------------------------------------------------------------ #
+
+    def _eval_expr(self, expr: str, variables: dict) -> object:
+        """Substitute variables then evaluate a Python expression safely."""
+        if hasattr(self.config, "substitute_variables"):
+            expr = self.config.substitute_variables(expr, variables)
+        ctx = {**variables, **self._eval_state}
+        return safe_eval(expr, ctx)
+
+    def _run_loop_body(
+        self,
+        body: list,
+        variables: dict,
+        soft_assert_manager,
+        step_number: int,
+        break_if: str = None,
+        continue_if: str = None,
+    ) -> bool:
+        """Execute loop body steps; propagates _BreakSignal / _ContinueSignal."""
+        for loop_step in body:
+            # Inline break_if / continue_if guards on the step itself
+            if getattr(loop_step, "action", "") == "break":
+                raise _BreakSignal()
+            if getattr(loop_step, "action", "") == "continue":
+                raise _ContinueSignal()
+
+            svc_type = self._get_service_type(loop_step.action)
+            svc = self._create_service(svc_type)
+            success = self._execute_step(svc, loop_step, variables, soft_assert_manager, step_number)
+            if not success:
+                return False
+
+        # Per-iteration guards declared on the loop itself
+        if continue_if and self._eval_expr(continue_if, variables):
+            raise _ContinueSignal()
+        if break_if and self._eval_expr(break_if, variables):
+            raise _BreakSignal()
+        return True
+
+    def _execute_for_loop(self, step, variables: dict, soft_assert_manager, step_number: int) -> bool:
+        """Execute a for_each loop step."""
+        iterable = self._eval_expr(step.for_each, variables)
+        loop_var = step.loop_var or "item"
+        limit = step.loop_limit or 1000
+
+        if not hasattr(iterable, "__iter__"):
+            raise ValueError(f"for_each expression is not iterable: {step.for_each!r}")
+
+        items = list(iterable)
+        if len(items) > limit:
+            print(f"      ⚠ FOR loop: clamping {len(items)} items to limit {limit}")
+            items = items[:limit]
+
+        print(f"      → FOR {loop_var} in <{len(items)} items>")
+        for idx, item in enumerate(items):
+            variables[loop_var] = item
+            try:
+                ok = self._run_loop_body(
+                    step.loop_steps or [],
+                    variables,
+                    soft_assert_manager,
+                    step_number,
+                    break_if=step.break_if,
+                    continue_if=step.continue_if,
+                )
+                if not ok:
+                    return False
+            except _BreakSignal:
+                print(f"      → FOR loop: BREAK at iteration {idx + 1}")
+                break
+            except _ContinueSignal:
+                continue
+
+        variables.pop(loop_var, None)
+        return True
+
+    def _execute_while_loop(self, step, variables: dict, soft_assert_manager, step_number: int) -> bool:
+        """Execute a while loop step."""
+        condition = step.while_condition
+        limit = step.loop_limit or 1000
+        iteration = 0
+
+        print(f"      → WHILE {condition}")
+        while iteration < limit:
+            if not self._eval_expr(condition, variables):
+                break
+            iteration += 1
+            try:
+                ok = self._run_loop_body(
+                    step.loop_steps or [],
+                    variables,
+                    soft_assert_manager,
+                    step_number,
+                    break_if=step.break_if,
+                    continue_if=step.continue_if,
+                )
+                if not ok:
+                    return False
+            except _BreakSignal:
+                print(f"      → WHILE loop: BREAK at iteration {iteration}")
+                break
+            except _ContinueSignal:
+                continue
+        else:
+            print(f"      ⚠ WHILE loop reached iteration limit ({limit})")
+
+        return True
+
+    def _execute_try_except(self, step, variables: dict, soft_assert_manager, step_number: int) -> bool:
+        """Execute a try/except/finally step."""
+        success = True
+        try:
+            for try_step in (step.try_steps or []):
+                svc_type = self._get_service_type(try_step.action)
+                svc = self._create_service(svc_type)
+                ok = self._execute_step(svc, try_step, variables, soft_assert_manager, step_number)
+                if not ok:
+                    success = False
+                    break
+        except Exception as exc:
+            print(f"      → TRY failed: {exc}")
+            if step.except_steps:
+                variables["_exception"] = str(exc)
+                for ex_step in step.except_steps:
+                    svc_type = self._get_service_type(ex_step.action)
+                    svc = self._create_service(svc_type)
+                    self._execute_step(svc, ex_step, variables, soft_assert_manager, step_number)
+            else:
+                success = False
+        finally:
+            if step.finally_steps:
+                print(f"      → FINALLY")
+                for fin_step in step.finally_steps:
+                    svc_type = self._get_service_type(fin_step.action)
+                    svc = self._create_service(svc_type)
+                    try:
+                        self._execute_step(svc, fin_step, variables, soft_assert_manager, step_number)
+                    except Exception as fin_exc:
+                        print(f"      ⚠ FINALLY step error: {fin_exc}")
+
+        return success
 
     def _resolve_url_with_variables(self, url: str, variables: dict) -> str:
         """Resolve URL with variable substitution, handling URL-encoded variables"""
@@ -2558,6 +2740,123 @@ class TestRunner:
             else:
                 raise
 
+    def _handle_serial_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle serial port actions (serial.send, serial.receive, serial.flush, serial.close)."""
+        from ..services.serial_service import SerialService
+        params = self._get_params(step_params)
+        service = SerialService(self._connection_pool)
+        result = service.execute(action, params, variables)
+        store_as = params.get("store_as", "")
+        if store_as and result is not None:
+            variables[store_as] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, result, "runtime_data")
+        if result is False:
+            return False
+        print(f"      serial: {action.split('.')[-1]} OK")
+        return True
+
+    def _handle_telnet_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle telnet actions (telnet.connect, telnet.send, telnet.receive, telnet.close)."""
+        from ..services.telnet_service import TelnetService
+        params = self._get_params(step_params)
+        service = TelnetService(self._connection_pool)
+        result = service.execute(action, params, variables)
+        store_as = params.get("store_as", "")
+        if store_as and result is not None:
+            variables[store_as] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, result, "runtime_data")
+        if result is False:
+            return False
+        print(f"      telnet: {action.split('.')[-1]} OK")
+        return True
+
+    def _handle_eval_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle session-stateful Python eval/exec actions.
+
+        Actions:
+          eval.run   — evaluate an expression, store result
+          eval.exec  — execute a code block (state mutations persist)
+          eval.set   — set a key in shared eval state
+          eval.get   — read a key from shared eval state into variables
+          eval.clear — clear the entire eval state
+        """
+        import math, re as _re, json as _json, datetime as _datetime, collections as _collections
+
+        params = self._get_params(step_params)
+        action_lower = action.lower()
+        store_as = params.get("store_as", "")
+
+        # Build the execution context: shared state + current test variables
+        ctx = {
+            "state": self._eval_state,
+            "variables": variables,
+            "math": math,
+            "re": _re,
+            "json": _json,
+            "datetime": _datetime,
+            "collections": _collections,
+        }
+        ctx.update(self._eval_state)
+        ctx.update(variables)
+
+        if "set" in action_lower:
+            key = params.get("key", "")
+            value = params.get("value")
+            if key:
+                self._eval_state[key] = value
+                variables[key] = value
+            return True
+
+        if "get" in action_lower:
+            key = params.get("key", "")
+            value = self._eval_state.get(key)
+            if store_as:
+                variables[store_as] = value
+                if hasattr(self.config, "set_variable"):
+                    self.config.set_variable(store_as, value, "runtime_data")
+            return True
+
+        if "clear" in action_lower:
+            self._eval_state.clear()
+            return True
+
+        if "exec" in action_lower:
+            code = params.get("code", "")
+            if not code:
+                raise ValueError("eval.exec requires 'code'")
+            # Intentional exec: eval.exec is an explicit test-authoring tool for trusted
+            # test YAML files written by the QA team. It is not exposed to external input.
+            exec(code, ctx)  # noqa: S102
+            # Persist any new/changed keys back to eval state (exclude builtins)
+            for k, v in ctx.items():
+                if not k.startswith("_") and k not in ("state", "variables", "math", "re", "json", "datetime", "collections"):
+                    self._eval_state[k] = v
+                    variables[k] = v
+            return True
+
+        # Default: eval.run — evaluate an expression
+        expression = params.get("expression", "") or params.get("code", "")
+        if not expression:
+            raise ValueError("eval.run requires 'expression'")
+        # Intentional eval: eval.run is an explicit test-authoring tool for trusted
+        # test YAML files written by the QA team. It is not exposed to external input.
+        result = eval(expression, ctx)  # noqa: S307
+        print(f"      eval: {expression!r} → {result!r}")
+        if store_as:
+            variables[store_as] = result
+            self._eval_state[store_as] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, result, "runtime_data")
+        return True
+
     def _handle_command_action(
         self, action: str, step_params: dict, variables: dict
     ) -> bool:
@@ -3134,6 +3433,19 @@ class TestRunner:
     ) -> bool:
         """Internal method to execute a single step (called by _execute_step with or without retry)"""
         try:
+            # Control-flow constructs — handled before variable substitution
+            action_tag = getattr(step, "action", "")
+            if action_tag == "for_loop":
+                return self._execute_for_loop(step, variables, soft_assert_manager, step_number)
+            if action_tag == "while_loop":
+                return self._execute_while_loop(step, variables, soft_assert_manager, step_number)
+            if action_tag == "try_except":
+                return self._execute_try_except(step, variables, soft_assert_manager, step_number)
+            if action_tag == "break":
+                raise _BreakSignal()
+            if action_tag == "continue":
+                raise _ContinueSignal()
+
             # Check if this is a conditional step
             if hasattr(step, "condition") and step.condition:
                 return self._execute_conditional_step(
