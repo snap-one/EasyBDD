@@ -650,25 +650,49 @@ class TestRailRunner:
     def _build_inline_test_dict(self, case: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Build an in-memory Easy BDD test dict from an Inline: case.
 
-        Priority:
-          1. custom_steps_separated rows → Option B (structured content/expected)
-          2. custom_steps text           → Option A (raw YAML steps)
-        Preconditions field → local variables (merged on top of injected_vars later).
+        Read priority:
+          1. custom_preconds as YAML list  → plain steps list written by UI or converter
+          2. custom_preconds as dict with 'steps' key → steps + optional variables block
+          3. custom_steps_separated rows   → structured content/expected (Option B)
+          4. custom_steps text             → raw YAML steps (Option A, legacy)
         """
+        import yaml as _yaml
+
         title = case.get("clean_title", case.get("title", "Inline Test"))
-        variables = _parse_preconds_vars(case)
+        steps: List[Dict[str, Any]] = []
+        variables: Dict[str, Any] = {}
 
-        structured = case.get("custom_steps_separated") or []
-        has_structured = isinstance(structured, list) and any(
-            isinstance(r, dict) and (r.get("content") or r.get("expected"))
-            for r in structured
-        )
+        preconds_text = (case.get("custom_preconds") or "").strip()
+        if preconds_text:
+            try:
+                parsed = _yaml.safe_load(preconds_text)
+                if isinstance(parsed, list):
+                    steps = parsed
+                elif isinstance(parsed, dict) and "steps" in parsed:
+                    steps = parsed.get("steps") or []
+                    variables = {
+                        str(k).lstrip("$"): v
+                        for k, v in (parsed.get("variables") or {}).items()
+                    }
+                # else: dict without 'steps' → treat as variables only (Var: case shape)
+                #       leave steps empty so legacy fallback runs below
+            except Exception:
+                pass
 
-        if has_structured:
-            steps = _parse_structured_steps(case)
-        else:
-            body = (case.get("custom_steps") or "").strip()
-            steps = _parse_inline_body(body)
+        if not steps:
+            # Legacy / Option B fallback
+            structured = case.get("custom_steps_separated") or []
+            has_structured = isinstance(structured, list) and any(
+                isinstance(r, dict) and (r.get("content") or r.get("expected"))
+                for r in structured
+            )
+            if has_structured:
+                steps = _parse_structured_steps(case)
+            else:
+                body = (case.get("custom_steps") or "").strip()
+                steps = _parse_inline_body(body)
+            if not variables:
+                variables = _parse_preconds_vars(case)
 
         if not steps:
             return None
@@ -691,17 +715,21 @@ class TestRailRunner:
         if not test_dict:
             return False, [
                 "Inline case has no steps.\n"
-                "\nOption A — Steps field: paste a YAML steps list, e.g.:\n"
+                "\nPreconditions field — paste a YAML steps list, e.g.:\n"
                 "  - action: browser.open\n"
                 "    url: ${base_url}\n"
                 "  - action: browser.click\n"
                 "    role: button\n"
                 "    name: Login\n"
-                "\nOption B — Use the 'Steps (Separated)' case type:\n"
+                "\nTo include test-level variables, use the full form:\n"
+                "  variables:\n"
+                "    base_url: https://staging.example.com\n"
+                "  steps:\n"
+                "    - action: browser.open\n"
+                "      url: ${base_url}\n"
+                "\nLegacy — Steps (Separated) case type is also still supported:\n"
                 "  Step Description: action YAML (one step per row)\n"
-                "  Expected Result:  Python expression or natural-language assertion\n"
-                "\nPreconditions field: key: value variable pairs\n"
-                "  base_url: https://staging.example.com"
+                "  Expected Result:  Python expression or natural-language assertion"
             ]
 
         test_id = case.get("id", "tmp")

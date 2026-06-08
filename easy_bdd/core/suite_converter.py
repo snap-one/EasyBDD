@@ -666,8 +666,8 @@ class BddSuiteConverter:
                 default_flow_style=False, sort_keys=False
             ).rstrip()
             payload = {
-                "title":        f"Keyword: {ps['clean']}",
-                "custom_steps": steps_yaml,
+                "title":           f"Keyword: {ps['clean']}",
+                "custom_preconds": steps_yaml,
             }
             try:
                 new_case = self._tr.add_case(sec, **payload)
@@ -685,19 +685,24 @@ class BddSuiteConverter:
         for pf in parsed_features:
             c   = pf["case"]
             sec = _target_section(c)
-            steps_yaml = yaml.dump(
-                pf["steps"], allow_unicode=True,
-                default_flow_style=False, sort_keys=False
-            ).rstrip() if pf["steps"] else ""
+
+            if pf["extra_vars"]:
+                # Include both variables and steps so the runner can read both
+                preconds_doc = {"variables": pf["extra_vars"], "steps": pf["steps"]}
+                preconds_text = yaml.dump(
+                    preconds_doc, allow_unicode=True,
+                    default_flow_style=False, sort_keys=False
+                ).rstrip()
+            else:
+                preconds_text = yaml.dump(
+                    pf["steps"], allow_unicode=True,
+                    default_flow_style=False, sort_keys=False
+                ).rstrip() if pf["steps"] else ""
 
             payload: Dict[str, Any] = {
-                "title":        f"Inline: {pf['clean']}",
-                "custom_steps": steps_yaml,
+                "title":           f"Inline: {pf['clean']}",
+                "custom_preconds": preconds_text,
             }
-            if pf["extra_vars"]:
-                payload["custom_preconds"] = "\n".join(
-                    f"{k}: {v}" for k, v in pf["extra_vars"].items()
-                )
 
             try:
                 new_case = self._tr.add_case(sec, **payload)
