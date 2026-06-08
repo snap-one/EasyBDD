@@ -239,33 +239,74 @@ class AWSService:
         """
         self._get_s3_clients(bucket_name, access_key_id, secret_access_key, region)
 
+        # Normalize folder_prefix: ensure it ends with '/' so S3 only returns
+        # objects inside the folder, not objects whose key merely starts with the string.
+        if folder_prefix and not folder_prefix.endswith("/"):
+            folder_prefix = folder_prefix + "/"
+
+        # Log active filters so users can see exactly what will be applied
+        self._log(f"─── aws.list_files ───────────────────────────────")
+        self._log(f"  bucket       : {bucket_name}")
+        self._log(f"  folder_prefix: {folder_prefix or '(none — scanning all)'}")
+        self._log(f"  file_extension: {file_extension or '(none)'}")
+        self._log(f"  filename_pattern: {filename_pattern or '(none)'}")
+        self._log(f"  version_pattern : {version_pattern or '(none)'}")
+        self._log(f"  specific_version: {specific_version or '(none)'}")
+
         object_urls = []
         cloudfront_urls = []
+        scanned = 0
+        skipped_ext = skipped_pattern = skipped_version = skipped_specific = 0
 
         try:
             # Get objects
             if folder_prefix:
                 objects = self._current_bucket.objects.filter(Prefix=folder_prefix)
-                self._log(f"Listing files in {bucket_name}/{folder_prefix}")
+                self._log(f"  Querying s3://{bucket_name}/{folder_prefix} ...")
             else:
                 objects = self._current_bucket.objects.all()
-                self._log(f"Listing all files in {bucket_name}")
+                self._log(f"  Querying s3://{bucket_name}/ (all objects) ...")
 
-            # Filter objects
-            for obj in objects:
+            # Force evaluation so we can show total count before filtering
+            all_objects = list(objects)
+            self._log(f"  Total objects returned by S3: {len(all_objects)}")
+            if not all_objects:
+                self._log(
+                    f"  ⚠  No objects found under prefix={folder_prefix!r}. "
+                    f"Check bucket name and folder_prefix (S3 prefixes are case-sensitive)."
+                )
+
+            # Filter objects — log each skip reason
+            for obj in all_objects:
+                scanned += 1
+                key = obj.key
+
+                # Skip zero-byte "folder" placeholder objects
+                if key.endswith("/"):
+                    self._log(f"  SKIP  {key}  (directory placeholder)")
+                    continue
+
                 # Filter by filename pattern
-                if filename_pattern and filename_pattern.lower() not in obj.key.lower():
+                if filename_pattern and filename_pattern.lower() not in key.lower():
+                    self._log(f"  SKIP  {key}  (no match for filename_pattern={filename_pattern!r})")
+                    skipped_pattern += 1
                     continue
 
                 # Filter by version pattern (use cached regex)
                 if version_pattern:
                     regex = self._get_compiled_regex(version_pattern)
-                    if not regex.search(obj.key):
+                    if not regex.search(key):
+                        self._log(f"  SKIP  {key}  (no match for version_pattern={version_pattern!r})")
+                        skipped_version += 1
                         continue
 
-                # Filter by file extension
-                if file_extension and not obj.key.endswith(file_extension):
-                    continue
+                # Filter by file extension (case-insensitive comparison)
+                if file_extension:
+                    ext_lower = file_extension.lower()
+                    if not key.lower().endswith(ext_lower):
+                        self._log(f"  SKIP  {key}  (extension != {file_extension!r}, actual={os.path.splitext(key)[1]!r})")
+                        skipped_ext += 1
+                        continue
 
                 # Filter by specific version(s)
                 if specific_version:
@@ -274,17 +315,21 @@ class AWSService:
                         if isinstance(specific_version, list)
                         else [specific_version]
                     )
-                    if not any(ver in obj.key for ver in versions):
+                    if not any(ver in key for ver in versions):
+                        self._log(f"  SKIP  {key}  (specific_version {versions!r} not in key)")
+                        skipped_specific += 1
                         continue
 
+                self._log(f"  MATCH {key}")
+
                 # Build S3 URL
-                s3_url = f"{protocol}://{bucket_name}.s3.amazonaws.com/{obj.key}"
+                s3_url = f"{protocol}://{bucket_name}.s3.amazonaws.com/{key}"
                 object_urls.append(s3_url)
 
                 # Build CloudFront URL if specified
                 if cloudfront_url:
                     if cloudfront_filename_only:
-                        filename = os.path.basename(obj.key)
+                        filename = os.path.basename(key)
                         cf_url = f"{protocol}://{cloudfront_url}/{filename}"
                     else:
                         cf_url = s3_url.replace(
@@ -296,13 +341,13 @@ class AWSService:
                 if download_dir:
                     local_dir = Path(download_dir)
                     local_dir.mkdir(parents=True, exist_ok=True)
-                    local_file = local_dir / os.path.basename(obj.key)
+                    local_file = local_dir / os.path.basename(key)
 
                     if local_file.exists():
-                        self._log(f"File already exists, skipping: {local_file.name}")
+                        self._log(f"  ↓ Already downloaded: {local_file.name}")
                     else:
-                        self._log(f"Downloading: {obj.key} -> {local_file}")
-                        self._current_bucket.download_file(obj.key, str(local_file))
+                        self._log(f"  ↓ Downloading: {key} → {local_file}")
+                        self._current_bucket.download_file(key, str(local_file))
 
             # Choose URLs to return
             urls = cloudfront_urls if cloudfront_url else object_urls
@@ -310,11 +355,28 @@ class AWSService:
             # Sort URLs by version (intelligent numeric sorting)
             urls = self._sort_urls_by_version(urls, bucket_name, cloudfront_url)
 
-            self._log(f"Found {len(urls)} matching files")
+            # Summary
+            self._log(
+                f"  ─── Summary: scanned={scanned}  matched={len(urls)}  "
+                f"skipped(ext={skipped_ext} pattern={skipped_pattern} "
+                f"version={skipped_version} specific={skipped_specific})"
+            )
+            if not urls:
+                self._log(
+                    "  ⚠  0 files matched. Common causes:\n"
+                    "     • folder_prefix is wrong (S3 prefixes are case-sensitive; "
+                    "try listing without a prefix first)\n"
+                    "     • file_extension casing mismatch (use lowercase e.g. '.bin')\n"
+                    "     • filename_pattern not present in any key\n"
+                    "     • Bucket has no objects yet"
+                )
+            else:
+                for i, u in enumerate(urls, 1):
+                    self._log(f"  [{i}] {u}")
             return urls
 
         except Exception as e:
-            self._log(f"Error listing S3 objects: {str(e)}", "error")
+            self._log(f"  ✗ Error listing S3 objects: {e}", "error")
             raise
 
     def _sort_urls_by_version(

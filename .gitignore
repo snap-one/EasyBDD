@@ -107,3 +107,4 @@ test_builder_settings.json
 # User-specific data (collections and environments)
 collections/
 environments/
+tests/

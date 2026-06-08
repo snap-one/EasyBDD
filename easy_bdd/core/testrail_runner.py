@@ -20,35 +20,71 @@ Test: case body format (Steps/Preconditions field):
   tag: <tag>    — run all local YAML tests in tests/cases/ that have this tag
   file: <path>  — run a specific YAML file (relative to tests/cases/ or absolute)
 
-Inline: case body formats:
-  Option A — Steps field contains a YAML steps list:
-    - action: browser.open
-      url: ${base_url}
-    - action: browser.click
-      role: button
-      name: Login
+Inline: case body formats (all written in the Preconditions field):
 
-  Option B — "Steps (Separated)" TestRail case type (recommended for teams):
-    Step Description column: Easy BDD action YAML, one step per row:
-      action: browser.fill
-      field: "#username"
-      value: ${username}
-    Expected Result column: Python expression or natural language:
-      Python   →  'Dashboard' in page_content   (becomes test.assert)
-      Natural  →  Page shows the dashboard       (becomes soft test.assert with message)
+  PREFERRED — same dot-notation format used in local YAML files:
+    - aws.list_files:
+        bucket_name: my-bucket
+        folder_prefix: vps
+        file_extension: .bin
+        store_as: firmware_files
+    - eval.exec:
+        code: print(firmware_files)
 
-  Preconditions field (both options):
-    Parsed as key: value variable pairs (merged with Var: case variables):
+  Parameters may also be written flush-left (no indentation) — the runner
+  will re-indent them automatically:
+    - aws.list_files:
+    bucket_name: my-bucket
+    folder_prefix: vps/
+
+  PARAMETERIZED — JSON data block + steps (for multiple SKUs / devices):
+    JSON:
+    [{"mac": "D4:6A:91:29:0F:5A", "product": "WB-800", "bucket_name": "my-bucket"}]
+
+    - ovrc.connect:
+    device_id: ${mac}
+    - ovrc.disconnect: {}
+
+  WITH data + steps block (full YAML format, mirrors local YAML files):
+    data:
+      - mac: D4:6A:91:29:0F:5A
+        product: WB-800
+    steps:
+      - ovrc.connect:
+          device_id: ${mac}
+
+  WITH variables block (mirrors local YAML files exactly):
+    variables:
       base_url: https://staging.example.com
-      username: admin
+    steps:
+      - api.request:
+          method: GET
+          url: ${base_url}/status
+          store_as: last_response
+      - test.assert_response:
+          status: 200
+
+  ALSO ACCEPTED — flat action: key format (single-step shorthand):
+    action: aws.list_files
+    bucket_name: my-bucket
+    folder_prefix: vps
+    file_extension: .bin
+    store_as: firmware_files
+
+  Legacy Option A — Steps field contains a YAML steps list (still supported).
+  Legacy Option B — "Steps (Separated)" TestRail case type (still supported):
+    Step Description column: Easy BDD action YAML, one step per row
+    Expected Result column: Python expression or natural-language assertion
 
 Variable injection (Var: case body):
   base_url: https://staging.example.com
   username: testuser
 """
 
+import html as _html_mod
 import json
 import os
+import re as _re_mod
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -57,6 +93,195 @@ from typing import Any, Dict, List, Optional, Tuple
 from .runner import TestResult, TestRunner
 from .variable_manager import GlobalConfigManager
 from ..services.testrail_service import RunVariables, TestRailService, TestRailError
+
+
+def _html_to_text(raw: str) -> str:
+    """Strip HTML tags and unescape entities from a TestRail rich-text field.
+
+    TestRail's web UI stores Preconditions/Steps as HTML.  Convert to plain
+    text so YAML parsers can read it cleanly.
+    """
+    text = raw or ""
+    # Block-level closing tags → newline
+    text = _re_mod.sub(r"<br\s*/?>",  "\n", text, flags=_re_mod.IGNORECASE)
+    text = _re_mod.sub(r"</p>",       "\n", text, flags=_re_mod.IGNORECASE)
+    text = _re_mod.sub(r"</div>",     "\n", text, flags=_re_mod.IGNORECASE)
+    text = _re_mod.sub(r"</li>",      "\n", text, flags=_re_mod.IGNORECASE)
+    # Opening block-level tags → nothing (content follows on same line)
+    text = _re_mod.sub(r"<(p|div|li|ul|ol|pre|code)[^>]*>", "", text, flags=_re_mod.IGNORECASE)
+    # Strip any remaining tags
+    text = _re_mod.sub(r"<[^>]+>", "", text)
+    # Unescape HTML entities (&amp; &lt; &gt; &nbsp; etc.)
+    text = _html_mod.unescape(text)
+    # Trim each line, drop trailing blank lines
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    return "\n".join(lines).strip()
+
+
+def _fix_yaml_indent(text: str) -> str:
+    """Remove spurious continuation-line indentation from flat YAML dicts.
+
+    When a user types key-value pairs in TestRail and accidentally indents
+    all keys after the first (4 spaces, etc.), YAML fails to parse because
+    the extra indentation implies nesting under the previous scalar value.
+
+    This function detects that pattern (first non-empty line has less indent
+    than all subsequent non-empty lines) and strips the extra indent so the
+    result is a valid flat mapping.
+
+    Only called as a fallback when yaml.safe_load already failed, so there
+    is no risk of mis-processing already-valid YAML.
+
+        action: aws.list_files          ← indent 0
+            bucket_name: jpdsauto-wattbox  ← indent 4 (spurious)
+        →
+        action: aws.list_files
+        bucket_name: jpdsauto-wattbox
+    """
+    lines = text.splitlines()
+    non_empty = [(i, ln) for i, ln in enumerate(lines) if ln.strip()]
+    if len(non_empty) < 2:
+        return text
+
+    indents = [len(ln) - len(ln.lstrip()) for _, ln in non_empty]
+    first_indent = indents[0]
+    rest_min = min(indents[1:])
+
+    if rest_min <= first_indent:
+        return text  # no spurious indentation — don't touch it
+
+    extra = rest_min - first_indent
+    result = list(lines)
+    for i, ln in non_empty[1:]:
+        curr_indent = len(ln) - len(ln.lstrip())
+        if curr_indent >= extra:
+            result[i] = ln[extra:]
+        # else: less-indented than expected — leave unchanged
+
+    return "\n".join(result)
+
+
+def _yaml_safe_load_lenient(text: str):
+    """Parse YAML, retrying with indent-fix if the first attempt fails."""
+    import yaml as _yaml
+    try:
+        return _yaml.safe_load(text)
+    except _yaml.YAMLError:
+        fixed = _fix_yaml_indent(text)
+        if fixed != text:
+            return _yaml.safe_load(fixed)   # may still raise — caller handles it
+        raise
+
+
+_STEP_LINE_RE = _re_mod.compile(r'^(\s*)- (\S[^:]*):(.*)$')
+_PARAM_LINE_RE = _re_mod.compile(r'^[A-Za-z_][\w. -]*\s*:')
+_STEP_ANNOTATION_KEYS = frozenset({'description', 'comment', 'note', 'label'})
+
+
+def _extract_inline_data(text: str):
+    """Extract a 'JSON:\\n[...]' data block prepended to inline preconditions.
+
+    Allows parameterized runs by putting a JSON array in the Preconditions
+    field before the steps list:
+
+        JSON:
+        [{"mac": "AA:BB:CC:DD:EE:FF", "product": "WB-800", "bucket_name": "my-bucket"}]
+
+        - ovrc.connect:
+        device_id: ${mac}
+
+    Returns (data_list, remaining_steps_text) on success,
+    or (None, original_text) if no recognised prefix is found.
+    """
+    if not text.startswith("JSON:"):
+        return None, text
+    nl = text.find('\n')
+    if nl == -1:
+        return None, text
+    rest = text[nl + 1:].lstrip()
+    if not rest.startswith('['):
+        return None, text
+    # Find the matching closing ']' (handle nested arrays/objects)
+    depth = 0
+    end_idx = -1
+    for idx, ch in enumerate(rest):
+        if ch == '[':
+            depth += 1
+        elif ch == ']':
+            depth -= 1
+            if depth == 0:
+                end_idx = idx
+                break
+    if end_idx == -1:
+        return None, text
+    try:
+        data = json.loads(rest[:end_idx + 1])
+        if not isinstance(data, list):
+            return None, text
+        return data, rest[end_idx + 1:].lstrip('\n\r ')
+    except Exception:
+        return None, text
+
+
+def _fix_step_list_indent(text: str) -> str:
+    """Re-indent step parameters that appear at the same level as their '-' marker.
+
+    Users often type step params flush-left in TestRail's plain-text editor:
+
+        - aws.list_files:
+        bucket_name: my-bucket     ← wrong: needs 4-space indent
+        folder_prefix: vps/
+
+    This function indents them under the step key so YAML parses correctly:
+
+        - aws.list_files:
+            bucket_name: my-bucket
+            folder_prefix: vps/
+
+    Bare annotation lines (description:, note:, label:) after a step are dropped.
+    """
+    lines = text.splitlines()
+    result = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = _STEP_LINE_RE.match(line)
+        if m:
+            dash_indent = len(m.group(1))
+            result.append(line)
+            i += 1
+            param_prefix = ' ' * (dash_indent + 4)
+            while i < len(lines):
+                nl = lines[i]
+                if not nl.strip():
+                    result.append(nl)
+                    i += 1
+                    break
+                nl_indent = len(nl) - len(nl.lstrip())
+                stripped = nl.lstrip()
+                # Next list item at same or shallower indent → stop
+                if stripped.startswith('- ') and nl_indent <= dash_indent:
+                    break
+                # Already correctly indented → keep as-is
+                if nl_indent > dash_indent:
+                    result.append(nl)
+                    i += 1
+                    continue
+                # At wrong indent level: check if it's a key: value line
+                if _PARAM_LINE_RE.match(stripped):
+                    key = stripped.split(':', 1)[0].strip()
+                    if key in _STEP_ANNOTATION_KEYS:
+                        i += 1  # drop bare annotation lines
+                        continue
+                    result.append(param_prefix + stripped)
+                    i += 1
+                else:
+                    result.append(nl)
+                    i += 1
+        else:
+            result.append(line)
+            i += 1
+    return '\n'.join(result)
 
 
 # Ordered prefix → role mapping (order matters: longest prefix checked first)
@@ -160,8 +385,8 @@ def _get_case_body(test: Dict[str, Any]) -> str:
 
     for field in ("custom_steps", "custom_preconds"):
         value = test.get(field)
-        if value:
-            return str(value)
+        if value and not isinstance(value, list):
+            return _html_to_text(str(value))
     return ""
 
 
@@ -171,7 +396,7 @@ def _parse_preconds_vars(test: Dict[str, Any]) -> Dict[str, Any]:
     Tries YAML first, then falls back to line-by-line splitting on the first colon.
     """
     import yaml as _yaml
-    text = (test.get("custom_preconds") or "").strip()
+    text = _html_to_text(test.get("custom_preconds") or "")
     if not text:
         return {}
     try:
@@ -240,17 +465,18 @@ def _parse_structured_steps(test: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _parse_inline_body(body: str) -> List[Dict[str, Any]]:
-    """Parse raw YAML from the Steps field as a steps list (Option A)."""
-    import yaml as _yaml
-    body = (body or "").strip()
+    """Parse raw YAML from a TestRail text field as a steps list."""
+    body = _html_to_text(body)
     if not body:
         return []
     try:
-        parsed = _yaml.safe_load(body)
+        parsed = _yaml_safe_load_lenient(body)
         if isinstance(parsed, list):
             return [s for s in parsed if isinstance(s, dict)]
         if isinstance(parsed, dict) and "steps" in parsed:
             return [s for s in parsed["steps"] if isinstance(s, dict)]
+        if isinstance(parsed, dict):
+            return [parsed]
     except Exception:
         pass
     return []
@@ -590,6 +816,25 @@ class TestRailRunner:
                 if verbose:
                     print(f"    FAIL ({elapsed})")
 
+        # Mark definition cases (Keyword: / Var:) as passed so they don't
+        # remain "untested" in the run. They are not executable directly.
+        definition_roles = {"keyword": "Shared step definition", "var": "Variable definition"}
+        for case in classified:
+            role = case.get("role", "")
+            if role not in definition_roles:
+                continue
+            if case.get("status_id", TestRailService.STATUS_UNTESTED) != TestRailService.STATUS_UNTESTED:
+                continue
+            label = definition_roles[role]
+            try:
+                self._tr.add_result(
+                    case["id"],
+                    status_id=TestRailService.STATUS_PASSED,
+                    comment=f"{label} — not directly executable. Referenced via shared_step actions in Inline: cases.",
+                )
+            except Exception:
+                pass
+
         return passed, failed, skipped
 
     def _run_yaml_files(
@@ -640,7 +885,7 @@ class TestRailRunner:
                 for k, v in injected_vars.items():
                     self._config.set_variable(k, str(v), scope="collection_vars")
 
-            runner = TestRunner(self._config)
+            runner = TestRunner(self._config, log_dir=self._artifact_dir)
             return runner.run(yaml_path)
         except Exception as exc:
             if verbose:
@@ -653,31 +898,42 @@ class TestRailRunner:
         Read priority:
           1. custom_preconds as YAML list  → plain steps list written by UI or converter
           2. custom_preconds as dict with 'steps' key → steps + optional variables block
-          3. custom_steps_separated rows   → structured content/expected (Option B)
-          4. custom_steps text             → raw YAML steps (Option A, legacy)
+          3. custom_preconds as plain dict with action key → single-step shorthand
+          4. custom_steps_separated rows   → structured content/expected (Option B)
+          5. custom_steps text             → raw YAML steps (Option A, legacy)
         """
         import yaml as _yaml
 
         title = case.get("clean_title", case.get("title", "Inline Test"))
         steps: List[Dict[str, Any]] = []
         variables: Dict[str, Any] = {}
+        data_sets: Optional[List[Dict[str, Any]]] = None
 
-        preconds_text = (case.get("custom_preconds") or "").strip()
+        preconds_text = _html_to_text(case.get("custom_preconds") or "")
         if preconds_text:
+            # Extract "JSON:\n[...]" data prefix for parameterized runs
+            data_sets, preconds_text = _extract_inline_data(preconds_text)
+            # Re-indent step params that are flush-left in TestRail's editor
+            preconds_text = _fix_step_list_indent(preconds_text)
             try:
-                parsed = _yaml.safe_load(preconds_text)
+                parsed = _yaml_safe_load_lenient(preconds_text)
                 if isinstance(parsed, list):
-                    steps = parsed
+                    steps = [s for s in parsed if isinstance(s, dict)]
                 elif isinstance(parsed, dict) and "steps" in parsed:
-                    steps = parsed.get("steps") or []
+                    steps = [s for s in (parsed.get("steps") or []) if isinstance(s, dict)]
                     variables = {
                         str(k).lstrip("$"): v
                         for k, v in (parsed.get("variables") or {}).items()
                     }
-                # else: dict without 'steps' → treat as variables only (Var: case shape)
-                #       leave steps empty so legacy fallback runs below
-            except Exception:
-                pass
+                    # Support full YAML format: data: + steps: (mirrors local YAML files)
+                    if parsed.get("data") and isinstance(parsed["data"], list):
+                        data_sets = parsed["data"]
+                elif isinstance(parsed, dict):
+                    # Any dict in preconds → single step (covers both `action:` and short-key formats)
+                    steps = [parsed]
+                # else: plain string/scalar → fall through to legacy
+            except Exception as _exc:
+                print(f"  [warn] Could not parse Preconditions as YAML: {_exc}")
 
         if not steps:
             # Legacy / Option B fallback
@@ -689,8 +945,20 @@ class TestRailRunner:
             if has_structured:
                 steps = _parse_structured_steps(case)
             else:
-                body = (case.get("custom_steps") or "").strip()
-                steps = _parse_inline_body(body)
+                # custom_steps may be a string (plain text) or a list (structured field)
+                raw_steps = case.get("custom_steps")
+                if isinstance(raw_steps, list):
+                    # Treat as structured rows if they have content/expected keys
+                    if any(isinstance(r, dict) and (r.get("content") or r.get("expected"))
+                           for r in raw_steps):
+                        steps = _parse_structured_steps({"custom_steps_separated": raw_steps})
+                    else:
+                        body = " ".join(
+                            str(r.get("content", r)) for r in raw_steps if r
+                        )
+                        steps = _parse_inline_body(body)
+                else:
+                    steps = _parse_inline_body(raw_steps or "")
             if not variables:
                 variables = _parse_preconds_vars(case)
 
@@ -700,6 +968,8 @@ class TestRailRunner:
         result: Dict[str, Any] = {"name": title, "steps": steps}
         if variables:
             result["variables"] = variables
+        if data_sets:
+            result["data"] = data_sets
         return result
 
     def _run_inline(
@@ -711,31 +981,74 @@ class TestRailRunner:
         """Execute an Inline: case by materialising it as a temp YAML file."""
         import yaml as _yaml
 
+        # If the test object from get_tests lacks case body fields, fetch the full case.
+        # TestRail sometimes doesn't include custom_preconds/custom_steps in the run's
+        # test list — calling get_case by case_id gets the authoritative data.
+        has_body = bool(
+            case.get("custom_preconds")
+            or case.get("custom_steps")
+            or case.get("custom_steps_separated")
+        )
+        if not has_body:
+            case_id = case.get("case_id")
+            if case_id:
+                try:
+                    full_case = self._tr.get_case(int(case_id))
+                    # Merge: keep test-level fields (id, status_id, etc.), overlay case body
+                    case = {**full_case, **{k: v for k, v in case.items() if v is not None}}
+                    print(f"  [info] Fetched full case body from get_case({case_id})")
+                except Exception as _e:
+                    print(f"  [warn] Could not fetch case body for case_id={case_id}: {_e}")
+
         test_dict = self._build_inline_test_dict(case)
         if not test_dict:
+            # Debug: show raw field lengths to aid diagnosis
+            preconds_raw = case.get("custom_preconds") or ""
+            steps_raw    = case.get("custom_steps") or ""
+            preconds_clean = _html_to_text(preconds_raw)
+            steps_clean    = _html_to_text(str(steps_raw)) if isinstance(steps_raw, str) else str(steps_raw)
+            debug_lines = [
+                f"  [debug] custom_preconds ({len(preconds_raw)} chars raw → {len(preconds_clean)} clean): "
+                f"{repr(preconds_clean[:200])}",
+                f"  [debug] custom_steps ({type(steps_raw).__name__}, len={len(str(steps_raw))} raw → "
+                f"{len(steps_clean)} clean): {repr(steps_clean[:200])}",
+            ]
             return False, [
                 "Inline case has no steps.\n"
-                "\nPreconditions field — paste a YAML steps list, e.g.:\n"
-                "  - action: browser.open\n"
-                "    url: ${base_url}\n"
-                "  - action: browser.click\n"
-                "    role: button\n"
-                "    name: Login\n"
-                "\nTo include test-level variables, use the full form:\n"
-                "  variables:\n"
-                "    base_url: https://staging.example.com\n"
-                "  steps:\n"
-                "    - action: browser.open\n"
-                "      url: ${base_url}\n"
-                "\nLegacy — Steps (Separated) case type is also still supported:\n"
-                "  Step Description: action YAML (one step per row)\n"
-                "  Expected Result:  Python expression or natural-language assertion"
+                + "\n".join(debug_lines) + "\n"
+                "\nPaste steps in the Preconditions field using one of these formats:\n"
+                "\n"
+                "  PREFERRED (dot-notation, params may be flush-left):\n"
+                "    - aws.list_files:\n"
+                "    bucket_name: my-bucket\n"
+                "    folder_prefix: vps/\n"
+                "    store_as: firmware_files\n"
+                "    - ovrc.connect:\n"
+                "    device_id: ${mac}\n"
+                "\n"
+                "  PARAMETERIZED (JSON data prefix + steps):\n"
+                "    JSON:\n"
+                "    [{\"mac\": \"AA:BB:CC:DD\", \"bucket_name\": \"my-bucket\"}]\n"
+                "\n"
+                "    - aws.list_files:\n"
+                "    bucket_name: ${bucket_name}\n"
+                "    - ovrc.connect:\n"
+                "    device_id: ${mac}\n"
+                "\n"
+                "  WITH VARIABLES (mirrors local YAML exactly):\n"
+                "    variables:\n"
+                "      base_url: https://staging.example.com\n"
+                "    steps:\n"
+                "      - api.request:\n"
+                "          method: GET\n"
+                "          url: ${base_url}/status\n"
             ]
 
         test_id = case.get("id", "tmp")
         tmp_path = self._artifact_dir / f"_inline_{test_id}.yaml"
         try:
             self._artifact_dir.mkdir(parents=True, exist_ok=True)
+            self._sync_shared_steps_to_artifact_dir()
             with open(tmp_path, "w", encoding="utf-8") as f:
                 _yaml.dump(test_dict, f, allow_unicode=True, default_flow_style=False,
                            sort_keys=False)
@@ -745,6 +1058,42 @@ class TestRailRunner:
                 tmp_path.unlink(missing_ok=True)
             except Exception:
                 pass
+
+    def _sync_shared_steps_to_artifact_dir(self) -> None:
+        """Merge all shared_steps.yaml files from tests_dir into artifact_dir.
+
+        The parser looks for shared_steps.yaml in the same directory as the
+        YAML file being parsed. Inline temp files land in artifact_dir, so
+        shared steps must be there too.
+        """
+        import yaml as _yaml
+
+        merged: Dict[str, Any] = {}
+        for path in sorted(self._tests_dir.rglob("shared_steps.yaml")):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = _yaml.safe_load(f) or {}
+                if isinstance(data, dict):
+                    merged.update(data)
+            except Exception:
+                pass
+
+        if not merged:
+            return
+
+        out = self._artifact_dir / "shared_steps.yaml"
+        try:
+            existing: Dict[str, Any] = {}
+            if out.exists():
+                with open(out, encoding="utf-8") as f:
+                    existing = _yaml.safe_load(f) or {}
+            if existing != merged:
+                existing.update(merged)
+                with open(out, "w", encoding="utf-8") as f:
+                    _yaml.dump(existing, f, allow_unicode=True,
+                               default_flow_style=False, sort_keys=False)
+        except Exception:
+            pass
 
     def _skip_all(self, classified: List[Dict]) -> None:
         for case in classified:

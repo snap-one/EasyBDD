@@ -58,16 +58,84 @@ class TestResult:
             self.test_details = []
 
 
+class _GvLogEntry:
+    """Mimics a single gv.log[n] dict entry from mybdd."""
+    def __init__(self, variables: dict, offset: int = -1):
+        self._vars = variables
+        self._offset = offset
+
+    def __getitem__(self, key: str):
+        if self._offset in (-1, 0):
+            mapping = {
+                "response_txt":  self._vars.get("last_response", ""),
+                "response_dict": self._vars.get("last_response_dict", {}),
+                "status_code":   self._vars.get("last_status_code", 0),
+                "response_code": self._vars.get("last_status_code", 0),
+            }
+        elif self._offset == -2:
+            mapping = {
+                "response_txt":  self._vars.get("prev_response", ""),
+                "response_dict": self._vars.get("prev_response_dict", {}),
+                "status_code":   0,
+                "response_code": 0,
+            }
+        else:
+            mapping = {"response_txt": "", "response_dict": {}, "status_code": 0, "response_code": 0}
+        return mapping.get(key, "")
+
+    def get(self, key, default=None):
+        val = self[key]
+        return val if val != "" else default
+
+
+class _GvLog:
+    """Mimics gv.log[] from mybdd — indexed access to response history."""
+    def __init__(self, variables: dict):
+        self._vars = variables
+
+    def __getitem__(self, idx: int):
+        return _GvLogEntry(self._vars, idx)
+
+
+class _GvTests:
+    """Mimics gv.tests from mybdd — variable store access."""
+    def __init__(self, variables: dict):
+        self._vars = variables
+
+    def __getitem__(self, key: str):
+        if key == "variables":
+            return self._vars
+        return {}
+
+    def get(self, key, default=None):
+        if key == "variables":
+            return self._vars
+        return default
+
+
+class _Gv:
+    """mybdd gv compatibility shim for eval.exec steps.
+
+    Allows converted test code that still references gv.log[-1]['response_txt'],
+    gv.tests['variables']['key'], etc. to run unchanged under Easy BDD.
+    """
+    def __init__(self, variables: dict):
+        self.log = _GvLog(variables)
+        self.tests = _GvTests(variables)
+
+
 class TestRunner:
     """Main test runner for Easy BDD Framework"""
 
-    def __init__(self, config: GlobalConfigManager):
+    def __init__(self, config: GlobalConfigManager, log_dir: Path = None):
         self.config = config
         self.parser = YAMLParser()
         self.generator = GherkinGenerator()
         from .connection_pool import ConnectionPool
         self._connection_pool = ConnectionPool()
         self._eval_state: dict = {}
+        from .run_logger import RunLogger
+        self._run_logger = RunLogger(log_dir)
 
         # Load custom actions
         # Load action modules if available
@@ -335,8 +403,12 @@ class TestRunner:
             thread_id = threading.get_ident()
 
             try:
-                # Merge test variables with current data set
-                iteration_variables = test.variables.copy() if test.variables else {}
+                # Merge test variables with current data set (include config vars)
+                try:
+                    _cfg_vars = self.config.variable_manager.get_all_variables()
+                except Exception:
+                    _cfg_vars = {}
+                iteration_variables = {**_cfg_vars, **(test.variables or {})}
                 iteration_variables.update(data_set)
 
                 # Create a copy of the test for this iteration
@@ -437,8 +509,12 @@ class TestRunner:
         for i, data_set in enumerate(data_sets, 1):
             print(f"\n    === Data Iteration {i}/{len(data_sets)} ===")
 
-            # Merge test variables with current data set
-            iteration_variables = test.variables.copy() if test.variables else {}
+            # Merge config vars + test vars + data set (data set wins)
+            try:
+                _cfg_vars = self.config.variable_manager.get_all_variables()
+            except Exception:
+                _cfg_vars = {}
+            iteration_variables = {**_cfg_vars, **(test.variables or {})}
             iteration_variables.update(data_set)
 
             # Create a copy of the test for this iteration
@@ -481,9 +557,16 @@ class TestRunner:
         soft_assert_manager = SoftAssertionManager()
         console_output = StringIO()
         test_passed = False
-        variables = (
-            test.variables.copy() if test.variables else {}
-        )  # Initialize variables for cleanup
+        # Start with config-level vars (collection_vars set by TestRail injected_vars),
+        # then overlay test-level variables so the test's own vars take priority.
+        # Assign back to test.variables so every reference in the loop below picks up
+        # the full merged dict without needing individual call-site changes.
+        try:
+            config_vars = self.config.variable_manager.get_all_variables()
+        except Exception:
+            config_vars = {}
+        variables = {**config_vars, **(test.variables or {})}
+        test.variables = variables  # single source of truth for the rest of _run_test
 
         # Store original stdout to capture console output
         original_stdout = sys.stdout
@@ -599,14 +682,14 @@ class TestRunner:
                     time.sleep(0.5)
 
             # Execute main test steps
-            print(f"    === Main Test Phase ===")
+            self._run_logger.phase("Main Test Phase")
             total_steps = len(test.steps)
-            
+
             for i, step in enumerate(test.steps, 1):
-                step_description = self._get_step_description(step)
-                print(f"    Step {i}/{len(test.steps)}: {step.action}")
-                if step_description:
-                    print(f"           → {step_description}")
+                step_params = step.parameters if hasattr(step, "parameters") else {}
+                prev_response = (test.variables or {}).get("last_response")
+
+                self._run_logger.step_start(i, total_steps, step.action, step_params)
 
                 # Determine which service to use based on action
                 service_type = self._get_service_type(step.action)
@@ -615,22 +698,20 @@ class TestRunner:
                     services[service_type] = self._create_service(service_type)
 
                 # Show step indicator in browser if browser service is available
-                # Check both "browser" service and if current service is browser
                 browser_service = services.get("browser")
                 if not browser_service and service_type == "browser":
                     browser_service = services.get(service_type)
-                
+
                 if browser_service and hasattr(browser_service, "show_step_indicator"):
                     try:
                         browser_service.show_step_indicator(
                             step_number=i,
                             total_steps=total_steps,
                             step_action=step.action,
-                            step_description=step_description
+                            step_description=self._get_step_description(step),
                         )
-                    except Exception as e:
-                        # Log error for debugging but don't fail the test
-                        print(f"      ⚠️  Could not show step indicator: {e}")
+                    except Exception:
+                        pass
 
                 # Execute the step
                 try:
@@ -642,20 +723,21 @@ class TestRunner:
                         i,
                     )
                     if not success:
-                        print(f"    ❌ STEP {i} FAILED: {step.action}")
-                        print(f"       Details: {step_description}")
+                        self._run_logger.step_fail(
+                            i, step.action,
+                            error="step returned False",
+                            details=self._get_step_description(step),
+                        )
 
-                        # Capture failure screenshot
                         failed_step_info = {
                             "step_number": i,
                             "step_action": step.action,
-                            "step_details": step_description,
+                            "step_details": self._get_step_description(step),
                         }
                         failure_screenshot = self._capture_failure_screenshot(
                             services.get("browser"), test.name, i
                         )
 
-                        # Store failure info in test_detail if provided
                         if test_detail is not None:
                             test_detail["failed_step"] = failed_step_info
                             test_detail["failure_screenshot"] = failure_screenshot
@@ -663,18 +745,18 @@ class TestRunner:
 
                         return False
                     else:
-                        print(f"    ✅ Step {i} completed successfully")
+                        self._run_logger.step_pass(i, test.variables or {}, prev_response)
                         step_logs.append(
                             {"step": i, "action": step.action, "status": "passed"}
                         )
                 except Exception as e:
-                    print(f"    ❌ STEP {i} FAILED WITH EXCEPTION: {step.action}")
-                    print(f"       Error: {str(e)}")
-                    print(f"       Details: {step_description}")
                     import traceback
-
-                    traceback_str = traceback.format_exc()
-                    print(f"       Traceback: {traceback_str}")
+                    self._run_logger.step_fail(
+                        i, step.action,
+                        error=str(e),
+                        details=self._get_step_description(step),
+                        traceback_str=traceback.format_exc(),
+                    )
 
                     # Capture failure screenshot
                     failed_step_info = {
@@ -2794,6 +2876,7 @@ class TestRunner:
         action_lower = action.lower()
         store_as = params.get("store_as", "")
 
+        import platform as _platform
         # Build the execution context: shared state + current test variables
         ctx = {
             "state": self._eval_state,
@@ -2803,6 +2886,8 @@ class TestRunner:
             "json": _json,
             "datetime": _datetime,
             "collections": _collections,
+            "platform": _platform,
+            "gv": _Gv(variables),  # mybdd compatibility shim
         }
         ctx.update(self._eval_state)
         ctx.update(variables)
@@ -3170,16 +3255,33 @@ class TestRunner:
             aws_service = AWSService(logger=print)
             variables["_aws_service"] = aws_service
 
-        # Extract parameters using helper
+        # Extract parameters using helper — resolve ${vars} against current variables
         params = self._get_params(step_params)
         action_lower = action.lower()
 
+        # Log credential source (mask secrets)
+        key_id = (
+            params.get("access_key_id")
+            or variables.get("aws_access_key_id")
+            or AWSService._global_config.get("access_key_id")
+        )
+        if key_id:
+            masked = key_id[:4] + "****" + key_id[-4:] if len(key_id) > 8 else "****"
+            print(f"      AWS credentials: key_id={masked} (explicit)")
+        else:
+            print(f"      AWS credentials: using AWS CLI / environment defaults")
+
         try:
-            if "list firmware" in action_lower or "list files" in action_lower:
+            if any(k in action_lower for k in ("list firmware", "list files", "list_files", "list_firmware")):
                 # List and download firmware files
                 bucket_name = params.get("bucket_name", "")
                 if not bucket_name:
                     raise ValueError("AWS list firmware requires 'bucket_name'")
+
+                # Inject aws_access_key_id / aws_secret_access_key from run variables
+                # if the step didn't specify them explicitly
+                eff_key    = params.get("access_key_id")    or variables.get("aws_access_key_id")
+                eff_secret = params.get("secret_access_key") or variables.get("aws_secret_access_key")
 
                 urls = aws_service.list_firmware_files(
                     bucket_name=bucket_name,
@@ -3194,17 +3296,19 @@ class TestRunner:
                     ),
                     download_dir=params.get("download_dir"),
                     protocol=params.get("protocol", "https"),
-                    access_key_id=params.get("access_key_id"),
-                    secret_access_key=params.get("secret_access_key"),
+                    access_key_id=eff_key,
+                    secret_access_key=eff_secret,
                     region=params.get("region"),
                 )
 
                 # Store URLs in variable if requested
                 store_as = params.get("store_as", "")
-                if store_as and urls:
+                if store_as:
                     variables[store_as] = urls
-                    print(f"      Stored {len(urls)} URLs as: {store_as}")
+                    print(f"      Stored {len(urls)} URL(s) as: {store_as!r}")
 
+                if not urls:
+                    print(f"      ⚠  0 files matched — check filter params above")
                 return len(urls) > 0
 
             elif "get latest firmware" in action_lower:
