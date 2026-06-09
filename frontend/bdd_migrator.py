@@ -30,8 +30,18 @@ Key syntax being migrated
   response_code | 200 |                             → test.assert_response
   Shared: name                                      → shared_step: name
   $variable                                         → ${variable}
-  gv.log[-1]['response_txt']                        → ${last_response}
-  gv.log[-1]['response_dict']                       → ${last_response_dict}
+  gv.log[-1]['response_txt']  (YAML param context)  → ${last_response}
+  gv.log[-1]['response']      (YAML param context)  → ${last_response}
+  gv.log[-1]['response_dict'] (YAML param context)  → ${last_response_dict}
+  gv.log[-1]['response_code'] (YAML param context)  → ${last_response_code}
+  gv.message                  (YAML param context)  → ${last_eval}
+  gv.log[-1]['response_txt']  (Python code context) → str(last_response)
+  gv.log[-1]['response']      (Python code context) → str(last_response)
+  gv.log[-1]['response_dict'] (Python code context) → last_response_dict
+  gv.tests['variables']['k']  (Python code context) → kept as-is (valid Easy BDD runtime)
+  gv.tests['variables']['k']  (YAML param context)  → ${k}
+  gv.tests['variables']['k']=v (Python assignment)  → eval.exec: code + store_as: k
+  pure boolean Python expression                    → test.assert: expression
 """
 
 from __future__ import annotations
@@ -57,21 +67,38 @@ def _int_or_var(value, default=0):
 # ────────────────────────────────────────────────────────────────────────────
 
 def _sub_vars(text: str) -> str:
-    """Translate mybdd variable syntax to Easy BDD ${...} syntax."""
+    """
+    Translate mybdd variable syntax to Easy BDD ${...} syntax.
+
+    Use this for YAML *parameter value* strings (URLs, selectors, command args,
+    assertion literals).  Do NOT call this on Python code bodies — use
+    _translate_code() instead.
+    """
     if not isinstance(text, str):
         return text
 
-    # gv.log indexed access
+    # gv.log indexed access — response text
     text = re.sub(r"gv\.log\[-1\]\['response_txt'\]",   "${last_response}",      text)
-    text = re.sub(r"gv\.log\[-1\]\['response_dict'\]",  "${last_response_dict}", text)
+    text = re.sub(r"gv\.log\[-1\]\['response'\]",        "${last_response}",      text)
     text = re.sub(r"gv\.log\[-2\]\['response_txt'\]",   "${prev_response}",      text)
+    text = re.sub(r"gv\.log\[-2\]\['response'\]",        "${prev_response}",      text)
+    text = re.sub(r"gv\.log\[(-?\d+)\]\['response(?:_txt)?'\]", r"${response_\1}", text)
+
+    # gv.log indexed access — response dict
+    text = re.sub(r"gv\.log\[-1\]\['response_dict'\]",  "${last_response_dict}", text)
     text = re.sub(r"gv\.log\[-2\]\['response_dict'\]",  "${prev_response_dict}", text)
-    text = re.sub(r"gv\.log\[(-?\d+)\]\['response_txt'\]",  r"${response_\1}",  text)
     text = re.sub(r"gv\.log\[(-?\d+)\]\['response_dict'\]", r"${response_dict_\1}", text)
 
-    # gv.tests['variables']['key'] access
+    # gv.log — response code / status
+    text = re.sub(r"gv\.log\[-1\]\['(?:response_code|status_code)'\]",  "${last_response_code}",    text)
+    text = re.sub(r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "${last_response_headers}", text)
+
+    # gv.tests['variables']['key'] access (single-quoted and double-quoted)
     text = re.sub(r"gv\.tests\['variables'\]\['(\w+)'\]", r"${\1}", text)
     text = re.sub(r'gv\.tests\["variables"\]\["(\w+)"\]', r"${\1}", text)
+
+    # gv.message — the last eval/message result
+    text = re.sub(r"\bgv\.message\b", "${last_eval}", text)
 
     # <$varname$> or <${varname}$> or <${varname}> — Gherkin Scenario Outline params
     text = re.sub(r"<\$\{([A-Za-z_][A-Za-z0-9_]*)\}\$?>", r"${\1}", text)
@@ -79,11 +106,100 @@ def _sub_vars(text: str) -> str:
 
     # $variable → ${variable}  (dollar-sign variables, not already in ${...})
     def dollar_sub(m):
-        inner = m.group(1)
-        return "${" + inner + "}"
+        return "${" + m.group(1) + "}"
     text = re.sub(r"\$(?!\{)([A-Za-z_][A-Za-z0-9_]*)", dollar_sub, text)
 
     return text
+
+
+# ── patterns applied to Python code strings (eval.exec, test.assert, etc.) ──
+# Maps (pattern, replacement) where replacement can be a string or callable.
+_CODE_PATTERNS: List[Tuple[str, Any]] = [
+    # gv.log response text  (old framework used 'response'; Easy BDD uses 'response_txt'
+    # but also exposes last_response as a bare name)
+    (r"gv\.log\[-1\]\['response_txt'\]",    "str(last_response)"),
+    (r"gv\.log\[-1\]\['response'\]",         "str(last_response)"),
+    (r"gv\.log\[-2\]\['response_txt'\]",    "str(prev_response)"),
+    (r"gv\.log\[-2\]\['response'\]",         "str(prev_response)"),
+    # gv.log response dict
+    (r"gv\.log\[-1\]\['response_dict'\]",   "last_response_dict"),
+    (r"gv\.log\[-2\]\['response_dict'\]",   "prev_response_dict"),
+    # gv.log response code / headers
+    (r"gv\.log\[-1\]\['(?:response_code|status_code)'\]",  "last_response_code"),
+    (r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "last_response_headers"),
+    # Numeric-indexed log entries
+    (r"gv\.log\[(-?\d+)\]\['response(?:_txt)?'\]",
+        lambda m: "str(last_response)" if m.group(1) in ("-1",)
+                  else f"str(log_response_{m.group(1).lstrip('-')})"),
+    (r"gv\.log\[(-?\d+)\]\['response_dict'\]",
+        lambda m: "last_response_dict" if m.group(1) in ("-1",)
+                  else f"log_response_dict_{m.group(1).lstrip('-')}"),
+    # gv.tests['variables']['key'] — in Python code context keep the gv API;
+    # READS: leave as-is so the code is valid Easy BDD Python.
+    # (The YAML-string variant is handled by _sub_vars.)
+    # gv.message is a valid Easy BDD runtime global — leave it as-is.
+]
+
+
+def _translate_code(code: str) -> str:
+    """
+    Translate Python code strings from mybdd runtime API to Easy BDD runtime API.
+
+    Called for eval.exec code bodies, eval.run expressions, and test.assert
+    expression strings.  Unlike _sub_vars(), this does NOT convert
+    gv.tests['variables'][...] → ${...} because ${...} is not valid Python;
+    it keeps gv.* references that are valid in the Easy BDD execution context
+    and only normalises patterns that were renamed between frameworks.
+    """
+    if not isinstance(code, str):
+        return code
+
+    for pattern, replacement in _CODE_PATTERNS:
+        if callable(replacement):
+            code = re.sub(pattern, replacement, code)
+        else:
+            code = re.sub(pattern, replacement, code)
+
+    return code
+
+
+def _smart_eval_step(code: str) -> Dict:
+    """
+    Convert a Python code string to the most appropriate Easy BDD step dict.
+
+    Rules (in priority order):
+      1. Pure variable assignment  gv.tests['variables']['key'] = <expr>
+         → eval.exec with store_as so the intent is visible.
+      2. Pure boolean / comparison expression (no assignment, no side-effect call)
+         → test.assert so the failure produces a clear message.
+      3. Everything else → eval.exec.
+    """
+    code = _translate_code(code.strip())
+
+    # Rule 1 — variable assignment
+    m = re.match(
+        r"^gv\.tests\['variables'\]\['(\w+)'\]\s*=\s*(.+)$",
+        code, re.DOTALL
+    )
+    if m:
+        return {"action": "eval.exec", "code": code, "store_as": m.group(1)}
+
+    # Rule 2 — pure boolean expression (no assignment, no function call with side effects)
+    # Heuristic: if the code contains a comparison / containment operator and no '='
+    # (but allow '==' and '!=') then treat as assertion.
+    _no_assign = not re.search(r"(?<![=!<>])=(?!=)", code)  # lone = but not == != <= >=
+    _is_bool   = bool(re.search(
+        r"\bin\b|\bnot\s+in\b|\b(?:is|is\s+not)\b|==|!=|<=|>=|<(?!=)|>(?!=)|"
+        r"\bre\.(?:search|match|fullmatch)\b",
+        code
+    ))
+    if _no_assign and _is_bool and "(" not in code.split("in")[0]:
+        # Extra guard: don't promote if the expression contains a function call
+        # before the first boolean keyword (e.g. `some_fn() in result` is fine,
+        # but `fetch_data()` alone is not a boolean).
+        return {"action": "test.assert", "expression": code}
+
+    return {"action": "eval.exec", "code": code}
 
 
 def _strip_dollar(name: str) -> str:
@@ -275,18 +391,15 @@ def _map_function(param_dict: Dict, data_str: str) -> Dict:
         return {"action": "browser.wait", "seconds": float(sec)}
 
     if name in ("exec", "execute"):
-        code = _sub_vars(str(param_dict.get("string", "")))
-        # Clean up common gv patterns
-        code = re.sub(r"gv\.tests\['variables'\]\['(\w+)'\]\s*=\s*", r"eval.set(\1, ", code)
-        return {"action": "eval.exec", "code": code}
+        # Use _translate_code (not _sub_vars) — Python code context, not a YAML string value.
+        return _smart_eval_step(str(param_dict.get("string", "")))
 
     if name == "eval":
         # "string" key → exec-style, "expression" key → eval-style
         if "string" in param_dict:
-            code = _sub_vars(str(param_dict["string"]))
-            code = re.sub(r"gv\.tests\['variables'\]\['(\w+)'\]\s*=\s*", r"eval.set(\1, ", code)
-            return {"action": "eval.exec", "code": code}
-        expr = _sub_vars(str(param_dict.get("expression", "")))
+            return _smart_eval_step(str(param_dict["string"]))
+        # "expression" → evaluate and optionally store result
+        expr  = _translate_code(str(param_dict.get("expression", "")))
         store = param_dict.get("store_as", "eval_result")
         return {"action": "eval.run", "expression": expr, "store_as": store}
 
@@ -295,13 +408,13 @@ def _map_function(param_dict: Dict, data_str: str) -> Dict:
         expected  = param_dict.get("expected", "")
         expr_tmpl = param_dict.get("expression", "@")  # "@" means use data arg
 
-        # Resolve data source
-        data_ref = data_str if data_str and data_str not in ("{}", "") else "${last_response}"
+        # Resolve data source — translate code-context patterns in data_str
+        data_ref = _translate_code(data_str) if data_str and data_str not in ("{}", "") else "str(last_response)"
         # Replace "@" placeholder
         if expr_tmpl == "@":
             data_val = data_ref
         else:
-            data_val = _sub_vars(expr_tmpl)
+            data_val = _translate_code(expr_tmpl)
 
         tmpl = _ASSERT_OP_MAP.get(op, "{data} == {expected!r}")
         try:
@@ -387,18 +500,18 @@ def _map_function(param_dict: Dict, data_str: str) -> Dict:
         bucket   = _sub_vars(str(param_dict.get("aws_bucket", "")))
         dl_dir   = _sub_vars(str(param_dict.get("download_dir", "")))
         regex    = _sub_vars(str(param_dict.get("regex_pattern", "")))
-        sort_pat = _sub_vars(str(param_dict.get("sort_pattern", "")))
         cf_url   = _sub_vars(str(param_dict.get("cloudfront_url", "")))
-        is_cf    = bool(cf_url)
-        prefix   = "cloudfront_" if is_cf else ""
-        return {
-            "action": "eval.exec",
-            "code": (
-                f"# upload_cloud_firmware: list S3 bucket '{bucket}' path '{dl_dir}'\n"
-                f"# filter by regex '{regex}', sort by '{sort_pat}'\n"
-                f"# result → [{prefix}upgrade_file, {prefix}downgrade_file] in variables"
-            ),
+        step: Dict = {
+            "action": "aws.list_files",
+            "bucket_name": bucket,
+            "folder_prefix": dl_dir,
+            "store_as": "last_response",
         }
+        if regex:
+            step["filename_pattern"] = regex
+        if cf_url:
+            step["cloudfront_url"] = cf_url
+        return step
 
     if name == "extract_firmware_version":
         bucket  = _sub_vars(str(param_dict.get("aws_bucket", "")))
@@ -643,15 +756,21 @@ def _parse_step_line(line: str) -> Optional[Dict]:
     # ── re | lookup | in response ─────────────────────────────────────────
     m = re.match(r"^re\s*\|\s*(.+)\s*\|\s*in response", line, re.I)
     if m:
-        pattern = m.group(1).strip()
+        pattern = _translate_code(m.group(1).strip())
         return {"action": "test.assert",
                 "expression": f"re.search({pattern!r}, str(last_response)) is not None"}
+
+    # ── Raw Python that contains gv.* or known Easy BDD runtime names ─────
+    # Route through _smart_eval_step so patterns are normalised and pure
+    # boolean expressions are promoted to test.assert automatically.
+    if any(kw in line for kw in ("gv.", "last_response", "last_eval", "variables[")):
+        return _smart_eval_step(line)  # caller wraps with _to_dot_notation
 
     # ── Generic function call: name(args) ─────────────────────────────────
     m = re.match(r"^(\w+)\(([^)]*)\)$", line)
     if m:
         fn   = m.group(1)
-        args = m.group(2)
+        args = _translate_code(m.group(2))
         return {"action": "eval.exec", "code": f"{fn}({args})"}
 
     # Fallback — keep as a TODO comment
@@ -730,7 +849,7 @@ def parse_step_block(text: str) -> List[Dict]:
 
         step = _parse_step_line(stripped)
         if step:
-            steps.append(step)
+            steps.append(_to_dot_notation(step))
 
     # Handle Examples: at end of block
     _flush_examples()
@@ -812,7 +931,7 @@ def parse_feature_file(content: str) -> List[Dict[str, Any]]:
                 continue
             step = _parse_step_line(stripped)
             if step:
-                current_test["steps"].append(step)
+                current_test["steps"].append(_to_dot_notation(step))
 
     if current_test:
         tests.append(current_test)
@@ -972,7 +1091,32 @@ def migrate(content: str) -> Dict[str, Any]:
 
 def _flag_todos(steps: List[Dict], test_name: str, warnings: List[str]) -> None:
     """Add warning for steps that could not be auto-mapped."""
-    todos = [s for s in steps if s.get("action") == "test.log" and
-             str(s.get("message", "")).startswith("TODO")]
+    todos = [s for s in steps if isinstance(s, dict) and
+             "test.log" in s and
+             str((s.get("test.log") or {}).get("message", "")).startswith("TODO")]
     if todos:
         warnings.append(f"Test '{test_name}': {len(todos)} step(s) need manual review (marked as TODO).")
+
+
+def _to_dot_notation(step: Dict) -> Dict:
+    """Convert flat {'action': 'x.y', 'param': val} → {'x.y': {'param': val}}.
+
+    Recursively converts steps inside loop/conditional bodies.
+    Leaves special structures (shared_step, for_each, condition, etc.) untouched.
+    """
+    if not isinstance(step, dict):
+        return step
+
+    step = dict(step)
+
+    # Recurse into nested step lists first
+    for key in ("steps", "loop_steps", "then_steps", "else_steps"):
+        if isinstance(step.get(key), list):
+            step[key] = [_to_dot_notation(s) for s in step[key]]
+
+    action = step.pop("action", None)
+    if action is None:
+        return step  # already dot-notation or special structure (shared_step, for_each, etc.)
+
+    # Remaining keys are params
+    return {action: step} if step else {action: {}}

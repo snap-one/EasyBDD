@@ -368,11 +368,12 @@ class BddSuiteConverter:
                 ))
                 continue
             parsed_shared.append({
-                "slug":  _slug(c["_clean"]),
-                "clean": c["_clean"],
-                "steps": steps,
-                "todos": todos,
-                "case":  c,
+                "slug":         _slug(c["_clean"]),
+                "clean":        c["_clean"],
+                "keyword_name": c["_clean"].replace(" ", "_"),
+                "steps":        steps,
+                "todos":        todos,
+                "case":         c,
             })
 
         # ── parse Feature: cases ────────────────────────────────────────
@@ -599,7 +600,7 @@ class BddSuiteConverter:
                 for d in devices:
                     print(f"  Var: {d['name']}  ({len(d['vars'])} var(s))")
                 for ps in parsed_shared:
-                    print(f"  Keyword: {ps['clean']}  ({len(ps['steps'])} step(s))")
+                    print(f"  Keyword: {ps['keyword_name']}  ({len(ps['steps'])} step(s))")
                 for pf in parsed_features:
                     print(f"  Inline: {pf['clean']}  ({len(pf['steps'])} step(s))")
             return None
@@ -666,20 +667,20 @@ class BddSuiteConverter:
                 default_flow_style=False, sort_keys=False
             ).rstrip()
             payload = {
-                "title":           f"Keyword: {ps['clean']}",
+                "title":           f"Keyword: {ps['keyword_name']}",
                 "custom_preconds": steps_yaml,
             }
             try:
                 new_case = self._tr.add_case(sec, **payload)
                 if verbose:
-                    print(f"  [TR created] Keyword: {ps['clean']}  ({len(ps['steps'])} step(s))")
+                    print(f"  [TR created] Keyword: {ps['keyword_name']}  ({len(ps['steps'])} step(s))")
                 for cr in result.cases:
                     if cr.source_id == c.get("case_id", c.get("id", 0)) and cr.role == "shared":
                         cr.tr_case_id = new_case.get("id")
                         break
             except Exception as exc:
                 if verbose:
-                    print(f"  [TR error] Keyword: {ps['clean']}: {exc}", file=sys.stderr)
+                    print(f"  [TR error] Keyword: {ps['keyword_name']}: {exc}", file=sys.stderr)
 
         # ── Inline: cases (Feature:) ───────────────────────────────────
         for pf in parsed_features:

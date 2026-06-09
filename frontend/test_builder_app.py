@@ -301,8 +301,16 @@ def convert_test_to_yaml(test_def: TestDefinition) -> str:
     def convert_steps(steps: List[TestStep]) -> List[Dict]:
         result = []
         for step in steps:
-            # Use new dot notation format
-            step_dict = {step.action: step.parameters}
+            params = step.parameters or {}
+            if "_value" in params:
+                # Reconstruct a complex step (shared_step, for_each, etc.) that was
+                # stored with a scalar/list value plus optional sibling keys.
+                step_dict = {step.action: params["_value"]}
+                for k, v in params.items():
+                    if k != "_value":
+                        step_dict[k] = v
+            else:
+                step_dict = {step.action: params}
             if step.description:
                 step_dict["description"] = step.description
             result.append(step_dict)
@@ -340,9 +348,22 @@ def convert_yaml_to_test(yaml_content: str) -> TestDefinition:
                 action = list(step_dict.keys())[0]
                 if action == "description":
                     continue
-                params = (
-                    step_dict[action] if isinstance(step_dict[action], dict) else {}
-                )
+                action_value = step_dict[action]
+                if isinstance(action_value, dict):
+                    # Normal case: {browser.open: {url: ...}}
+                    params = action_value
+                    # Absorb any sibling keys (e.g. 'description' already handled above)
+                    for k, v in step_dict.items():
+                        if k != action and k != "description":
+                            params[k] = v
+                else:
+                    # Complex step: value is a scalar or list (shared_step, for_each).
+                    # Store under _value; sibling keys (parameters, loop_var, steps…)
+                    # are preserved alongside it so the round-trip is lossless.
+                    params = {"_value": action_value}
+                    for k, v in step_dict.items():
+                        if k != action and k != "description":
+                            params[k] = v
 
             result.append(
                 TestStep(
@@ -687,28 +708,35 @@ async def list_tests(
             raise HTTPException(status_code=404, detail=f"Folder not found: {folder}")
 
     for test_file in search_path.rglob("*.yaml"):
+        # Skip shared step library files — they are not test cases
+        if test_file.name == "shared_steps.yaml":
+            continue
+
+        relative_path = test_file.relative_to(tests_directory)
+        # Always use forward slashes so the JS startsWith(workspace+'/') check works on Windows
+        folder_path = (
+            relative_path.parent.as_posix() if relative_path.parent.as_posix() != "." else None
+        )
+        workspace_name = (
+            relative_path.parts[0] if len(relative_path.parts) > 1 else None
+        )
+
         try:
-            with open(test_file, "r") as f:
+            with open(test_file, "r", encoding="utf-8") as f:
                 content = f.read()
                 data = yaml.safe_load(content)
 
-            # Count steps
+            if not isinstance(data, dict):
+                continue  # skip files that don't parse as a mapping (e.g. empty files)
+
+            # Count steps (top-level entries only; nested loop steps counted via the loop step itself)
             step_count = len(data.get("steps", []))
             step_count += len(data.get("setup", []))
             step_count += len(data.get("cleanup", []))
 
-            # Get folder info
-            relative_path = test_file.relative_to(tests_directory)
-            folder_path = (
-                str(relative_path.parent) if relative_path.parent != Path(".") else None
-            )
-            workspace_name = (
-                relative_path.parts[0] if len(relative_path.parts) > 1 else None
-            )
-
             tests.append(
                 TestFile(
-                    id=str(relative_path),
+                    id=relative_path.as_posix(),
                     path=str(test_file),
                     name=data.get("name", test_file.stem),
                     description=data.get("description"),
@@ -723,21 +751,12 @@ async def list_tests(
                 )
             )
         except Exception as e:
-            # Include broken files
-            relative_path = test_file.relative_to(tests_directory)
-            folder_path = (
-                str(relative_path.parent) if relative_path.parent != Path(".") else None
-            )
-            workspace_name = (
-                relative_path.parts[0] if len(relative_path.parts) > 1 else None
-            )
-
             tests.append(
                 TestFile(
-                    id=str(relative_path),
+                    id=relative_path.as_posix(),
                     path=str(test_file),
                     name=test_file.stem,
-                    description=f"Error: {str(e)}",
+                    description=f"Error loading: {str(e)}",
                     tags=["error"],
                     step_count=0,
                     created=None,
@@ -900,6 +919,55 @@ async def get_test_reports(
 
     print(f"[DEBUG] Found {len(reports)} reports for test_id: {test_id}")
     return {"reports": reports}
+
+
+@app.get("/api/tests/{test_id:path}/testrail-export")
+async def testrail_export(test_id: str):
+    """Return the test steps as a TestRail Preconditions-compatible YAML string."""
+    # Guard against path traversal: reject suspicious segments before joining
+    if ".." in test_id.replace("\\", "/").split("/") or test_id.startswith("/"):
+        raise HTTPException(status_code=400, detail="Invalid test id")
+
+    base = tests_directory.resolve()
+    test_path = (base / test_id).resolve()
+
+    # Confirm the resolved path is still inside tests_directory
+    if base not in test_path.parents:
+        raise HTTPException(status_code=400, detail="Invalid test id")
+
+    # Only serve YAML files
+    if test_path.suffix.lower() not in {".yaml", ".yml"}:
+        raise HTTPException(status_code=400, detail="Invalid test id")
+
+    if not test_path.is_file():
+        raise HTTPException(status_code=404, detail="Test not found")
+
+    try:
+        with open(test_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f.read())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading test: {str(e)}")
+
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Test file is not a valid YAML mapping")
+
+    # Build the preconditions block: variables (if any) + setup + steps + cleanup
+    preconds: dict = {}
+    if data.get("variables"):
+        preconds["variables"] = data["variables"]
+    if data.get("setup"):
+        preconds["setup"] = data["setup"]
+    preconds["steps"] = data.get("steps", [])
+    if data.get("cleanup"):
+        preconds["cleanup"] = data["cleanup"]
+
+    preconditions_text = yaml.dump(preconds, sort_keys=False, allow_unicode=True, default_flow_style=False)
+
+    return {
+        "test_id": test_id,
+        "name": data.get("name", test_path.stem),
+        "preconditions": preconditions_text,
+    }
 
 
 @app.get("/api/tests/{test_id:path}")

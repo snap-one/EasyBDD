@@ -93,30 +93,74 @@ class YAMLParser:
         self._load_shared_steps()
 
     def _load_shared_steps(self, workspace_dir: Optional[Path] = None) -> None:
-        """Load shared steps: global file first, then workspace-local (overrides global)."""
+        """Load shared steps: global file first, then workspace-local (overrides global).
+
+        Uses a two-pass approach so that shared steps can reference each other
+        regardless of their order in the YAML file:
+          Pass 1 — collect all raw step-list dicts from every candidate file.
+          Pass 2 — parse each entry in dependency order (topological sort) so
+                   nested shared_step references are already registered when a
+                   dependent entry is parsed.
+        """
         candidates = [Path("shared_steps.yaml")]
         if workspace_dir is not None:
             candidates.append(Path(workspace_dir) / "shared_steps.yaml")
 
+        # Pass 1: gather raw data from all candidate files (later files override earlier)
+        raw: Dict[str, Dict[str, Any]] = {}
         for shared_steps_path in candidates:
             if not shared_steps_path.exists():
                 continue
             try:
                 with open(shared_steps_path, "r", encoding="utf-8") as f:
                     data = yaml.safe_load(f)
-
                 if isinstance(data, dict):
                     for name, step_data in data.items():
                         if isinstance(step_data, dict):
-                            shared_step = SharedStep(
-                                name=name,
-                                description=step_data.get("description", ""),
-                                parameters=step_data.get("parameters", []),
-                                steps=self._parse_steps(step_data.get("steps", [])),
-                            )
-                            self.shared_steps[name] = shared_step
+                            raw[name] = step_data
             except Exception as e:
                 print(f"Warning: Failed to load shared steps from {shared_steps_path}: {e}")
+
+        # Helper: extract direct shared_step dependencies from a raw step list
+        def _deps(steps_raw: List[Any]) -> List[str]:
+            return [s["shared_step"] for s in (steps_raw or [])
+                    if isinstance(s, dict) and "shared_step" in s]
+
+        # Pass 2: topological sort so dependencies are parsed before dependents
+        order: List[str] = []
+        visiting: set = set()
+        visited: set = set()
+
+        def _visit(name: str) -> None:
+            if name in visited:
+                return
+            if name in visiting:
+                # Cycle — skip; _expand_shared_step raises a clear error at runtime
+                return
+            visiting.add(name)
+            for dep in _deps((raw.get(name) or {}).get("steps", [])):
+                if dep in raw:
+                    _visit(dep)
+            visiting.discard(name)
+            visited.add(name)
+            order.append(name)
+
+        for name in raw:
+            _visit(name)
+
+        # Parse in dependency order so nested refs are already registered
+        for name in order:
+            step_data = raw[name]
+            try:
+                shared_step = SharedStep(
+                    name=name,
+                    description=step_data.get("description", ""),
+                    parameters=step_data.get("parameters", []),
+                    steps=self._parse_steps(step_data.get("steps", [])),
+                )
+                self.shared_steps[name] = shared_step
+            except Exception as e:
+                print(f"Warning: Failed to parse shared step '{name}': {e}")
 
     def parse_file(self, file_path: Path) -> TestDefinition:
         """Parse a single YAML test file, loading workspace-local shared steps if present."""
@@ -465,26 +509,53 @@ class YAMLParser:
 
         return steps
 
-    def _expand_shared_step(self, step_data: Dict[str, Any]) -> List[TestStep]:
-        """Expand a shared step into its constituent steps"""
+    def _expand_shared_step(
+        self,
+        step_data: Dict[str, Any],
+        _visited: Optional[frozenset] = None,
+    ) -> List[TestStep]:
+        """Expand a shared step into its constituent steps, recursively.
+
+        Nested shared_step references inside a shared step definition are
+        expanded depth-first.  A frozenset of already-expanding names is
+        threaded through the recursion so circular references raise a clear
+        error rather than causing infinite recursion.
+        """
         shared_step_name = step_data["shared_step"]
         step_parameters = step_data.get("parameters", {})
 
         if shared_step_name not in self.shared_steps:
             raise ValueError(f"Shared step '{shared_step_name}' not found")
 
+        if _visited is None:
+            _visited = frozenset()
+        if shared_step_name in _visited:
+            raise ValueError(
+                f"Circular shared step reference detected: '{shared_step_name}' "
+                f"is already being expanded (chain: {' -> '.join(sorted(_visited))} -> {shared_step_name})"
+            )
+        _visited = _visited | {shared_step_name}
+
         shared_step = self.shared_steps[shared_step_name]
         expanded_steps = []
 
         for step in shared_step.steps:
-            # Create a copy of the step with parameter substitution
-            expanded_step = TestStep(
-                action=step.action,
-                parameters=self._substitute_parameters(
-                    step.parameters, step_parameters
-                ),
-            )
-            expanded_steps.append(expanded_step)
+            # Nested shared step — recurse
+            if step.action == "shared_step" and isinstance(step.parameters, dict) and "shared_step" in step.parameters:
+                nested_data = {
+                    "shared_step": step.parameters["shared_step"],
+                    "parameters": {**step_parameters, **step.parameters.get("parameters", {})},
+                }
+                expanded_steps.extend(self._expand_shared_step(nested_data, _visited))
+            else:
+                expanded_steps.append(
+                    TestStep(
+                        action=step.action,
+                        parameters=self._substitute_parameters(
+                            step.parameters, step_parameters
+                        ),
+                    )
+                )
 
         return expanded_steps
 

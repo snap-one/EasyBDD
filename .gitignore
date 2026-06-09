@@ -108,3 +108,5 @@ test_builder_settings.json
 collections/
 environments/
 tests/
+reports/
+scheduled_tests.json
