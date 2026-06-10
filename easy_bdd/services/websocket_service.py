@@ -155,7 +155,11 @@ class _WSConn:
         # Use compact JSON (no spaces) — matches bdd's json.dumps(separators=(',', ':'))
         if isinstance(data, (dict, list)):
             data = json.dumps(data, separators=(",", ":"))
-        self._ws.send(data)
+        try:
+            self._ws.send(data)
+        except Exception:
+            self._closed = True
+            raise
 
     def receive(self, timeout: float = 10.0, wait_for: Optional[str] = None) -> str:
         """Return the next message.
@@ -240,6 +244,33 @@ _TEXT_AUTH_SIGNALS = ("401", "403", "Unauthorized", "Session Timeout")
 def _is_auth_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(sig in msg for sig in _AUTH_SIGNALS)
+
+
+def _is_stale_connection_error(exc: Exception) -> bool:
+    """Return True when the exception indicates the underlying socket silently dropped."""
+    msg = str(exc).lower()
+    stale_signals = (
+        "socket is already closed",
+        "connection is already closed",
+        "eof occurred",
+        "broken pipe",
+        "connection reset",
+        "connection aborted",
+        "forcibly closed",
+        "transport endpoint is not connected",
+    )
+    if any(sig in msg for sig in stale_signals):
+        return True
+    try:
+        import websocket as _ws_mod
+        if isinstance(exc, _ws_mod.WebSocketConnectionClosedException):
+            return True
+    except ImportError:
+        pass
+    import ssl as _ssl_mod
+    if isinstance(exc, (_ssl_mod.SSLEOFError, BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+        return True
+    return False
 
 
 def _fetch_token(
@@ -534,7 +565,8 @@ class WebSocketService:
             existing = self._pool.acquire(key, lambda: None)
             _is_closed = getattr(existing, "_closed", False)
             _prior_uuid = getattr(existing, "_session_uuid", None)
-            print(f"         🔍 Pool: existing connection found — closed={_is_closed}, session={_prior_uuid}")
+            _status = "closed" if _is_closed else "open"
+            print(f"         🔍 Pool: existing connection found — {_status}, session={_prior_uuid}")
             if _is_closed:
                 prior_uuid = getattr(existing, "_session_uuid", None)
                 if prior_uuid:
@@ -569,6 +601,12 @@ class WebSocketService:
             if reauth and (_is_auth_error(exc) or conn.is_auth_error()):
                 self._do_reauth(reauth, params, variables)
                 new_conn = self._pool.acquire(key, lambda: self._make_conn(url, params, variables))
+                return _attempt(new_conn)
+            if _is_stale_connection_error(exc):
+                print(f"         🔄 Stale connection detected — reconnecting to {url}")
+                new_conn = self._pool.acquire(
+                    key, lambda: self._make_conn(url, reconnect_params, variables)
+                )
                 return _attempt(new_conn)
             raise
 
