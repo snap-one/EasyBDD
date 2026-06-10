@@ -11,7 +11,7 @@ from dataclasses import dataclass, asdict
 @dataclass
 class BrowserConfig:
     default: str = "chrome"
-    headless: bool = False
+    headless: bool = True
     window_size: tuple = (1920, 1080)
     timeout: int = 30
     implicit_wait: int = 10

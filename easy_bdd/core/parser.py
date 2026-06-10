@@ -69,6 +69,7 @@ class TestDefinition:
     async_execution: bool = False
     max_workers: int = 1
     device_config: Optional[str] = None  # Device configuration file reference
+    browsers: Optional[List[str]] = None  # Run test on multiple browsers e.g. [chromium, firefox, webkit]
 
     def __post_init__(self):
         # Ensure all list fields are lists
@@ -360,6 +361,9 @@ class YAMLParser:
         variables = data.get("variables", {})
         data_source = data.get("data_source")
         device_config = data.get("device_config")  # Device configuration file reference
+        browsers = data.get("browsers")  # e.g. [chromium, firefox, webkit]
+        if isinstance(browsers, str):
+            browsers = [b.strip() for b in browsers.split(",") if b.strip()]
 
         # Extract data-driven fields
         test_data = data.get("data", None)
@@ -385,6 +389,7 @@ class YAMLParser:
             async_execution=async_execution,
             max_workers=max_workers,
             device_config=device_config,
+            browsers=browsers,
         )
 
     def _parse_steps(self, steps_data: List[Dict[str, Any]]) -> List[TestStep]:

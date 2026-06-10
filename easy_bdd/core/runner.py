@@ -135,8 +135,9 @@ class TestRunner:
         from .connection_pool import ConnectionPool
         self._connection_pool = ConnectionPool()
         self._eval_state: dict = {}
-        from .run_logger import RunLogger
+        from .run_logger import RunLogger, _fmt_duration
         self._run_logger = RunLogger(log_dir)
+        self._fmt_duration = _fmt_duration
 
         # Load custom actions
         # Load action modules if available
@@ -303,7 +304,7 @@ class TestRunner:
 
         print(f"\n{'='*60}")
         print(f"Test Results: {passed} passed, {failed} failed")
-        print(f"Execution time: {execution_time:.2f} seconds")
+        print(f"Execution time: {self._fmt_duration(execution_time)}")
         print(f"{'='*60}")
 
         # Generate HTML report
@@ -362,6 +363,11 @@ class TestRunner:
                     print(f"      ❌ Failed to load data from {data_file}: {e}")
                     return False
 
+            # Multi-browser run: repeat test for each browser in the list
+            browsers = getattr(test, "browsers", None) or []
+            if len(browsers) > 1:
+                return self._execute_multi_browser_test(test, browsers, test_detail)
+
             # Check for data-driven testing
             if hasattr(test, "data") and test.data:
                 return self._execute_data_driven_test(test)
@@ -371,7 +377,66 @@ class TestRunner:
             print(f"      Test execution failed: {e}")
             return False
 
-    def _execute_data_driven_test(self, test: TestDefinition) -> bool:
+    def _execute_multi_browser_test(
+        self,
+        test: TestDefinition,
+        browsers: List[str],
+        test_detail: Dict[str, Any] = None,
+    ) -> bool:
+        """Run _execute_single_test once per browser; all must pass."""
+        import copy
+
+        all_passed = True
+        results: Dict[str, bool] = {}
+
+        print(f"    🌐 Multi-browser run: {browsers}")
+
+        for browser in browsers:
+            print(f"\n    {'─'*44}")
+            print(f"    🖥  Browser: {browser.upper()}")
+            print(f"    {'─'*44}")
+
+            # Deep-copy the test so each run gets a fresh variable state
+            test_copy = copy.deepcopy(test)
+            # Inject the browser override so BrowserService picks it up
+            if test_copy.variables is None:
+                test_copy.variables = {}
+            test_copy.variables["_browser_override"] = browser
+            # Clear the browsers list so nested call doesn't recurse
+            test_copy.browsers = [browser]
+
+            # Build a per-browser sub-detail that feeds into the parent detail
+            browser_detail: Dict[str, Any] = {
+                "name": f"{test.name} [{browser}]",
+                "browser": browser,
+            }
+
+            if hasattr(test_copy, "data") and test_copy.data:
+                ok = self._execute_data_driven_test(test_copy)
+            else:
+                ok = self._execute_single_test(test_copy, browser_detail)
+
+            results[browser] = ok
+            status = "✅ PASSED" if ok else "❌ FAILED"
+            print(f"    {status} [{browser}]")
+            if not ok:
+                all_passed = False
+
+        # Summary
+        print(f"\n    {'─'*44}")
+        print(f"    Multi-browser results:")
+        for browser, ok in results.items():
+            icon = "✅" if ok else "❌"
+            print(f"      {icon} {browser}")
+
+        if test_detail is not None:
+            test_detail["multi_browser_results"] = {
+                b: ("PASSED" if ok else "FAILED") for b, ok in results.items()
+            }
+
+        return all_passed
+
+
         """Execute test with multiple data sets"""
         all_passed = True
         data_sets = test.data
@@ -937,26 +1002,16 @@ class TestRunner:
                 else:
                     try:
                         # Get test metadata from variables or use defaults
-                        product = (
-                            test.variables.get("product", "Unknown")
-                            if test.variables
-                            else "Unknown"
-                        )
-                        product_category = (
-                            test.variables.get("product_category", "Test")
-                            if test.variables
-                            else "Test"
-                        )
+                        _tvars = test.variables or {}
+                        product = _tvars.get("product", "Unknown")
+                        product_category = _tvars.get("product_category", "Test")
+                        # Accept both 'mac_address' and 'mac' variable names
                         mac_address = (
-                            test.variables.get("mac_address", "00:00:00:00:00:00")
-                            if test.variables
-                            else "00:00:00:00:00:00"
+                            _tvars.get("mac_address")
+                            or _tvars.get("mac")
+                            or "00:00:00:00:00:00"
                         )
-                        time_savings = (
-                            test.variables.get("time_savings", 5.0)
-                            if test.variables
-                            else 5.0
-                        )
+                        time_savings = _tvars.get("time_savings", 5.0)
 
                         # Get console output (captured during test)
                         console = console_output.getvalue() if console_output else ""
@@ -3786,8 +3841,9 @@ class TestRunner:
                 button = params.get("button", "")
                 role = params.get("role", "")
                 name = params.get("name", "")
+                label = params.get("label", "")
                 service.click_element(
-                    selector=selector, text=text, button=button, role=role, name=name
+                    selector=selector, text=text, button=button, role=role, name=name, label=label
                 )
                 return True
 
@@ -3974,6 +4030,20 @@ class TestRunner:
                 timeout = self._get_param(step_params, "timeout", 10000)
                 print(f"      Asserting element '{selector}' count equals {count}")
                 service.assert_element_count(selector, count, timeout=timeout)
+                return True
+
+            elif action in ("browser.assert_checked", "test.assert_checked") or (hasattr(service, "assert_checked") and "assert" in action and "checked" in action and "un" not in action):
+                selector = self._get_param(step_params, "selector", "")
+                timeout = self._get_param(step_params, "timeout", 10000)
+                print(f"      Asserting element '{selector}' is checked")
+                service.assert_checked(selector, timeout=timeout)
+                return True
+
+            elif action in ("browser.assert_unchecked", "test.assert_unchecked") or (hasattr(service, "assert_unchecked") and "assert" in action and "unchecked" in action):
+                selector = self._get_param(step_params, "selector", "")
+                timeout = self._get_param(step_params, "timeout", 10000)
+                print(f"      Asserting element '{selector}' is unchecked")
+                service.assert_unchecked(selector, timeout=timeout)
                 return True
 
             elif "wait" in action:

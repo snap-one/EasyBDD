@@ -1,8 +1,8 @@
 config:
   browser:
     default: "chrome"
-    headless: false
-    headed: true  # Explicitly show browser window
+    headless: true
+    headed: false  # Explicitly show browser window
     window_size: [1920, 1080]
     timeout: 30
     implicit_wait: 10
@@ -118,7 +118,7 @@ config:
   
   # Datalake logging configuration
   datalake:
-    enabled: false  # Set to false to disable all datalake logging
+    enabled: true  # Set to false to disable all datalake logging
     post_on_failure_only: false  # Set to true to only log failed tests
   
   parallel:

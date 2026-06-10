@@ -107,10 +107,10 @@ class RunLogger:
         self._info(f"\nExecuting: {name}")
 
     def test_pass(self, name: str, elapsed: float) -> None:
-        self._info(f"  ✅ PASSED: {name} ({elapsed:.1f}s)")
+        self._info(f"  ✅ PASSED: {name} ({_fmt_duration(elapsed)})")
 
     def test_fail(self, name: str, elapsed: float) -> None:
-        self._info(f"  ❌ FAILED: {name} ({elapsed:.1f}s)")
+        self._info(f"  ❌ FAILED: {name} ({_fmt_duration(elapsed)})")
 
     def phase(self, label: str) -> None:
         self._info(f"\n    === {label} ===")
@@ -134,7 +134,7 @@ class RunLogger:
     def step_pass(self, n: int, variables: Dict[str, Any], prev_response: Any) -> None:
         elapsed = time.time() - self._step_start_time
         _log_response(self._info, variables, prev_response)
-        self._info(f"    ✅ Step {n} passed ({elapsed:.2f}s)")
+        self._info(f"    ✅ Step {n} passed ({_fmt_duration(elapsed)})")
 
     def step_fail(
         self,
@@ -145,7 +145,7 @@ class RunLogger:
         traceback_str: str = "",
     ) -> None:
         elapsed = time.time() - self._step_start_time
-        self._warn(f"\n    ❌ STEP {n} FAILED: {action} ({elapsed:.2f}s)")
+        self._warn(f"\n    ❌ STEP {n} FAILED: {action} ({_fmt_duration(elapsed)})")
         if error:
             self._warn(f"    Error: {error}")
         if details:
@@ -219,6 +219,27 @@ def _log_response(log_fn, variables: Dict[str, Any], prev_response: Any) -> None
                 log_fn(f"    response_dict:\n{_indent(dict_str, '      ')}")
             except Exception:
                 pass
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format a duration into a human-readable string.
+
+    Examples:
+        9.5   → '9.50s'
+        300.1 → '5m 00.10s'
+        3750  → '1h 02m 30.00s'
+    """
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+    elif seconds < 3600:
+        m = int(seconds // 60)
+        s = seconds % 60
+        return f"{m}m {s:05.2f}s"
+    else:
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = seconds % 60
+        return f"{h}h {m:02d}m {s:05.2f}s"
 
 
 def _truncate(s: str, n: int) -> str:

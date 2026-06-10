@@ -442,7 +442,7 @@ class GlobalConfigManager:
             "config": {
                 "browser": {
                     "default": "chrome",
-                    "headless": False,
+                    "headless": True,
                     "timeout": 30,
                 },
                 "api": {
