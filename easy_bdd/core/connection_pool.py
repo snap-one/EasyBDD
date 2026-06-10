@@ -25,6 +25,10 @@ class ConnectionPool:
             self._pool[key] = factory()
         return self._pool[key]
 
+    def has(self, key: str) -> bool:
+        """Return True if a live connection already exists for key."""
+        return key in self._pool
+
     def evict(self, key: str) -> None:
         """Close and remove a connection from the pool."""
         conn = self._pool.pop(key, None)

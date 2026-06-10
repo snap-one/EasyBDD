@@ -1132,6 +1132,9 @@ class TestRunner:
         elif service_type == "telnet":
             from ..services.telnet_service import TelnetService
             return TelnetService(self._connection_pool)
+        elif service_type == "websocket":
+            from ..services.websocket_service import WebSocketService
+            return WebSocketService(self._connection_pool)
         elif service_type == "eval":
             return None  # eval actions are handled directly in _execute_custom_action
         else:
@@ -1155,6 +1158,19 @@ class TestRunner:
                     soft_assert_manager.raise_if_failures()
                 else:
                     print("      ✓ No soft assertion failures")
+                return True
+
+            # Sleep / wait action (no browser required)
+            if action_lower in ["test.sleep", "sleep", "test.wait", "wait"]:
+                params = self._get_params(step_params)
+                seconds = float(
+                    params.get("seconds")
+                    or params.get("duration")
+                    or params.get("timeout")
+                    or 1
+                )
+                print(f"      ⏳ Sleeping {seconds}s...")
+                time.sleep(seconds)
                 return True
 
             # Custom assertion actions (support both formats)
@@ -1213,6 +1229,10 @@ class TestRunner:
             if action_lower.startswith("telnet"):
                 return self._handle_telnet_action(action, step_params, variables)
 
+            # WebSocket actions
+            if action_lower.startswith("websocket") or action_lower.startswith("ws."):
+                return self._handle_websocket_action(action, step_params, variables)
+
             # Eval actions (session-stateful Python execution)
             if action_lower.startswith("eval"):
                 return self._handle_eval_action(action, step_params, variables)
@@ -1249,6 +1269,18 @@ class TestRunner:
             # Re-raise eval failures — they should not silently fall through to
             # the browser handler which would report a confusing "Unknown action" error.
             if action_lower_check.startswith("eval"):
+                raise
+            # Re-raise assert/websocket/telnet/serial failures so they propagate
+            # as proper step failures rather than "Unknown action" browser fallthrough.
+            if (
+                action_lower_check in ("assert", "test.assert", "assert json schema",
+                                       "test.assert_schema", "assert response",
+                                       "test.assert_response")
+                or action_lower_check.startswith("websocket")
+                or action_lower_check.startswith("ws.")
+                or action_lower_check.startswith("telnet")
+                or action_lower_check.startswith("serial")
+            ):
                 raise
             print(f"      Warning: Custom action '{action}' failed: {e}")
             return False
@@ -2869,6 +2901,82 @@ class TestRunner:
         print(f"      telnet: {action.split('.')[-1]} OK")
         return True
 
+    def _handle_websocket_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle websocket actions (websocket.connect, websocket.send, websocket.receive, websocket.close)."""
+        import json as _json
+        from ..services.websocket_service import WebSocketService
+        params = self._get_params(step_params)
+        # Reuse the same WebSocketService instance across steps so the token
+        # cache and connection pool are shared for the duration of the test.
+        if not hasattr(self, "_websocket_service"):
+            self._websocket_service = WebSocketService(self._connection_pool)
+        service = self._websocket_service
+        action_verb = action.split(".")[-1].lower()
+        url = params.get("url", "")
+
+        # --- pre-call logging ---
+        if action_verb == "connect":
+            protos = params.get("subprotocols") or params.get("protocol") or []
+            if isinstance(protos, str):
+                protos = [p.strip() for p in protos.split(",") if p.strip()]
+            print(f"      🔌 websocket.connect → {url}")
+            if protos:
+                print(f"         subprotocols: {protos}")
+            hdrs = {k: v for k, v in (params.get("headers") or {}).items()
+                    if k.lower() != "authorization"}
+            if hdrs:
+                print(f"         headers: {hdrs}")
+        elif action_verb == "send":
+            data = params.get("data", "")
+            method = params.get("method")
+            print(f"      📤 websocket.send → {url}")
+            if method:
+                print(f"         method (JSON-RPC): {method}")
+            if data:
+                try:
+                    payload_str = _json.dumps(data, indent=2) if isinstance(data, (dict, list)) else str(data)
+                    # Indent each line for alignment
+                    indented = "\n".join("         " + ln for ln in payload_str.splitlines())
+                    print(f"         payload:\n{indented}")
+                except Exception:
+                    print(f"         payload: {data}")
+        elif action_verb in ("receive", "read"):
+            print(f"      📥 websocket.receive ← {url}")
+        elif action_verb == "close":
+            print(f"      🔒 websocket.close → {url}")
+
+        result = service.execute(action, params, variables)
+        if result is False:
+            return False
+
+        # --- post-call logging ---
+        if isinstance(result, str) and result:
+            variables["last_response"] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable("last_response", result, "runtime_data")
+            # Pretty-print response
+            try:
+                parsed = _json.loads(result)
+                resp_str = _json.dumps(parsed, indent=2)
+            except Exception:
+                resp_str = result
+            indented = "\n".join("         " + ln for ln in resp_str.splitlines())
+            print(f"      📥 response:\n{indented}")
+
+        store_as = params.get("store_as", "")
+        if store_as and result is not None:
+            variables[store_as] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, result, "runtime_data")
+            if store_as != "last_response":
+                print(f"         stored as: {store_as}")
+
+        if action_verb not in ("send", "receive", "read"):
+            print(f"      ✅ websocket.{action_verb} OK")
+        return True
+
     def _handle_eval_action(
         self, action: str, step_params: dict, variables: dict
     ) -> bool:
@@ -3869,13 +3977,21 @@ class TestRunner:
                 return True
 
             elif "wait" in action:
-                wait_time = self._get_param(step_params, "time", 1)
+                params = self._get_params(step_params)
+                wait_time = (
+                    params.get("seconds")
+                    or params.get("duration")
+                    or params.get("time")
+                    or 1
+                )
                 if isinstance(wait_time, str):
                     try:
                         wait_time = float(wait_time)
                     except ValueError:
                         wait_time = 1
-                print(f"      Waiting {wait_time} seconds...")
+                else:
+                    wait_time = float(wait_time)
+                print(f"      ⏳ Sleeping {wait_time}s...")
                 time.sleep(wait_time)
                 return True
 

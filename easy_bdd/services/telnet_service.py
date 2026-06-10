@@ -15,6 +15,10 @@ Example:
     - action: telnet.connect
       host: 192.168.1.1
       port: 23
+      username: admin
+      password: secret
+      username_prompt: "Username:"
+      password_prompt: "Password:"
       timeout: 10.0
 
     - action: telnet.send
@@ -26,6 +30,17 @@ Example:
 
     - action: telnet.close
       host: 192.168.1.1
+
+Login shortcut (no explicit telnet.connect required):
+  steps:
+    - telnet.send:
+        host: 192.168.1.1
+        port: 23
+        username: admin
+        password: secret
+        command: ?Firmware
+        prompt: ">"
+        store_as: fw_response
 """
 
 import socket
@@ -78,6 +93,36 @@ class _TelnetConn:
                 self._sock.sendall(response)
         except (socket.timeout, OSError):
             pass
+
+    def _login(
+        self,
+        username: str,
+        password: str,
+        username_prompt: str = "Username:",
+        password_prompt: str = "Password:",
+        timeout: float = 10.0,
+        encoding: str = "utf-8",
+    ) -> str:
+        """Send username and password in response to login prompts.
+
+        Waits for username_prompt, sends username, waits for password_prompt,
+        sends password.  Returns all output accumulated during the handshake.
+        """
+        output = ""
+        # Wait for the username prompt (device may send it before we do anything)
+        chunk = self.read_until(username_prompt, timeout, encoding)
+        output += chunk
+        self.send(username + "\n", encoding)
+        chunk = self.read_until(password_prompt, timeout, encoding)
+        output += chunk
+        self.send(password + "\n", encoding)
+        # Small drain after password to consume any welcome banner
+        try:
+            chunk = self.read_available(timeout=2.0, encoding=encoding)
+            output += chunk
+        except Exception:
+            pass
+        return output
 
     def send(self, data: str, encoding: str = "utf-8") -> None:
         raw = data.encode(encoding) if isinstance(data, str) else data
@@ -162,10 +207,26 @@ class TelnetService:
         host = params.get("host", "")
         port = int(params.get("port", 23))
         timeout = float(params.get("timeout", 10.0))
+        username = params.get("username", "")
+        password = params.get("password", "")
+        username_prompt = params.get("username_prompt", "Username:")
+        password_prompt = params.get("password_prompt", "Password:")
+        encoding = params.get("encoding", "utf-8")
         if not host:
             raise ValueError("telnet.connect requires 'host'")
         key = _pool_key(host, port)
-        self._pool.acquire(key, lambda: _TelnetConn(host, port, timeout))
+        is_new = not self._pool.has(key)
+        conn: _TelnetConn = self._pool.acquire(
+            key, lambda: _TelnetConn(host, port, timeout)
+        )
+        if is_new and username:
+            conn._login(
+                username, password,
+                username_prompt=username_prompt,
+                password_prompt=password_prompt,
+                timeout=timeout,
+                encoding=encoding,
+            )
         return True
 
     def _send(self, params: Dict[str, Any]) -> str:
@@ -175,13 +236,27 @@ class TelnetService:
         prompt = params.get("prompt", "#")
         timeout = float(params.get("timeout", 10.0))
         encoding = params.get("encoding", "utf-8")
+        username = params.get("username", "")
+        password = params.get("password", "")
+        username_prompt = params.get("username_prompt", "Username:")
+        password_prompt = params.get("password_prompt", "Password:")
         if not host:
             raise ValueError("telnet.send requires 'host'")
         key = _pool_key(host, port)
+        is_new = not self._pool.has(key)
         conn: _TelnetConn = self._pool.acquire(
             key, lambda: _TelnetConn(host, port, timeout)
         )
         try:
+            # If credentials supplied and this is a fresh connection, log in first
+            if is_new and username:
+                conn._login(
+                    username, password,
+                    username_prompt=username_prompt,
+                    password_prompt=password_prompt,
+                    timeout=timeout,
+                    encoding=encoding,
+                )
             data = command if command.endswith("\n") else command + "\n"
             conn.send(data, encoding)
             return conn.read_until(prompt, timeout, encoding)
