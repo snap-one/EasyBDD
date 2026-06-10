@@ -15,7 +15,9 @@ Parameters shared across actions:
   timeout        — seconds to wait for a response (default 10.0)
   headers        — dict of extra request headers (optional)
   store_as       — variable name to store the received message (optional)
-  verify_ssl     — set false to skip TLS certificate verification (default true)
+  verify_ssl     — set false to skip TLS certificate verification (default true).
+                   Also read from test variables: ovrc_verify_ssl, ws_verify_ssl, verify_ssl.
+                   For firmware.testing.ovrc.com set verify_ssl: false (testing cert).
 
 websocket.send parameters:
   data           — message to send; dict/list is JSON-serialised automatically
@@ -26,8 +28,9 @@ websocket.send parameters:
 
 Automatic token re-authentication:
   When the server closes the connection with an auth-related close code (4001,
-  4003, 4401) or the connection/send raises an error containing "unauthorized",
-  "forbidden", or "token", the service will:
+  4003, 4401), raises an error containing "unauthorized"/"forbidden"/"token", OR
+  the response body contains "401"/"403"/"Unauthorized"/"Session Timeout" (OVRC
+  returns auth errors as JSON text, not WebSocket close frames), the service will:
     1. POST to auth_url with {"username": auth_username, "password": auth_password}
     2. Extract the new token from the response (looks for "token", "access_token",
        or "accessToken" keys at the top level or inside a "data" wrapper)
@@ -73,7 +76,6 @@ Examples:
 
 import json
 import ssl
-import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -88,12 +90,12 @@ def _pool_key(url: str) -> str:
 
 
 class _WSConn:
-    """Synchronous WebSocket connection wrapper.
+    """Synchronous WebSocket connection using websocket.WebSocket (blocking recv).
 
-    Supports:
-    - Optional subprotocols (e.g. ["firmware-protocol", session_id])
-    - Optional extra headers (e.g. Origin, Authorization)
-    - SSL with optional verification skip
+    Using the synchronous API ensures that when the server sends a response
+    frame and immediately closes the TCP connection, recv() returns the
+    response frame before raising the close exception — eliminating the race
+    condition that exists with the async WebSocketApp callback approach.
     """
 
     def __init__(
@@ -114,96 +116,104 @@ class _WSConn:
 
         self._url = url
         self._timeout = timeout
-        self._messages: List[str] = []
-        self._lock = threading.Lock()
-        self._connected = threading.Event()
-        self._error: Optional[Exception] = None
         self._close_code: Optional[int] = None
-        self._close_msg: str = ""
+        self._closed: bool = False
+        # Session identity — populated by _make_conn
+        self._session_uuid: str = str(uuid.uuid4())
+        self._msg_counter: int = 0
 
         # Build header list; add Origin if missing
         hdr = dict(headers or {})
         if "Origin" not in hdr and "origin" not in hdr:
             parsed = urlparse(url)
             scheme = "https" if parsed.scheme == "wss" else "http"
-            hdr["Origin"] = f"{scheme}://{parsed.netloc}"
+            # Use hostname only (no port) — matches the browser Origin which is always
+            # the scheme+host of the serving page, not the WebSocket target port.
+            hdr["Origin"] = f"{scheme}://{parsed.hostname}"
         header_list = [f"{k}: {v}" for k, v in hdr.items()]
 
-        run_kwargs: Dict[str, Any] = {"ping_interval": 20, "ping_timeout": 10}
+        sslopt: Dict[str, Any] = {}
         if not verify_ssl and url.startswith("wss://"):
-            ssl_ctx = ssl.create_default_context()
-            ssl_ctx.check_hostname = False
-            ssl_ctx.verify_mode = ssl.CERT_NONE
-            run_kwargs["sslopt"] = {"cert_reqs": ssl.CERT_NONE, "ssl_version": ssl.PROTOCOL_TLS}
+            sslopt = {"cert_reqs": ssl.CERT_NONE}
 
-        create_kwargs: Dict[str, Any] = {
-            "header": header_list,
-            "on_open": self._on_open,
-            "on_message": self._on_message,
-            "on_error": self._on_error,
-            "on_close": self._on_close,
-        }
+        self._ws = websocket.WebSocket(sslopt=sslopt)
+        self._ws.settimeout(timeout)
+        connect_kwargs: Dict[str, Any] = {"header": header_list}
         if subprotocols:
-            create_kwargs["subprotocols"] = subprotocols
+            connect_kwargs["subprotocols"] = subprotocols
 
-        self._ws = websocket.WebSocketApp(url, **create_kwargs)
-        self._thread = threading.Thread(
-            target=self._ws.run_forever,
-            kwargs=run_kwargs,
-            daemon=True,
-        )
-        self._thread.start()
-        if not self._connected.wait(timeout=timeout):
-            self._ws.close()
-            raise ConnectionError(f"WebSocket connection timed out: {url}")
-        if self._error:
-            raise self._error
-
-    def _on_open(self, ws):
-        self._connected.set()
-        print(f"         ✅ WebSocket connected: {self._url}")
-
-    def _on_message(self, ws, message):
-        with self._lock:
-            self._messages.append(message)
-
-    def _on_error(self, ws, error):
-        self._error = error
-        print(f"         ⚠️  WebSocket error: {error}")
-        self._connected.set()  # unblock the wait in __init__
-
-    def _on_close(self, ws, close_status_code, close_msg):
-        self._close_code = close_status_code
-        self._close_msg = close_msg or ""
-        if close_status_code:
-            print(f"         🔒 WebSocket closed: code={close_status_code} msg={close_msg or ''}")
+        self._ws.connect(url, **connect_kwargs)
+        print(f"         ✅ WebSocket connected: {url}")
+        if subprotocols:
+            print(f"         subprotocols: {subprotocols}")
 
     def send(self, data: Any) -> None:
         if isinstance(data, (dict, list)):
             data = json.dumps(data)
         self._ws.send(data)
 
-    def receive(self, timeout: float = 10.0, wait_for: Optional[str] = None) -> Optional[str]:
-        """Return the next message, optionally waiting for one containing wait_for."""
+    def receive(self, timeout: float = 10.0, wait_for: Optional[str] = None) -> str:
+        """Return the next message.
+
+        Uses a blocking recv() with settimeout so the frame that arrives
+        just before the server closes is always returned correctly.
+        Collects frames until wait_for is satisfied (or timeout).
+        """
+        import websocket
+
+        self._ws.settimeout(timeout)
         deadline = time.time() + timeout
         while time.time() < deadline:
-            with self._lock:
-                if wait_for:
-                    for i, msg in enumerate(self._messages):
-                        if wait_for in msg:
-                            return self._messages.pop(i)
-                elif self._messages:
-                    return self._messages.pop(0)
-            # Stop waiting if the connection has errored or the background thread died
-            if self._error is not None or not self._thread.is_alive():
-                break
-            time.sleep(0.05)
-        # Return any buffered message even if the connection dropped
-        with self._lock:
-            return self._messages.pop(0) if self._messages else ""
+            remaining = max(0.1, deadline - time.time())
+            self._ws.settimeout(remaining)
+            try:
+                msg = self._ws.recv()
+            except websocket.WebSocketTimeoutException:
+                return ""
+            except websocket.WebSocketConnectionClosedException as _wce:
+                self._closed = True
+                # Try to capture the close code and reason from the exception
+                _close_status = getattr(_wce, 'status_code', None) or getattr(self._ws, 'status', None)
+                _close_msg = str(_wce) if str(_wce) else getattr(self._ws, 'close_msg', b'')
+                if hasattr(_close_msg, 'decode'):
+                    _close_msg = _close_msg.decode('utf-8', errors='replace')
+                if _close_status:
+                    print(f"         🔒 WebSocket closed by server (code={_close_status}, reason={_close_msg!r})")
+                    self._close_code = int(_close_status) if str(_close_status).isdigit() else self._close_code
+                else:
+                    print(f"         🔒 WebSocket closed by server (reason={_close_msg!r})")
+                return ""
+            except Exception as e:
+                self._closed = True
+                print(f"         ⚠️  WebSocket error during recv: {e}")
+                return ""
+
+            if msg is None or msg == "":
+                self._closed = True
+                print(f"         🔒 WebSocket connection ended")
+                return ""
+
+            # Log the received frame
+            try:
+                parsed = json.loads(msg)
+                pretty = json.dumps(parsed, indent=2)
+                # Capture close code from JSON-RPC error responses
+                if isinstance(parsed, dict) and "error" in parsed:
+                    code = parsed["error"].get("code")
+                    if code in (4001, 4003, 4401):
+                        self._close_code = code
+            except Exception:
+                pretty = msg
+            indented = "\n".join("         " + ln for ln in pretty.splitlines())
+            print(f"         📩 WebSocket frame received:\n{indented}")
+
+            if wait_for is None or wait_for in msg:
+                return msg
+            # Got a frame but not the one we want — keep reading
+
+        return ""
 
     def is_auth_error(self) -> bool:
-        """Return True if the connection was closed with an auth-related code."""
         return self._close_code in (4001, 4003, 4401)
 
     def close(self) -> None:
@@ -211,10 +221,15 @@ class _WSConn:
             self._ws.close()
         except Exception:
             pass
+        self._closed = True
 
 
 # Auth-error signals in exception messages
 _AUTH_SIGNALS = ("unauthorized", "forbidden", "token", "auth", "401", "403")
+
+# Auth-error signals in response TEXT (OVRC returns these inside the JSON body rather than
+# as a WebSocket close frame — mirrors bdd's execute_webservice check)
+_TEXT_AUTH_SIGNALS = ("401", "403", "Unauthorized", "Session Timeout")
 
 
 def _is_auth_error(exc: Exception) -> bool:
@@ -352,10 +367,16 @@ class WebSocketService:
     # Connection factory                                                   #
     # ------------------------------------------------------------------ #
 
-    def _make_conn(self, url: str, params: Dict[str, Any]) -> "_WSConn":
+    def _make_conn(self, url: str, params: Dict[str, Any], variables: Optional[Dict[str, Any]] = None) -> "_WSConn":
         timeout = float(params.get("timeout", 10.0))
         headers = dict(params.get("headers") or {})
-        verify_ssl = bool(params.get("verify_ssl", True))
+        # verify_ssl: check params first, then test variables (ovrc_verify_ssl / ws_verify_ssl),
+        # then fall back to True.  Matches bdd's sslopt variable lookup.
+        _vars = variables or {}
+        verify_ssl = params.get("verify_ssl")
+        if verify_ssl is None:
+            verify_ssl = _vars.get("ovrc_verify_ssl", _vars.get("ws_verify_ssl", _vars.get("verify_ssl", True)))
+        verify_ssl = bool(verify_ssl)
 
         # Inject cached token if no Authorization header set yet
         auth_url = params.get("auth_url", "")
@@ -366,11 +387,36 @@ class WebSocketService:
         if isinstance(raw_protos, str):
             raw_protos = [p.strip() for p in raw_protos.split(",") if p.strip()]
 
-        # Auto-append session UUID alongside named protocols
-        if raw_protos and not any(_looks_like_uuid(p) for p in raw_protos):
-            raw_protos = list(raw_protos) + [str(uuid.uuid4())]
+        # Determine the session identifier (used as the second subprotocol and message-ID prefix).
+        # OvrC firmware servers require the auth token as the second subprotocol, not a random UUID.
+        if len(raw_protos) >= 2:
+            # Caller already supplied a second protocol (UUID or auth token) — use it as-is.
+            session_uuid = raw_protos[1]
+        elif len(raw_protos) == 1:
+            # Only one named protocol; append a session identifier.
+            # Priority: explicit session_token param > Bearer token from Authorization header > new UUID.
+            session_token = params.get("session_token", "")
+            if not session_token:
+                auth_hdr = headers.get("Authorization", "")
+                if auth_hdr.startswith("Bearer "):
+                    session_token = auth_hdr[7:]
+            if not session_token:
+                session_token = str(uuid.uuid4())
+            raw_protos = list(raw_protos) + [session_token]
+            session_uuid = session_token
+        else:
+            session_uuid = str(uuid.uuid4())
 
-        return _WSConn(url, headers, timeout, raw_protos or None, verify_ssl)
+        conn = _WSConn(url, headers, timeout, raw_protos or None, verify_ssl)
+        conn._session_uuid = session_uuid
+        # Preserve params so a later implicit reconnect reuses the SAME sessionId/subprotocols.
+        # Overwrite 'subprotocols' with the fully-expanded list (including the session UUID) so
+        # that a reconnect via _creation_params hits the `len >= 2` branch and keeps the same UUID
+        # rather than generating a fresh one — the OvrC server tracks device sessions by sessionId.
+        params_with_session = dict(params)
+        params_with_session["subprotocols"] = list(raw_protos) if raw_protos else []
+        conn._creation_params = params_with_session
+        return conn
 
     # ------------------------------------------------------------------ #
     # Actions                                                              #
@@ -381,16 +427,21 @@ class WebSocketService:
         if not url:
             raise ValueError("websocket.connect requires 'url'")
         key = _pool_key(url)
+        # Evict if the pooled connection is already closed
         if self._pool.has(key):
-            return True
+            existing = self._pool.acquire(key, lambda: None)
+            if getattr(existing, "_closed", False):
+                self._pool.evict(key)
+            else:
+                return True
         reauth = self._reauth_params(params)
         try:
-            self._pool.acquire(key, lambda: self._make_conn(url, params))
+            self._pool.acquire(key, lambda: self._make_conn(url, params, variables))
         except Exception as exc:
             if reauth and _is_auth_error(exc):
                 self._do_reauth(reauth, params, variables)
                 self._pool.evict(key)
-                self._pool.acquire(key, lambda: self._make_conn(url, params))
+                self._pool.acquire(key, lambda: self._make_conn(url, params, variables))
             else:
                 raise
         return True
@@ -404,37 +455,104 @@ class WebSocketService:
         if not url:
             raise ValueError("websocket.send requires 'url'")
 
+        # Normalize URL: when method is set (JSON-RPC mode) the method name is sent in
+        # the payload, not the URL path.  Strip any trailing "/{method}" so that
+        # `url: ${url}/dxUpdateFirmware, method: dxUpdateFirmware` connects to the
+        # correct base WebSocket endpoint (e.g. wss://firmware.testing.ovrc.com:10444).
+        if method:
+            suffix = f"/{method}"
+            if url.endswith(suffix):
+                url = url[: -len(suffix)]
+                print(f"         ℹ️  Stripped method path from URL → {url}")
+
         reauth = self._reauth_params(params)
 
-        def _build_payload():
+        def _build_payload(conn: "_WSConn"):
             if method:
+                # Use server-expected id format: {session_uuid}|{session_uuid}|{counter}
+                conn._msg_counter += 1
+                msg_id = f"{conn._session_uuid}|{conn._session_uuid}|{conn._msg_counter}"
+                # Accept dict directly, or parse a JSON string into a dict for params
+                if isinstance(data, dict):
+                    params_val = data
+                elif isinstance(data, str) and data.strip():
+                    try:
+                        params_val = json.loads(data)
+                    except (json.JSONDecodeError, ValueError):
+                        params_val = {}
+                else:
+                    params_val = {}
                 return {
                     "jsonrpc": "2.0",
                     "method": method,
-                    "id": str(uuid.uuid4()),
-                    "params": data if isinstance(data, dict) else {},
+                    "id": msg_id,
+                    "params": params_val,
                 }
             return data
 
         def _attempt(conn: "_WSConn") -> str:
-            conn.send(_build_payload())
+            payload = _build_payload(conn)
+            payload_str = json.dumps(payload, indent=2) if isinstance(payload, (dict, list)) else str(payload)
+            indented = "\n".join("         " + ln for ln in payload_str.splitlines())
+            print(f"         📨 Sending payload:\n{indented}")
+            conn.send(payload)
             response = conn.receive(timeout=timeout, wait_for=wait_for)
             # Treat empty response on a connection that was auth-closed as an error
             if response == "" and conn.is_auth_error():
                 raise ConnectionError("WebSocket closed with auth error")
+            # Check for text-based auth errors in response body (OVRC returns these as JSON
+            # text rather than WebSocket close frames — mirrors bdd's execute_webservice check)
+            if response and any(sig in response for sig in _TEXT_AUTH_SIGNALS):
+                raise ConnectionError(f"Auth error in WebSocket response: {response[:200]}")
+            if not response:
+                print(f"         ⚠️  No response received (timeout={timeout}s)")
             return response if response is not None else ""
 
         key = _pool_key(url)
+        # Evict stale closed connections so we reconnect fresh.
+        # If the prior connection for this URL was closed by the server (e.g. after dxGetAbout
+        # responded), carry its session UUID forward so the server recognises the same session
+        # when we reconnect for the next command (e.g. dxUpdateFirmware).
+        reconnect_params = params
+        if self._pool.has(key):
+            existing = self._pool.acquire(key, lambda: None)
+            _is_closed = getattr(existing, "_closed", False)
+            _prior_uuid = getattr(existing, "_session_uuid", None)
+            print(f"         🔍 Pool: existing connection found — closed={_is_closed}, session={_prior_uuid}")
+            if _is_closed:
+                prior_uuid = getattr(existing, "_session_uuid", None)
+                if prior_uuid:
+                    # Inject prior session UUID as the second subprotocol so the OvrC server
+                    # recognises this reconnect as part of the same logical session.
+                    reconnect_params = dict(params)
+                    protos = reconnect_params.get("subprotocols") or reconnect_params.get("protocol") or []
+                    if isinstance(protos, str):
+                        protos = [p.strip() for p in protos.split(",") if p.strip()]
+                    protos = list(protos)
+                    if len(protos) >= 2:
+                        protos[1] = prior_uuid          # replace whatever is there
+                    elif len(protos) == 1:
+                        protos.append(prior_uuid)       # add to named protocol
+                    else:
+                        protos = [prior_uuid]
+                    reconnect_params["subprotocols"] = protos
+                    reconnect_params["session_token"] = prior_uuid  # skip UUID generation
+                self._pool.evict(key)
         conn: _WSConn = self._pool.acquire(
-            key, lambda: self._make_conn(url, params)
+            key, lambda: self._make_conn(url, reconnect_params, variables)
         )
+
         try:
-            return _attempt(conn)
+            result = _attempt(conn)
+            # Evict if the server closed the connection during this send
+            if getattr(conn, "_closed", False):
+                self._pool.evict(key)
+            return result
         except Exception as exc:
             self._pool.evict(key)
-            if reauth and (_is_auth_error(exc) or (hasattr(conn, "is_auth_error") and conn.is_auth_error())):
+            if reauth and (_is_auth_error(exc) or conn.is_auth_error()):
                 self._do_reauth(reauth, params, variables)
-                new_conn = self._pool.acquire(key, lambda: self._make_conn(url, params))
+                new_conn = self._pool.acquire(key, lambda: self._make_conn(url, params, variables))
                 return _attempt(new_conn)
             raise
 
@@ -447,7 +565,7 @@ class WebSocketService:
         key = _pool_key(url)
         reauth = self._reauth_params(params)
         conn: _WSConn = self._pool.acquire(
-            key, lambda: self._make_conn(url, params)
+            key, lambda: self._make_conn(url, params, variables)
         )
         try:
             response = conn.receive(timeout=timeout, wait_for=wait_for)
@@ -458,7 +576,7 @@ class WebSocketService:
             self._pool.evict(key)
             if reauth and _is_auth_error(exc):
                 self._do_reauth(reauth, params, variables)
-                new_conn = self._pool.acquire(key, lambda: self._make_conn(url, params))
+                new_conn = self._pool.acquire(key, lambda: self._make_conn(url, params, variables))
                 return new_conn.receive(timeout=timeout, wait_for=wait_for) or ""
             raise
 
