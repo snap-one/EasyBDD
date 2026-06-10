@@ -2853,13 +2853,19 @@ class TestRunner:
         params = self._get_params(step_params)
         service = TelnetService(self._connection_pool)
         result = service.execute(action, params, variables)
+        if result is False:
+            return False
+        # Always store string responses as last_response so downstream steps
+        # (eval.exec, test.assert, etc.) can reference the device output.
+        if isinstance(result, str) and result:
+            variables["last_response"] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable("last_response", result, "runtime_data")
         store_as = params.get("store_as", "")
         if store_as and result is not None:
             variables[store_as] = result
             if hasattr(self.config, "set_variable"):
                 self.config.set_variable(store_as, result, "runtime_data")
-        if result is False:
-            return False
         print(f"      telnet: {action.split('.')[-1]} OK")
         return True
 

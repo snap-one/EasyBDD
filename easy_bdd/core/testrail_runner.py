@@ -223,6 +223,24 @@ def _extract_inline_data(text: str):
         return None, text
 
 
+def _normalize_shared_step_refs(steps: List[Any]) -> List[Any]:
+    """Normalize ``shared_step`` reference names in a steps list to slug format.
+
+    When a Keyword: case body references another keyword with spaces or special
+    characters (e.g. ``- shared_step: Connect to Device``), the reference must
+    match the slugified key used in shared_steps.yaml
+    (``Connect_to_Device``).  This function rewrites every ``shared_step``
+    value in the list so it uses the same slug format.
+    """
+    result = []
+    for step in steps:
+        if isinstance(step, dict) and isinstance(step.get("shared_step"), str):
+            slug = _re_mod.sub(r"[^A-Za-z0-9_]+", "_", step["shared_step"]).strip("_")
+            step = {**step, "shared_step": slug}
+        result.append(step)
+    return result
+
+
 def _fix_step_list_indent(text: str) -> str:
     """Re-indent step parameters that appear at the same level as their '-' marker.
 
@@ -603,11 +621,9 @@ class TestRailRunner:
         # Setup artifact directory
         self._artifact_dir.mkdir(parents=True, exist_ok=True)
 
-        # Extract Var: variables and merge with run_vars.extra
-        injected_vars = self._extract_vars(classified)
-        injected_vars.update(run_vars.extra)
-        if verbose and injected_vars:
-            print(f"[TestRail] Injected {len(injected_vars)} variable(s): {list(injected_vars.keys())}")
+        # run_vars.extra are static overrides supplied in the run description;
+        # Var: case variables are re-extracted fresh inside each _execute_cases call.
+        static_extra = dict(run_vars.extra)
 
         # Phase 4–6: Execute with retry loop
         retry_remaining = run_vars.retry
@@ -616,7 +632,7 @@ class TestRailRunner:
 
         while True:
             passed, failed, skipped = self._execute_cases(
-                classified, injected_vars, run_id, verbose
+                classified, static_extra, run_id, verbose
             )
             total_passed += passed
             total_failed += failed
@@ -688,12 +704,29 @@ class TestRailRunner:
         ]
 
     def _extract_vars(self, classified: List[Dict]) -> Dict[str, Any]:
-        """Parse key: value pairs from all Var: cases."""
+        """Parse key: value pairs from all Var: cases that have a flat mapping body.
+
+        Var: cases whose body is a YAML steps list are skipped here; they are
+        handled by _execute_step_var_cases, which runs the steps and harvests
+        any variables set via store_as.
+
+        After collecting all variables a second pass resolves ${var}
+        cross-references so Var: cases can reference values defined in other
+        Var: cases.
+        """
         variables: Dict[str, Any] = {}
         for test in classified:
             if test["role"] != "var":
                 continue
-            for line in _get_case_body(test).splitlines():
+            body = _get_case_body(test)
+            # Skip step-list bodies — handled by _execute_step_var_cases
+            try:
+                parsed = _yaml_safe_load_lenient(body)
+                if isinstance(parsed, list):
+                    continue
+            except Exception:
+                pass
+            for line in body.splitlines():
                 line = line.strip()
                 if ":" in line and not line.startswith(("-", "#")):
                     key, _, value = line.partition(":")
@@ -701,7 +734,127 @@ class TestRailRunner:
                     value = value.strip()
                     if key:
                         variables[key] = _coerce(value)
+        # Second pass: resolve ${var} cross-references (repeat until stable or 10 iterations)
+        for _ in range(10):
+            changed = False
+            for k in list(variables.keys()):
+                if not isinstance(variables[k], str) or "${" not in variables[k]:
+                    continue
+                new_val = variables[k]
+                for ref_k, ref_v in variables.items():
+                    if ref_k != k:
+                        new_val = new_val.replace(f"${{{ref_k}}}", str(ref_v))
+                if new_val != variables[k]:
+                    variables[k] = _coerce(new_val)
+                    changed = True
+            if not changed:
+                break
         return variables
+
+    def _execute_step_var_cases(
+        self,
+        classified: List[Dict],
+        injected_vars: Dict[str, Any],
+        verbose: bool,
+    ) -> None:
+        """Execute Var: cases whose body is a YAML steps list.
+
+        Each step-list Var: case is run as a mini inline test.  Variables
+        captured via store_as during execution are merged into injected_vars
+        (and into the config scope) so subsequent Test:/Inline: cases can use
+        them via ${variable_name}.
+
+        The Var: case is always executed when there are pending tests,
+        regardless of its current TestRail status.
+        """
+        import yaml as _yaml
+
+        for case in classified:
+            if case["role"] != "var":
+                continue
+            body = _get_case_body(case)
+            if not body:
+                continue
+            # Fetch full case body if the run's test list doesn't include it
+            has_body = bool(
+                case.get("custom_preconds")
+                or case.get("custom_steps")
+                or case.get("custom_steps_separated")
+            )
+            if not has_body:
+                case_id = case.get("case_id")
+                if case_id:
+                    try:
+                        full = self._tr.get_case(int(case_id))
+                        case = {**full, **{k: v for k, v in case.items() if v is not None}}
+                        body = _get_case_body(case)
+                    except Exception:
+                        pass
+            try:
+                body_fixed = _fix_step_list_indent(body)
+                parsed = _yaml_safe_load_lenient(body_fixed)
+            except Exception:
+                continue
+            if not isinstance(parsed, list):
+                continue  # flat key:value — handled by _extract_vars
+            steps_raw = [s for s in parsed if isinstance(s, dict)]
+            if not steps_raw:
+                continue
+
+            title = case.get("clean_title", "Var steps")
+            test_dict = {"name": title, "steps": steps_raw}
+            test_id = case.get("id", "var_steps")
+            tmp_path = self._artifact_dir / f"_var_{test_id}.yaml"
+            try:
+                self._artifact_dir.mkdir(parents=True, exist_ok=True)
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    _yaml.dump(test_dict, f, allow_unicode=True,
+                               default_flow_style=False, sort_keys=False)
+
+                if verbose:
+                    print(f"  [VAR] Executing step-based Var case: {title}")
+
+                # Inject current vars so ${aws_bucket} etc. resolve inside the steps
+                for k, v in injected_vars.items():
+                    self._config.set_variable(k, str(v), scope="collection_vars")
+
+                result = self._run_single(tmp_path, injected_vars, verbose)
+                if result is None:
+                    if verbose:
+                        print(f"  [warn] Var case '{title}' failed to execute")
+                    continue
+
+                # Harvest all variables that the steps set at runtime
+                try:
+                    runtime_vars = self._config.variable_manager.get_all_variables()
+                    for k, v in runtime_vars.items():
+                        if k not in injected_vars or injected_vars[k] != v:
+                            injected_vars[k] = v
+                            if verbose:
+                                preview = str(v)[:80]
+                                print(f"    → {k} = {preview}")
+                except Exception:
+                    pass
+
+                # Also scan step store_as fields for any not already captured
+                for step in steps_raw:
+                    sa = step.get("store_as") or (
+                        list(step.values())[0].get("store_as")
+                        if isinstance(list(step.values())[0], dict) else None
+                    ) if step else None
+                    if sa and sa not in injected_vars:
+                        val = self._config.variable_manager.get_variable(sa)
+                        if val is not None:
+                            injected_vars[sa] = val
+
+            except Exception as exc:
+                if verbose:
+                    print(f"  [warn] Var case '{title}' error: {exc}")
+            finally:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     # Status IDs that mean "this test needs to be run"
     _PENDING_STATUSES = frozenset({
@@ -712,7 +865,7 @@ class TestRailRunner:
     def _execute_cases(
         self,
         classified: List[Dict],
-        injected_vars: Dict[str, Any],
+        static_extra: Dict[str, Any],
         run_id: int,
         verbose: bool,
     ) -> Tuple[int, int, int]:
@@ -720,8 +873,26 @@ class TestRailRunner:
 
         Only Test: cases in untested or retest status are executed.
         Setup: and Teardown: cases always run when there are pending tests.
+        Var: cases are always re-extracted here so variables are current even
+        when the Var: case status is already Passed from a previous run.
         """
         passed = failed = skipped = 0
+
+        # Re-extract Var: variables every execution so they are always current,
+        # regardless of the Var: case's current TestRail status.  Mirrors how
+        # _sync_keyword_cases unconditionally rebuilds shared_steps.yaml.
+        injected_vars = self._extract_vars(classified)
+        injected_vars.update(static_extra)  # static overrides win
+
+        # Execute any step-based Var: cases (bodies that are YAML step lists)
+        # so their store_as outputs land in injected_vars before tests run.
+        self._execute_step_var_cases(classified, injected_vars, verbose)
+
+        if verbose and injected_vars:
+            print(
+                f"  [vars] {len(injected_vars)} variable(s) loaded: "
+                f"{list(injected_vars.keys())}"
+            )
 
         # Build shared_steps.yaml from Keyword: cases so Inline: cases can reference them
         self._sync_keyword_cases(classified)
@@ -736,6 +907,7 @@ class TestRailRunner:
         if not pending_tests:
             if verbose:
                 print("  No pending tests (untested or retest) — nothing to execute.")
+            self._mark_definitions(classified)
             return passed, failed, skipped
 
         setups = [t for t in classified if t["role"] == "setup"]
@@ -821,14 +993,24 @@ class TestRailRunner:
 
         # Mark definition cases (Keyword: / Var:) as passed so they don't
         # remain "untested" in the run. They are not executable directly.
-        definition_roles = {"keyword": "Shared step definition", "var": "Variable definition"}
+        self._mark_definitions(classified)
+
+        return passed, failed, skipped
+
+    _DEFINITION_ROLES = {
+        "keyword": "Shared step definition",
+        "var": "Variable definition",
+    }
+
+    def _mark_definitions(self, classified: List[Dict]) -> None:
+        """Mark Keyword: and Var: cases as Passed so they don't stay Untested or Retest in the run."""
         for case in classified:
             role = case.get("role", "")
-            if role not in definition_roles:
+            if role not in self._DEFINITION_ROLES:
                 continue
-            if case.get("status_id", TestRailService.STATUS_UNTESTED) != TestRailService.STATUS_UNTESTED:
+            if case.get("status_id", TestRailService.STATUS_UNTESTED) not in self._PENDING_STATUSES:
                 continue
-            label = definition_roles[role]
+            label = self._DEFINITION_ROLES[role]
             try:
                 self._tr.add_result(
                     case["id"],
@@ -837,8 +1019,6 @@ class TestRailRunner:
                 )
             except Exception:
                 pass
-
-        return passed, failed, skipped
 
     def _run_yaml_files(
         self,
@@ -1146,14 +1326,14 @@ class TestRailRunner:
 
             if isinstance(parsed, list):
                 # Steps-only shorthand → wrap in a definition dict
-                steps_raw = [s for s in parsed if isinstance(s, dict)]
+                steps_raw = _normalize_shared_step_refs([s for s in parsed if isinstance(s, dict)])
                 entry = {"steps": steps_raw}
             elif isinstance(parsed, dict) and "steps" in parsed:
-                # Full definition dict — use as-is
-                entry = parsed
+                # Full definition dict — normalize shared_step refs in the steps list
+                entry = {**parsed, "steps": _normalize_shared_step_refs(parsed.get("steps") or [])}
             elif isinstance(parsed, dict):
                 # Single-step dict
-                entry = {"steps": [parsed]}
+                entry = {"steps": _normalize_shared_step_refs([parsed])}
             else:
                 print(f"  [warn] Keyword '{name}': unrecognised body format, skipping")
                 continue
