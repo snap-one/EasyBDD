@@ -79,8 +79,6 @@ import ssl
 import time
 import uuid
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
-
 from ..core.connection_pool import ConnectionPool
 
 # Params that belong to the websocket action itself — not forwarded as JSON-RPC data
@@ -129,15 +127,18 @@ class _WSConn:
         self._session_uuid: str = str(uuid.uuid4())
         self._msg_counter: int = 0
 
-        # Build header list; add Origin if missing
+        # Build header dict — do NOT auto-inject Origin.
+        # bdd's execute_websocket never adds Origin and OVRC servers work without it;
+        # adding Origin can cause the server to silently close after the first message.
         hdr = dict(headers or {})
-        if "Origin" not in hdr and "origin" not in hdr:
-            parsed = urlparse(url)
-            scheme = "https" if parsed.scheme == "wss" else "http"
-            # Use hostname only (no port) — matches the browser Origin which is always
-            # the scheme+host of the serving page, not the WebSocket target port.
-            hdr["Origin"] = f"{scheme}://{parsed.hostname}"
-        header_list = [f"{k}: {v}" for k, v in hdr.items()]
+
+        # Inject subprotocols as a raw Sec-WebSocket-Protocol header rather than using
+        # websocket-client's subprotocols= parameter.  The parameter path triggers
+        # server-response validation in websocket-client which can conflict with how
+        # OVRC echos (or doesn't echo) the protocol list.  Passing the header directly
+        # matches bdd's execute_webservice approach exactly.
+        if subprotocols:
+            hdr["Sec-WebSocket-Protocol"] = ", ".join(subprotocols)
 
         sslopt: Dict[str, Any] = {}
         if not verify_ssl and url.startswith("wss://"):
@@ -145,18 +146,15 @@ class _WSConn:
 
         self._ws = websocket.WebSocket(sslopt=sslopt)
         self._ws.settimeout(timeout)
-        connect_kwargs: Dict[str, Any] = {"header": header_list}
-        if subprotocols:
-            connect_kwargs["subprotocols"] = subprotocols
-
-        self._ws.connect(url, **connect_kwargs)
+        self._ws.connect(url, header=hdr)
         print(f"         ✅ WebSocket connected: {url}")
         if subprotocols:
             print(f"         subprotocols: {subprotocols}")
 
     def send(self, data: Any) -> None:
+        # Use compact JSON (no spaces) — matches bdd's json.dumps(separators=(',', ':'))
         if isinstance(data, (dict, list)):
-            data = json.dumps(data)
+            data = json.dumps(data, separators=(",", ":"))
         self._ws.send(data)
 
     def receive(self, timeout: float = 10.0, wait_for: Optional[str] = None) -> str:
@@ -499,10 +497,11 @@ class WebSocketService:
                              if k not in _WEBSOCKET_CONTROL_PARAMS}
                     if extra:
                         params_val = extra
+                # Field order matches bdd's execute_webservice: jsonrpc → id → method → params
                 return {
                     "jsonrpc": "2.0",
-                    "method": method,
                     "id": msg_id,
+                    "method": method,
                     "params": params_val,
                 }
             return data
