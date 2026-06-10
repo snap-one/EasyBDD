@@ -256,6 +256,12 @@ def _fix_step_list_indent(text: str) -> str:
             bucket_name: my-bucket
             folder_prefix: vps/
 
+    Also handles sub-list values under a bare key, e.g.:
+
+        - websocket.send:
+        subprotocols:
+        - firmware-protocol     ← indented as list value under subprotocols:
+
     Bare annotation lines (description:, note:, label:) after a step are dropped.
     """
     lines = text.splitlines()
@@ -269,17 +275,35 @@ def _fix_step_list_indent(text: str) -> str:
             result.append(line)
             i += 1
             param_prefix = ' ' * (dash_indent + 4)
+            # Track if last emitted param was a bare key (e.g. "subprotocols:") so
+            # that a following "- item" at flush-level is treated as its list value
+            # rather than as a new step at the same indent.
+            last_bare_key_indent: Optional[str] = None
+
             while i < len(lines):
                 nl = lines[i]
                 if not nl.strip():
                     result.append(nl)
                     i += 1
+                    last_bare_key_indent = None
                     break
                 nl_indent = len(nl) - len(nl.lstrip())
                 stripped = nl.lstrip()
-                # Next list item at same or shallower indent → stop
+
+                # A "- item" at the step's indent level is either:
+                #   • a sub-list value under the preceding bare key  → indent it
+                #   • the start of the next step                     → stop
                 if stripped.startswith('- ') and nl_indent <= dash_indent:
+                    if last_bare_key_indent is not None:
+                        result.append(last_bare_key_indent + '  ' + stripped)
+                        i += 1
+                        continue  # more list items may follow
                     break
+
+                # Any non-list flush-level line resets bare-key tracking
+                if nl_indent <= dash_indent:
+                    last_bare_key_indent = None
+
                 # Already correctly indented → keep as-is
                 if nl_indent > dash_indent:
                     result.append(nl)
@@ -293,9 +317,13 @@ def _fix_step_list_indent(text: str) -> str:
                         continue
                     result.append(param_prefix + stripped)
                     i += 1
+                    # Remember if this was a bare key so following list items can be nested
+                    val_part = stripped.split(':', 1)[1].strip() if ':' in stripped else ''
+                    last_bare_key_indent = param_prefix if not val_part else None
                 else:
                     result.append(nl)
                     i += 1
+                    last_bare_key_indent = None
         else:
             result.append(line)
             i += 1

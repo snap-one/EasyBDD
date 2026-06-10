@@ -83,6 +83,13 @@ from urllib.parse import urlparse
 
 from ..core.connection_pool import ConnectionPool
 
+# Params that belong to the websocket action itself — not forwarded as JSON-RPC data
+_WEBSOCKET_CONTROL_PARAMS = frozenset({
+    "url", "method", "timeout", "wait_for", "data", "subprotocols", "protocol",
+    "headers", "store_as", "verify_ssl", "session_token",
+    "auth_url", "auth_username", "auth_password", "auth_body_key", "auth_token_var",
+})
+
 
 def _pool_key(url: str) -> str:
     # Use the full URL as the key so different paths are separate connections
@@ -482,6 +489,16 @@ class WebSocketService:
                         params_val = {}
                 else:
                     params_val = {}
+                # Fallback: when data is empty/None (e.g. "data:" bare key in TestRail
+                # Preconditions where sub-keys end up as top-level step params after
+                # _fix_step_list_indent), collect any unrecognised step params as the
+                # JSON-RPC params dict.  This lets users write flat params in TestRail
+                # without a nested data: block.
+                if not params_val:
+                    extra = {k: v for k, v in params.items()
+                             if k not in _WEBSOCKET_CONTROL_PARAMS}
+                    if extra:
+                        params_val = extra
                 return {
                     "jsonrpc": "2.0",
                     "method": method,
