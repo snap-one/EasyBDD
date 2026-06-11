@@ -11,12 +11,12 @@ Run Easy BDD tests directly from TestRail — no local YAML files required for s
 3. [Run Configuration](#run-configuration)
 4. [Case Prefix Taxonomy](#case-prefix-taxonomy)
 5. [Var: Cases — Variable Injection](#var-cases--variable-injection)
-6. [Inline: Cases — Writing Steps in TestRail](#inline-cases--writing-steps-in-testrail)
+6. [Feature: Cases — Writing Steps in TestRail](#feature-cases--writing-steps-in-testrail)
 7. [TestRail-Safe Syntax (Recommended)](#testrail-safe-syntax-recommended)
 8. [API + Token + Assert Recipes](#api--token--assert-recipes)
 9. [Response Variables and Extraction Rules](#response-variables-and-extraction-rules)
-10. [TestRail Inline Templates](#testrail-inline-templates)
-11. [YAML File Format vs TestRail Inline Format](#yaml-file-format-vs-testrail-inline-format)
+10. [TestRail Feature Templates](#testrail-feature-templates)
+11. [YAML File Format vs TestRail Feature Format](#yaml-file-format-vs-testrail-feature-format)
 12. [Parameterized Tests — Multiple Devices / SKUs](#parameterized-tests--multiple-devices--skus)
 13. [Loops and Iteration](#loops-and-iteration)
 14. [Fault Insertion and Timed Delays](#fault-insertion-and-timed-delays)
@@ -48,7 +48,7 @@ Run Easy BDD tests directly from TestRail — no local YAML files required for s
 
 ## TestRail Author Checklist
 
-Use this checklist before saving any Inline case in TestRail.
+Use this checklist before saving any Feature case in TestRail.
 
 - Prefer flow-style YAML in TestRail fields to avoid indentation breakage.
 - Keep one step per line starting with `- action.name: {...}`.
@@ -58,7 +58,7 @@ Use this checklist before saving any Inline case in TestRail.
 - For authenticated requests, set header as `Authorization: "Bearer ${token}"`.
 - Avoid `Content-Type` on GET requests unless endpoint requires it.
 - Ensure keys in assert expressions are quoted, for example `'errCode'`.
-- Run one smoke case first (`Inline: Token`) before larger suites.
+- Run one smoke case first (`Feature: Token`) before larger suites.
 - If parsing fails, convert multiline nested maps to flow-style objects.
 
 Quick validation snippet:
@@ -102,19 +102,19 @@ Every case title must begin with one of these prefixes:
 | Prefix | Role | Runs when |
 |--------|------|-----------|
 | `Var: Name` | Variable definitions | Always (variables injected into all tests) |
-| `Setup: Name` | Pre-test setup | Before any Test:/Inline: case |
+| `Setup: Name` | Pre-test setup | Before any Test:/Feature: case |
 | `Test: Name` | Points to a local YAML file or tag | In order, if status is Untested/Retest |
-| `Inline: Name` | Steps written directly in TestRail | In order, if status is Untested/Retest |
-| `Teardown: Name` | Post-test cleanup | After all Test:/Inline: cases |
-| `Keyword: Name` | Shared step definition | Referenced by other cases via `shared_step` |
+| `Feature: Name` | Steps written directly in TestRail | In order, if status is Untested/Retest |
+| `Teardown: Name` | Post-test cleanup | After all Test:/Feature: cases |
+| `Shared: Name` | Shared step definition | Referenced by other cases via `shared_step` |
 
 Example run layout:
 ```
 Var: Environment Config
 Var: AWS Credentials
 Setup: Connect to Device
-Inline: Firmware Manager
-Inline: Verify Device Status
+Feature: Firmware Manager
+Feature: Verify Device Status
 Teardown: Disconnect
 ```
 
@@ -131,11 +131,11 @@ server_url: wss://firmware.testing.ovrc.com:10444
 environment: staging
 ```
 
-Variables from Var: cases are available in all Inline: and Test: cases as `${variable_name}`.
+Variables from Var: cases are available in all Feature: and Test: cases as `${variable_name}`.
 
 ---
 
-## Inline: Cases — Writing Steps in TestRail
+## Feature: Cases — Writing Steps in TestRail
 
 Write steps directly in the **Preconditions** field. Parameters can be flush-left — the runner re-indents them automatically.
 
@@ -187,7 +187,7 @@ store_as: firmware_files
 
 ## TestRail-Safe Syntax (Recommended)
 
-TestRail text fields can flatten indentation, merge lines, or replace spaces with non-standard whitespace. To avoid parse issues, prefer **flow-style YAML** in Inline cases.
+TestRail text fields can flatten indentation, merge lines, or replace spaces with non-standard whitespace. To avoid parse issues, prefer **flow-style YAML** in Feature cases.
 
 ### Best-practice pattern (flow style)
 
@@ -204,7 +204,7 @@ TestRail text fields can flatten indentation, merge lines, or replace spaces wit
 - Avoids common parse failures like `expected <block end>`.
 - Avoids line merge problems such as `Authorization: Bearer ${token}store_as: last_response`.
 
-### Rules for robust Inline steps
+### Rules for robust Feature steps
 
 - Quote expressions and interpolated values: `"${var}"`, `"'key' in last_json"`.
 - Keep `store_as` and `store_response` as top-level step params, not inside `headers` or `body`.
@@ -277,9 +277,9 @@ Important:
 
 ---
 
-## TestRail Inline Templates
+## TestRail Feature Templates
 
-Copy/paste these patterns into an Inline case Preconditions field.
+Copy/paste these patterns into a Feature case Preconditions field.
 
 ### 1) Login and save token
 
@@ -346,7 +346,7 @@ Template notes:
 
 ---
 
-## YAML File Format vs TestRail Inline Format
+## YAML File Format vs TestRail Feature Format
 
 Use whichever format fits your workflow. Both run through the same action engine.
 
@@ -379,7 +379,7 @@ steps:
       expression: "'systemInfo' in last_json"
 ```
 
-### B) TestRail Inline (`Inline:` case)
+### B) TestRail Feature (`Feature:` case)
 
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
@@ -627,9 +627,9 @@ Variables from Var: cases are injected into the YAML test automatically.
 
 ## Setup: and Teardown: Cases
 
-- **Setup:** cases run before all Test:/Inline: cases, regardless of their status.
-- **Teardown:** cases run after all Test:/Inline: cases, regardless of pass/fail.
-- Both use the same step formats as Inline: cases.
+- **Setup:** cases run before all Test:/Feature: cases, regardless of their status.
+- **Teardown:** cases run after all Test:/Feature: cases, regardless of pass/fail.
+- Both use the same step formats as Feature: cases.
 
 ```
 Setup: Connect to OvrC Server

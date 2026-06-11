@@ -819,9 +819,9 @@ class TestRailRunner:
     ) -> None:
         """Execute Var: cases whose body is a YAML steps list.
 
-        Each step-list Var: case is run as a mini inline test.  Variables
+        Each step-list Var: case is run as a mini feature test.  Variables
         captured via store_as during execution are merged into injected_vars
-        (and into the config scope) so subsequent Test:/Inline: cases can use
+        (and into the config scope) so subsequent Test:/Feature: cases can use
         them via ${variable_name}.
 
         The Var: case is always executed when there are pending tests,
@@ -981,7 +981,11 @@ class TestRailRunner:
             body = _get_case_body(case)
 
             if verbose:
-                print(f"\n  [{role.upper()}] {title}")
+                role_label = {
+                    "inline": "FEATURE",
+                    "keyword": "SHARED",
+                }.get(role, role.upper())
+                print(f"\n  [{role_label}] {title}")
 
             # Post "running" status immediately (best-effort — only if configured)
             if self._running_status_id is not None:
@@ -1051,7 +1055,7 @@ class TestRailRunner:
                 if verbose:
                     print(f"    FAIL ({elapsed})")
 
-        # Mark definition cases (Keyword: / Var:) as passed so they don't
+        # Mark definition cases (Shared: / Var:) as passed so they don't
         # remain "untested" in the run. They are not executable directly.
         self._mark_definitions(classified)
 
@@ -1375,7 +1379,7 @@ class TestRailRunner:
             if not body:
                 continue
 
-            # Apply same indentation fix as Inline: cases
+            # Apply same indentation fix as Feature: cases
             body = _fix_step_list_indent(body)
 
             try:
