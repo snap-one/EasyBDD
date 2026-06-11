@@ -4287,13 +4287,11 @@ class TestRunner:
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
                 response_json = None
-                if is_json:
-                    try:
-                        response_json = response.json()
-                        variables["last_json"] = response_json
-                    except:
-                        variables["last_json"] = None
-                else:
+                try:
+                    response_json = response.json()
+                    variables["last_json"] = response_json
+                    is_json = True
+                except Exception:
                     variables["last_json"] = None
 
                 # Print full response if verbose logging enabled
@@ -4589,13 +4587,11 @@ class TestRunner:
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
                 response_json = None
-                if is_json:
-                    try:
-                        response_json = response.json()
-                        variables["last_json"] = response_json
-                    except:
-                        variables["last_json"] = None
-                else:
+                try:
+                    response_json = response.json()
+                    variables["last_json"] = response_json
+                    is_json = True
+                except Exception:
                     variables["last_json"] = None
 
                 # Print full response if verbose logging enabled
@@ -4725,13 +4721,11 @@ class TestRunner:
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
                 response_json = None
-                if is_json:
-                    try:
-                        response_json = response.json()
-                        variables["last_json"] = response_json
-                    except:
-                        variables["last_json"] = None
-                else:
+                try:
+                    response_json = response.json()
+                    variables["last_json"] = response_json
+                    is_json = True
+                except Exception:
                     variables["last_json"] = None
 
                 # Print full response if verbose logging enabled
@@ -4985,13 +4979,11 @@ class TestRunner:
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
                 response_json = None
-                if is_json:
-                    try:
-                        response_json = response.json()
-                        variables["last_json"] = response_json
-                    except:
-                        variables["last_json"] = None
-                else:
+                try:
+                    response_json = response.json()
+                    variables["last_json"] = response_json
+                    is_json = True
+                except Exception:
                     variables["last_json"] = None
 
                 # Print full response if verbose logging enabled
@@ -5169,13 +5161,11 @@ class TestRunner:
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
                 response_json = None
-                if is_json:
-                    try:
-                        response_json = response.json()
-                        variables["last_json"] = response_json
-                    except:
-                        variables["last_json"] = None
-                else:
+                try:
+                    response_json = response.json()
+                    variables["last_json"] = response_json
+                    is_json = True
+                except Exception:
                     variables["last_json"] = None
 
                 # Print full response if verbose logging enabled
@@ -5377,13 +5367,11 @@ class TestRunner:
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
                 response_json = None
-                if is_json:
-                    try:
-                        response_json = response.json()
-                        variables["last_json"] = response_json
-                    except:
-                        variables["last_json"] = None
-                else:
+                try:
+                    response_json = response.json()
+                    variables["last_json"] = response_json
+                    is_json = True
+                except Exception:
                     variables["last_json"] = None
 
                 # Print full response if verbose logging enabled
