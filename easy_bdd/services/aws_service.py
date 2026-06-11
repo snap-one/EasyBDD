@@ -392,52 +392,29 @@ class AWSService:
     def _sort_urls_by_version(
         self, urls: List[str], bucket_name: str, cloudfront_url: str = None
     ) -> List[str]:
-        """
-        Sort URLs using version-aware numeric sorting.
+        """Sort URLs newest-first by build timestamp, non-DM before DM per timestamp.
 
-        Args:
-            urls: List of URLs to sort
-            bucket_name: S3 bucket name for extracting object keys
-            cloudfront_url: CloudFront URL if used
-
-        Returns:
-            Sorted list of URLs
+        Filename format: <prefix>_<semver>-<YYMMDDHHII>[-DM].<ext>
+        The 10-digit build timestamp is the primary sort key (descending).
+        Non-DM variants sort before DM for the same timestamp, matching the
+        interleaved pair order expected by callers (index 0 = newest non-DM,
+        index 1 = newest DM, index 2 = second-newest non-DM, ...).
+        Falls back to full key string for files without a recognisable timestamp.
         """
 
-        def extract_key(url):
-            """Extract S3 object key from URL."""
+        def extract_filename(url):
             if cloudfront_url:
-                return url.split(f"{cloudfront_url}/")[-1]
-            return url.split(f"{bucket_name}.s3.amazonaws.com/")[-1]
-
-        def find_best_version_token(key):
-            """Find the best version-like token in the key."""
-            matches = re.findall(r"\d+(?:\.\d+)*", key)
-            if not matches:
-                return None
-            # Prefer tokens with more components
-            return max(matches, key=lambda m: (m.count("."), len(m)))
-
-        def token_to_components(token):
-            """Convert version token to sortable components."""
-            parts = token.split(".")
-            comps = []
-            for p in parts:
-                if p.isdigit():
-                    comps.append((0, int(p)))
-                else:
-                    comps.append((1, p))
-            return tuple(comps)
+                key = url.split(f"{cloudfront_url}/")[-1]
+            else:
+                key = url.split(f"{bucket_name}.s3.amazonaws.com/")[-1]
+            return key, key.split("/")[-1]
 
         def sort_key(url):
-            """Generate sort key for a URL."""
-            key = extract_key(url)
-            token = find_best_version_token(key)
-
-            if token:
-                comps = token_to_components(token)
-                return (0, comps, key)
-            return (1, key)
+            key, filename = extract_filename(url)
+            m = re.search(r"-(\d{10})(?:-DM)?(?:\.|$)", filename)
+            build_ts = int(m.group(1)) if m else 0
+            is_dm = 1 if "-DM." in filename or filename.endswith("-DM") else 0
+            return (-build_ts, is_dm, key)
 
         return sorted(urls, key=sort_key)
 
