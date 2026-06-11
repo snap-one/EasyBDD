@@ -561,7 +561,7 @@ steps:
 
 ---
 
-## 🧪 TestRail Inline: Parameterized Format
+## 🧪 TestRail Feature: Parameterized Format
 
 When writing tests directly in TestRail's Preconditions field, use the `JSON:` prefix to supply multiple data rows. Parameters can be written flush-left — the runner indents them automatically.
 
