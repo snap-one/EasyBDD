@@ -3582,8 +3582,9 @@ class TestRunner:
                     effective_download_dir = _raw_download_dir
                 else:
                     from pathlib import Path as _Path
-                    # Strip leading slashes / bucket-name prefix from folder_prefix
-                    _rel = folder_prefix.lstrip("/").rstrip("/")
+                    # When folder_prefix is a list use the first entry for the default dir
+                    _fp_str = folder_prefix[0] if isinstance(folder_prefix, list) else folder_prefix
+                    _rel = (_fp_str or "").lstrip("/").rstrip("/")
                     effective_download_dir = str(_Path.cwd() / "Firmware" / _rel) if _rel else str(_Path.cwd() / "Firmware")
 
                 from pathlib import Path as _Path

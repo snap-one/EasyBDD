@@ -201,7 +201,7 @@ class AWSService:
     def list_firmware_files(
         self,
         bucket_name: str,
-        folder_prefix: str = None,
+        folder_prefix: Union[str, List[str]] = None,
         filename_pattern: str = None,
         version_pattern: str = None,
         file_extension: str = None,
@@ -220,7 +220,7 @@ class AWSService:
 
         Args:
             bucket_name: S3 bucket name
-            folder_prefix: Folder prefix to filter objects
+            folder_prefix: Folder prefix(es) to filter objects (string or list of strings)
             filename_pattern: Pattern to match in filename (e.g., "wattbox", "firmware")
             version_pattern: Regex pattern to match version in filename
             file_extension: File extension to filter (e.g., ".bin", ".zip")
@@ -239,15 +239,20 @@ class AWSService:
         """
         self._get_s3_clients(bucket_name, access_key_id, secret_access_key, region)
 
-        # Normalize folder_prefix: ensure it ends with '/' so S3 only returns
-        # objects inside the folder, not objects whose key merely starts with the string.
-        if folder_prefix and not folder_prefix.endswith("/"):
-            folder_prefix = folder_prefix + "/"
+        # Normalize folder_prefix to a list, ensuring each entry ends with '/'
+        if not folder_prefix:
+            prefixes = [None]
+        elif isinstance(folder_prefix, list):
+            prefixes = [p if p.endswith("/") else p + "/" for p in folder_prefix if p]
+            if not prefixes:
+                prefixes = [None]
+        else:
+            prefixes = [folder_prefix if folder_prefix.endswith("/") else folder_prefix + "/"]
 
         # Log active filters so users can see exactly what will be applied
         self._log(f"─── aws.list_files ───────────────────────────────")
         self._log(f"  bucket       : {bucket_name}")
-        self._log(f"  folder_prefix: {folder_prefix or '(none — scanning all)'}")
+        self._log(f"  folder_prefix: {prefixes if len(prefixes) > 1 else (prefixes[0] or '(none — scanning all)')}")
         self._log(f"  file_extension: {file_extension or '(none)'}")
         self._log(f"  filename_pattern: {filename_pattern or '(none)'}")
         self._log(f"  version_pattern : {version_pattern or '(none)'}")
@@ -259,20 +264,25 @@ class AWSService:
         skipped_ext = skipped_pattern = skipped_version = skipped_specific = 0
 
         try:
-            # Get objects
-            if folder_prefix:
-                objects = self._current_bucket.objects.filter(Prefix=folder_prefix)
-                self._log(f"  Querying s3://{bucket_name}/{folder_prefix} ...")
-            else:
-                objects = self._current_bucket.objects.all()
-                self._log(f"  Querying s3://{bucket_name}/ (all objects) ...")
+            # Collect objects from all prefixes, deduplicating by key
+            seen_keys: set = set()
+            all_objects = []
+            for pfx in prefixes:
+                if pfx:
+                    objects = self._current_bucket.objects.filter(Prefix=pfx)
+                    self._log(f"  Querying s3://{bucket_name}/{pfx} ...")
+                else:
+                    objects = self._current_bucket.objects.all()
+                    self._log(f"  Querying s3://{bucket_name}/ (all objects) ...")
+                for obj in objects:
+                    if obj.key not in seen_keys:
+                        seen_keys.add(obj.key)
+                        all_objects.append(obj)
 
-            # Force evaluation so we can show total count before filtering
-            all_objects = list(objects)
             self._log(f"  Total objects returned by S3: {len(all_objects)}")
             if not all_objects:
                 self._log(
-                    f"  ⚠  No objects found under prefix={folder_prefix!r}. "
+                    f"  ⚠  No objects found under prefix={prefixes!r}. "
                     f"Check bucket name and folder_prefix (S3 prefixes are case-sensitive)."
                 )
 
