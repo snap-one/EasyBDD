@@ -20,6 +20,27 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 
+def _path_get(obj: Any, path: str, default: Any = None) -> Any:
+    """Traverse a nested dict/list using a dot-separated path string.
+
+    Example: path(last_json, 'restful_res.systemInfo') returns the nested dict,
+    or `default` (None) if any key is missing or obj is not a dict at that level.
+    """
+    for key in str(path).split("."):
+        if isinstance(obj, dict):
+            obj = obj.get(key, default)
+        elif isinstance(obj, (list, tuple)):
+            try:
+                obj = obj[int(key)]
+            except (ValueError, IndexError):
+                return default
+        else:
+            return default
+        if obj is default:
+            return default
+    return obj
+
+
 @dataclass
 class AssertionResult:
     """Result of an assertion evaluation."""
@@ -85,6 +106,7 @@ class AssertionEngine:
         "all": all,
         "isinstance": isinstance,
         "type": type,
+        "path": _path_get,
     }
 
     def __init__(self, context: Optional[Dict[str, Any]] = None):
