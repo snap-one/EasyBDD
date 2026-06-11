@@ -67,10 +67,30 @@ python -m easy_bdd run tests/cases/my_first_test.yaml --headed
 - **[Setup Guide](./setup.md)** - Complete installation and configuration
 - **[Syntax Reference](./syntax.md)** - YAML syntax and structure
 - **[Actions Reference](./actions.md)** - All available test actions
+- **[TestRail Integration Guide](./testrail-integration.md)** - Run tests from TestRail (Inline, Var, Setup, Teardown)
 - **[Data-Driven Testing](./data-driven.md)** - Using data arrays and variables
 - **[Advanced Features](./advanced.md)** - Async execution, setup/cleanup
 - **[Examples](./examples/)** - Real-world test examples
 - **[Troubleshooting](./troubleshooting.md)** - Common issues and solutions
+
+### Quick Start for TestRail Authors
+
+Start here if you write test content directly in TestRail:
+
+- **[TestRail-Safe Syntax (Recommended)](./testrail-integration.md#testrail-safe-syntax-recommended)**
+- **[API + Token + Assert Recipes](./testrail-integration.md#api--token--assert-recipes)**
+- **[Response Variables and Extraction Rules](./testrail-integration.md#response-variables-and-extraction-rules)**
+- **[YAML File Format vs TestRail Inline Format](./testrail-integration.md#yaml-file-format-vs-testrail-inline-format)**
+- **[Inline: Cases — Writing Steps in TestRail](./testrail-integration.md#inline-cases--writing-steps-in-testrail)**
+
+Recommended authoring pattern inside TestRail fields (flow style):
+
+```yaml
+- api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
+- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}"}}
+- assert: {expression: "'systemInfo' in last_json"}
+```
 
 ## 🎯 Key Features
 

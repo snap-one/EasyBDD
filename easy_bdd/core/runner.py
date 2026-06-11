@@ -752,7 +752,8 @@ class TestRunner:
             total_steps = len(test.steps)
 
             for i, step in enumerate(test.steps, 1):
-                step_params = step.parameters if hasattr(step, "parameters") else {}
+                display_step_params = self._resolve_step_params(step, test.variables or {})
+                step_params = display_step_params.get("parameters", {}) if isinstance(display_step_params, dict) else {}
                 prev_response = (test.variables or {}).get("last_response")
 
                 self._run_logger.step_start(i, total_steps, step.action, step_params)
@@ -1226,6 +1227,15 @@ class TestRunner:
                 )
                 print(f"      ⏳ Sleeping {seconds}s...")
                 time.sleep(seconds)
+                return True
+
+            # Log / print action (no service required — just prints a message)
+            if action_lower in ["test.log", "log", "test.print", "print"]:
+                params = self._get_params(step_params)
+                message = str(params.get("message", params.get("text", "")))
+                if hasattr(self.config, "substitute_variables"):
+                    message = self.config.substitute_variables(message, variables)
+                print(f"      📝 {message}")
                 return True
 
             # Custom assertion actions (support both formats)
@@ -3038,11 +3048,12 @@ class TestRunner:
         """Handle session-stateful Python eval/exec actions.
 
         Actions:
-          eval.run   — evaluate an expression, store result
-          eval.exec  — execute a code block (state mutations persist)
-          eval.set   — set a key in shared eval state
-          eval.get   — read a key from shared eval state into variables
-          eval.clear — clear the entire eval state
+          eval.run             — evaluate an expression, store result
+          eval.exec            — execute a code block (state mutations persist)
+          eval.set             — set a key in shared eval state
+          eval.get             — read a key from shared eval state into variables
+          eval.clear           — clear the entire eval state
+          eval.extract_version — extract version string from a URL/filename/list
         """
         import math, re as _re, json as _json, datetime as _datetime, collections as _collections
 
@@ -3066,12 +3077,84 @@ class TestRunner:
         ctx.update(self._eval_state)
         ctx.update(variables)
 
-        if "set" in action_lower:
+        if "set" in action_lower and "extract" not in action_lower:
             key = params.get("key", "")
             value = params.get("value")
             if key:
                 self._eval_state[key] = value
                 variables[key] = value
+            return True
+
+        if "extract_version" in action_lower or action_lower == "eval.extract_version":
+            import re as _rev
+            # Source: explicit 'from' string, or a variable name in 'from_var', or 'url'
+            from_val = (
+                params.get("from")
+                or params.get("url")
+                or params.get("source")
+            )
+            from_var = params.get("from_var") or params.get("list_var")
+            if from_var:
+                from_val = variables.get(from_var, "")
+
+            # Resolve ${var} references in the source string
+            if isinstance(from_val, list):
+                # list of URLs — pick the index specified (default 0 = first/oldest; -1 = latest)
+                idx = int(params.get("index", 0))
+                from_val = from_val[idx] if from_val else ""
+            elif not isinstance(from_val, str):
+                from_val = str(from_val or "")
+
+            # Default pattern: semver-style digits e.g. 1.0.02.00 or v2.3.1
+            pattern = params.get("pattern", r"(\d+\.\d+[\.\d]*)")
+            match = _rev.search(pattern, from_val)
+            version = match.group(1) if match else ""
+
+            store_as = params.get("store_as", "firmware_version")
+            variables[store_as] = version
+            self._eval_state[store_as] = version
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, version, "runtime_data")
+            print(f"      🏷  Extracted version: {version!r} from {from_val!r} → stored as '{store_as}'")
+
+            # Optionally update the TestRail run name
+            run_name_template = params.get("run_name")
+            append_to_run_name = params.get("append_to_run_name")
+            if (run_name_template or append_to_run_name) and version:
+                tr_run_id = int(variables.get("_testrail_run_id", 0))
+                if tr_run_id:
+                    try:
+                        from ..services.testrail_service import TestRailService
+                        cfg = self.config
+                        tr = TestRailService(
+                            url=cfg.get_variable("testrail.url") or cfg.get_variable("testrail_url", None),
+                            username=cfg.get_variable("testrail.username") or cfg.get_variable("testrail_username", None),
+                            api_key=cfg.get_variable("testrail.api_key") or cfg.get_variable("testrail_api_key", None),
+                        )
+
+                        def _subst_run_name(value: str) -> str:
+                            return _rev.sub(
+                                r"\$\{(\w+)\}",
+                                lambda m: str(variables.get(m.group(1), m.group(0))),
+                                str(value),
+                            )
+
+                        if run_name_template:
+                            new_name = _subst_run_name(run_name_template)
+                        else:
+                            current_run = tr.get_run(tr_run_id)
+                            current_name = str(current_run.get("name", "") or "")
+                            suffix = _subst_run_name(append_to_run_name)
+                            if suffix and current_name.endswith(suffix):
+                                print(f"      ℹ  TestRail run [{tr_run_id}] already ends with: {suffix!r}")
+                                return True
+                            new_name = f"{current_name}{suffix}" if current_name else suffix
+
+                        if new_name:
+                            tr.update_run(tr_run_id, name=new_name)
+                            print(f"      ✅ TestRail run [{tr_run_id}] renamed to: {new_name!r}")
+                    except Exception as _e:
+                        print(f"      ⚠  Could not update run name: {_e}")
             return True
 
         if "get" in action_lower:
@@ -3490,9 +3573,26 @@ class TestRunner:
                 eff_key    = params.get("access_key_id")    or variables.get("aws_access_key_id")
                 eff_secret = params.get("secret_access_key") or variables.get("aws_secret_access_key")
 
+                # Default download_dir: <cwd>/Firmware/<folder_prefix>
+                # Mirrors the S3 folder structure under a local Firmware/ root.
+                # The directory is created automatically if it doesn't exist.
+                folder_prefix = params.get("folder_prefix") or ""
+                _raw_download_dir = params.get("download_dir")
+                if _raw_download_dir:
+                    effective_download_dir = _raw_download_dir
+                else:
+                    from pathlib import Path as _Path
+                    # Strip leading slashes / bucket-name prefix from folder_prefix
+                    _rel = folder_prefix.lstrip("/").rstrip("/")
+                    effective_download_dir = str(_Path.cwd() / "Firmware" / _rel) if _rel else str(_Path.cwd() / "Firmware")
+
+                from pathlib import Path as _Path
+                _Path(effective_download_dir).mkdir(parents=True, exist_ok=True)
+                print(f"      📁 Download dir: {effective_download_dir}")
+
                 urls = aws_service.list_firmware_files(
                     bucket_name=bucket_name,
-                    folder_prefix=params.get("folder_prefix"),
+                    folder_prefix=folder_prefix,
                     filename_pattern=params.get("filename_pattern"),
                     version_pattern=params.get("version_pattern"),
                     file_extension=params.get("file_extension"),
@@ -3501,7 +3601,7 @@ class TestRunner:
                     cloudfront_filename_only=params.get(
                         "cloudfront_filename_only", False
                     ),
-                    download_dir=params.get("download_dir"),
+                    download_dir=effective_download_dir,
                     protocol=params.get("protocol", "https"),
                     access_key_id=eff_key,
                     secret_access_key=eff_secret,
@@ -3513,6 +3613,22 @@ class TestRunner:
                 if store_as:
                     variables[store_as] = urls
                     print(f"      Stored {len(urls)} URL(s) as: {store_as!r}")
+
+                # Build and store local file paths (always, since we always download now)
+                if urls:
+                    import os as _os
+                    local_paths = [
+                        str(_Path(effective_download_dir) / _os.path.basename(u.split("?")[0]))
+                        for u in urls
+                    ]
+                    local_paths_as = params.get("local_paths_as", "")
+                    if local_paths_as:
+                        variables[local_paths_as] = local_paths
+                        print(f"      Stored {len(local_paths)} local path(s) as: {local_paths_as!r}")
+                    # Always expose as a predictable name too
+                    variables["_aws_local_paths"] = local_paths
+                    variables["_aws_local_path"] = local_paths[0]
+                    print(f"      Local path(s): {local_paths}")
 
                 # Always expose result as last_response for eval.exec steps
                 variables["last_response"] = urls
@@ -3690,6 +3806,7 @@ class TestRunner:
             "test.wait": "wait",
             "log": "log",
             # API actions - map dot notation to space notation
+            "api.request": "api request",
             "api.get": "api get",
             "api.post": "api post",
             "api.put": "api put",
@@ -3737,6 +3854,44 @@ class TestRunner:
                 service, step, variables, soft_assert_manager, step_number
             )
 
+    def _resolve_step_params(self, step, variables: dict) -> dict:
+        """Resolve step variables for display and execution using the same rules."""
+        if hasattr(self.config, "substitute_recursive"):
+            # For GlobalConfigManager, set test variables in runtime scope
+            for key, value in variables.items():
+                self.config.set_variable(key, value, "runtime_data")
+
+            # First, resolve nested variables in the test variables
+            resolved_vars = variables.copy()
+            max_iterations = 10
+            for iteration in range(max_iterations):
+                previous_vars = resolved_vars.copy()
+                for key, value in resolved_vars.items():
+                    if isinstance(value, str):
+                        new_value = self.config.substitute_variables(
+                            value, resolved_vars
+                        )
+                        resolved_vars[key] = new_value
+                if resolved_vars == previous_vars:
+                    break
+
+            for key, value in resolved_vars.items():
+                self.config.set_variable(key, value, "runtime_data")
+
+            return self.config.substitute_recursive(
+                step.__dict__.copy(), additional_vars=variables
+            )
+
+        resolved_vars = variables.copy()
+        for _ in range(3):
+            for key, value in resolved_vars.items():
+                if isinstance(value, str):
+                    resolved_vars[key] = self._replace_variables(
+                        value, resolved_vars
+                    )
+
+        return self._replace_variables(step.__dict__.copy(), resolved_vars)
+
     def _execute_step_internal(
         self,
         service,
@@ -3766,52 +3921,7 @@ class TestRunner:
                     service, step, variables, soft_assert_manager, step_number
                 )
 
-            # Use GlobalConfigManager's variable substitution if available
-            if hasattr(self.config, "substitute_recursive"):
-                # For GlobalConfigManager, set test variables in runtime scope
-                for key, value in variables.items():
-                    self.config.set_variable(key, value, "runtime_data")
-
-                # First, resolve nested variables in the test variables
-                # Do multiple passes to handle nested variables (e.g., api_base_url contains ${device_ip})
-                resolved_vars = variables.copy()
-                max_iterations = 10
-                for iteration in range(max_iterations):
-                    previous_vars = resolved_vars.copy()
-                    for key, value in resolved_vars.items():
-                        if isinstance(value, str):
-                            # Substitute variables in the value
-                            new_value = self.config.substitute_variables(
-                                value, resolved_vars
-                            )
-                            resolved_vars[key] = new_value
-                    # If no changes, we're done
-                    if resolved_vars == previous_vars:
-                        break
-
-                # Update the config with the resolved values
-                for key, value in resolved_vars.items():
-                    self.config.set_variable(key, value, "runtime_data")
-
-                # Use GlobalConfigManager's substitution with all variables
-                # Pass variables as additional_vars to ensure they're available
-                step_params = self.config.substitute_recursive(
-                    step.__dict__.copy(), additional_vars=variables
-                )
-            else:
-                # Fallback to old method with multi-pass substitution
-                resolved_vars = variables.copy()
-                # Multiple passes to resolve nested variables
-                for _ in range(3):  # Up to 3 levels of nesting
-                    for key, value in resolved_vars.items():
-                        if isinstance(value, str):
-                            resolved_vars[key] = self._replace_variables(
-                                value, resolved_vars
-                            )
-
-                step_params = self._replace_variables(
-                    step.__dict__.copy(), resolved_vars
-                )
+            step_params = self._resolve_step_params(step, variables)
 
             action = step_params.get("action", "").lower()
             # Normalize action (convert dot notation to legacy format)
@@ -4097,9 +4207,29 @@ class TestRunner:
                 headers = step_params.get("headers", {}) or params_dict.get(
                     "headers", {}
                 )
-                json_data = step_params.get("json_data", {}) or params_dict.get(
-                    "json_data", {}
+                json_data = (
+                    step_params.get("json_data")
+                    or params_dict.get("json_data")
+                    or step_params.get("body")
+                    or params_dict.get("body")
                 )
+                # If body/json_data is still empty, collect any unknown top-level
+                # params as body fields (handles mis-indented YAML where body fields
+                # end up as siblings of 'body:' rather than children)
+                if not json_data:
+                    _known = {
+                        "method", "url", "device_id", "headers", "json_data",
+                        "body", "data", "params", "store_as", "store_response",
+                        "fail_on_error", "verbose_logging", "show_full_response",
+                        "full_log", "parameters", "Accept", "Content-Type",
+                        "API POST", "API GET", "API PUT", "API PATCH", "API DELETE",
+                    }
+                    _extra = {k: v for k, v in step_params.items() if k not in _known and v is not None}
+                    if _extra:
+                        print(f"      ⚠  'body' is empty — using top-level params as body: {list(_extra.keys())}")
+                        json_data = _extra
+                    else:
+                        json_data = {}
                 data = step_params.get("data", {}) or params_dict.get("data", {})
                 params = step_params.get("params", {}) or params_dict.get("params", {})
 

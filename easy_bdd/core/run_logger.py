@@ -128,6 +128,16 @@ class RunLogger:
         if pairs:
             self._info(f"    Params:")
             for k, v in pairs:
+                if isinstance(v, dict):
+                    if not v:
+                        self._info(f"      {k}: {{}}")
+                        continue
+                    self._info(f"      {k}:")
+                    for nested_k, nested_v in v.items():
+                        nested_str = _truncate(str(nested_v), 200)
+                        self._info(f"        {nested_k}: {nested_str}")
+                    continue
+
                 v_str = _truncate(str(v), 200)
                 self._info(f"      {k}: {v_str}")
 

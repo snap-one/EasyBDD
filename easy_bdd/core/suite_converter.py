@@ -13,11 +13,11 @@ Source case prefix taxonomy (mybdd format):
                     → variables injected into generated YAML files
 
   Shared: <name>  — custom_preconds: pipe-delimited step block
-                    → Keyword: <name>  in new TestRail suite
+                    → Shared: <name>  in new TestRail suite
                     → entry in shared_steps.yaml
 
   Feature: <name> — custom_preconds + custom_expected: step blocks
-                    → Inline: <name>  in new TestRail suite
+                    → Feature: <name>  in new TestRail suite
                     → one YAML file per Feature: case
 
 Multiple Given: cases (multiple devices / SKUs):
@@ -196,8 +196,8 @@ class ConversionResult:
         print(f"  {'-'*30}")
         for role, label in (
             ("given",   "Given: → Var:"),
-            ("shared",  "Shared: → Keyword:"),
-            ("feature", "Feature: → Inline:"),
+            ("shared",  "Shared: → Shared:"),
+            ("feature", "Feature: → Feature:"),
             ("unknown", "Skipped (unknown)"),
         ):
             group = by_role.get(role, [])
@@ -600,9 +600,9 @@ class BddSuiteConverter:
                 for d in devices:
                     print(f"  Var: {d['name']}  ({len(d['vars'])} var(s))")
                 for ps in parsed_shared:
-                    print(f"  Keyword: {ps['keyword_name']}  ({len(ps['steps'])} step(s))")
+                    print(f"  Shared: {ps['keyword_name']}  ({len(ps['steps'])} step(s))")
                 for pf in parsed_features:
-                    print(f"  Inline: {pf['clean']}  ({len(pf['steps'])} step(s))")
+                    print(f"  Feature: {pf['clean']}  ({len(pf['steps'])} step(s))")
             return None
 
         # ── create or use target suite ─────────────────────────────────
@@ -658,7 +658,7 @@ class BddSuiteConverter:
                 if verbose:
                     print(f"  [TR error] Var: {d['name']}: {exc}", file=sys.stderr)
 
-        # ── Keyword: cases (Shared:) ───────────────────────────────────
+        # ── Shared: cases ───────────────────────────────────────────────
         for ps in parsed_shared:
             c   = ps["case"]
             sec = _target_section(c)
@@ -667,22 +667,22 @@ class BddSuiteConverter:
                 default_flow_style=False, sort_keys=False
             ).rstrip()
             payload = {
-                "title":           f"Keyword: {ps['keyword_name']}",
+                "title":           f"Shared: {ps['keyword_name']}",
                 "custom_preconds": steps_yaml,
             }
             try:
                 new_case = self._tr.add_case(sec, **payload)
                 if verbose:
-                    print(f"  [TR created] Keyword: {ps['keyword_name']}  ({len(ps['steps'])} step(s))")
+                    print(f"  [TR created] Shared: {ps['keyword_name']}  ({len(ps['steps'])} step(s))")
                 for cr in result.cases:
                     if cr.source_id == c.get("case_id", c.get("id", 0)) and cr.role == "shared":
                         cr.tr_case_id = new_case.get("id")
                         break
             except Exception as exc:
                 if verbose:
-                    print(f"  [TR error] Keyword: {ps['keyword_name']}: {exc}", file=sys.stderr)
+                    print(f"  [TR error] Shared: {ps['keyword_name']}: {exc}", file=sys.stderr)
 
-        # ── Inline: cases (Feature:) ───────────────────────────────────
+        # ── Feature: cases ─────────────────────────────────────────────
         for pf in parsed_features:
             c   = pf["case"]
             sec = _target_section(c)
@@ -701,7 +701,7 @@ class BddSuiteConverter:
                 ).rstrip() if pf["steps"] else ""
 
             payload: Dict[str, Any] = {
-                "title":           f"Inline: {pf['clean']}",
+                "title":           f"Feature: {pf['clean']}",
                 "custom_preconds": preconds_text,
             }
 
@@ -709,14 +709,14 @@ class BddSuiteConverter:
                 new_case = self._tr.add_case(sec, **payload)
                 if verbose:
                     todo_mark = f"  [{pf['todos']} TODO]" if pf["todos"] else ""
-                    print(f"  [TR created] Inline: {pf['clean']}  ({len(pf['steps'])} step(s)){todo_mark}")
+                    print(f"  [TR created] Feature: {pf['clean']}  ({len(pf['steps'])} step(s)){todo_mark}")
                 for cr in result.cases:
                     if cr.source_id == c.get("case_id", c.get("id", 0)) and cr.role == "feature":
                         cr.tr_case_id = new_case.get("id")
                         break
             except Exception as exc:
                 if verbose:
-                    print(f"  [TR error] Inline: {pf['clean']}: {exc}", file=sys.stderr)
+                    print(f"  [TR error] Feature: {pf['clean']}: {exc}", file=sys.stderr)
 
         return target_suite_id
 

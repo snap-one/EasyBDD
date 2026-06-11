@@ -232,6 +232,38 @@ def _parse_json(text: str) -> Optional[Dict]:
     return None
 
 
+def _expand_json_payload(raw: str) -> Any:
+    """Try to parse a JSON/Python-dict payload string into a native dict.
+
+    If parsing succeeds, applies _sub_vars to every string value so that
+    ``$variable`` references become ``${variable}`` in the output YAML.
+    Non-string values (int, float, bool, None) are preserved as-is so they
+    render as native YAML scalars rather than quoted strings.
+
+    Returns the expanded dict on success, or the original (var-substituted)
+    string if the input cannot be parsed as a dict.
+    """
+    if not raw or raw in ("{}", ""):
+        return None
+
+    d = _parse_json(raw)
+    if not isinstance(d, dict):
+        # Not a JSON object — return the string with vars substituted
+        return _sub_vars(raw)
+
+    def _convert_value(v: Any) -> Any:
+        if isinstance(v, str):
+            return _sub_vars(v)
+        if isinstance(v, dict):
+            return {k: _convert_value(vv) for k, vv in v.items()}
+        if isinstance(v, list):
+            return [_convert_value(i) for i in v]
+        # int, float, bool, None — keep native
+        return v
+
+    return {k: _convert_value(v) for k, v in d.items()}
+
+
 def _clean_var_key(k: str) -> str:
     """Strip surrounding quotes and leading $ from a variable key."""
     k = k.strip().strip("\"'").lstrip("$")
@@ -388,7 +420,7 @@ def _map_function(param_dict: Dict, data_str: str) -> Dict:
 
     if name == "sleep":
         sec = param_dict.get("sec", param_dict.get("seconds", 1))
-        return {"action": "browser.wait", "seconds": float(sec)}
+        return {"action": "test.sleep", "seconds": float(sec)}
 
     if name in ("exec", "execute"):
         # Use _translate_code (not _sub_vars) — Python code context, not a YAML string value.
@@ -429,13 +461,14 @@ def _map_function(param_dict: Dict, data_str: str) -> Dict:
         url     = _sub_vars(str(param_dict.get("url", "")))
         path    = _sub_vars(str(param_dict.get("path", param_dict.get("command", ""))))
         full_url = f"{url}{path}" if path else url
-        if method == "SEND" or full_url.startswith("wss://") or "${url}" in full_url:
-            # WebSocket send
-            body_val = _sub_vars(data_str) if data_str and data_str not in ("{}", "") else path
+        is_ws = method == "SEND" or full_url.startswith("wss://") or full_url.startswith("ws://")
+        if is_ws:
+            body_val = _expand_json_payload(data_str) if data_str and data_str not in ("{}", "") else _sub_vars(path)
             return {"action": "websocket.send", "url": full_url, "data": body_val, "store_as": "last_response"}
         step: Dict[str, Any] = {"action": "api.request", "method": method, "url": full_url, "store_as": "last_response"}
-        if data_str and data_str not in ("{}", ""):
-            step["body"] = data_str
+        payload = _expand_json_payload(data_str)
+        if payload is not None:
+            step["body"] = payload
         headers = param_dict.get("headers")
         if headers:
             step["headers"] = headers
@@ -446,16 +479,18 @@ def _map_function(param_dict: Dict, data_str: str) -> Dict:
         url     = _sub_vars(str(param_dict.get("url", "")))
         path    = _sub_vars(str(param_dict.get("path", "")))
         step = {"action": "api.request", "method": method, "url": f"{url}{path}", "store_as": "last_response"}
-        if data_str and data_str not in ("{}", ""):
-            step["body"] = data_str
+        payload = _expand_json_payload(data_str)
+        if payload is not None:
+            step["body"] = payload
         return step
 
     if name == "control4":
         method  = param_dict.get("method", "post").upper()
         path    = _sub_vars(str(param_dict.get("path", "")))
         step = {"action": "api.request", "method": method, "url": "${control4_url}" + path, "store_as": "last_response"}
-        if data_str and data_str not in ("{}", ""):
-            step["body"] = data_str
+        payload = _expand_json_payload(data_str)
+        if payload is not None:
+            step["body"] = payload
         return step
 
     if name == "telnet":
@@ -495,6 +530,23 @@ def _map_function(param_dict: Dict, data_str: str) -> Dict:
 
     if name == "response_like":
         return {"action": "test.assert", "expression": f"str(last_response).__contains__(str({data_str!r}))"}
+
+    if name == "find_firmware_in_location":
+        # Scans a local/S3 folder for firmware files matching a pattern
+        folder  = _sub_vars(str(param_dict.get("location_path", param_dict.get("folder_prefix", ""))))
+        ftype   = _sub_vars(str(param_dict.get("file_type", "*.imag")))
+        store   = param_dict.get("store_as", "firmware_files")
+        # Convert glob pattern to regex-style for aws.list_files filename_pattern
+        pattern = ftype.replace("*.", "").strip("*")
+        step: Dict = {
+            "action": "aws.list_files",
+            "bucket_name": "${aws_bucket}",
+            "folder_prefix": folder,
+            "store_as": store,
+        }
+        if pattern and pattern != ftype:
+            step["filename_pattern"] = f".{pattern}$"
+        return step
 
     if name == "upload_cloud_firmware":
         bucket   = _sub_vars(str(param_dict.get("aws_bucket", "")))
@@ -628,7 +680,7 @@ def _parse_step_line(line: str) -> Optional[Dict]:
             sec = float(raw)
         except ValueError:
             sec = raw
-        return {"action": "browser.wait", "seconds": sec}
+        return {"action": "test.sleep", "seconds": sec}
 
     # ── browser | {...} | ─────────────────────────────────────────────────
     m = re.match(r"^browser\s*\|\s*(\{.+\})\s*\|", line, re.I)
@@ -680,13 +732,15 @@ def _parse_step_line(line: str) -> Optional[Dict]:
         path   = _sub_vars(m.group(3).strip())
         data   = m.group(4).strip()
         full_url = f"{url}{path}"
-        if method == "SEND" or url.startswith("wss://") or url.startswith("${url}"):
-            body_val = _sub_vars(data) if data and data not in ("{}", "") else path
-            return {"action": "websocket.send", "url": full_url if not method == "SEND" else url,
+        is_ws = method == "SEND" or url.startswith("wss://") or url.startswith("ws://")
+        if is_ws:
+            body_val = _expand_json_payload(data) if data and data not in ("{}", "") else _sub_vars(path)
+            return {"action": "websocket.send", "url": full_url if method != "SEND" else url,
                     "data": body_val, "store_as": "last_response"}
         step: Dict[str, Any] = {"action": "api.request", "method": method, "url": full_url, "store_as": "last_response"}
-        if data and data not in ("{}", ""):
-            step["body"] = _sub_vars(data)
+        payload = _expand_json_payload(data)
+        if payload is not None:
+            step["body"] = payload
         return step
 
     # ── device | url | path | method | params | data | ────────────────────
@@ -697,8 +751,9 @@ def _parse_step_line(line: str) -> Optional[Dict]:
         method = m.group(3).strip().upper()
         data   = m.group(5).strip()
         step = {"action": "api.request", "method": method, "url": f"{url}{path}", "store_as": "last_response"}
-        if data and data not in ("{}", ""):
-            step["body"] = _sub_vars(data)
+        payload = _expand_json_payload(data)
+        if payload is not None:
+            step["body"] = payload
         return step
 
     # ── device_core | {...} | ─────────────────────────────────────────────
@@ -710,7 +765,9 @@ def _parse_step_line(line: str) -> Optional[Dict]:
         data   = d.get("data", {})
         step = {"action": "api.request", "method": method, "url": "${base_url}" + path, "store_as": "last_response"}
         if data:
-            step["body"] = _sub_vars(str(data))
+            payload = _expand_json_payload(json.dumps(data)) if isinstance(data, dict) else _expand_json_payload(str(data))
+            if payload is not None:
+                step["body"] = payload
         return step
 
     # ── control4 | {path} | data | ────────────────────────────────────────
@@ -722,8 +779,9 @@ def _parse_step_line(line: str) -> Optional[Dict]:
         method   = path_d.get("method", "post").upper()
         path     = _sub_vars(str(path_d.get("path", "")))
         step = {"action": "api.request", "method": method, "url": "${control4_url}" + path, "store_as": "last_response"}
-        if data and data not in ("{}", ""):
-            step["body"] = _sub_vars(data)
+        payload = _expand_json_payload(data)
+        if payload is not None:
+            step["body"] = payload
         return step
 
     # ── luma_ovrc / device_luma | method | path | data | ─────────────────
@@ -733,14 +791,18 @@ def _parse_step_line(line: str) -> Optional[Dict]:
         path   = _sub_vars(m.group(2).strip())
         data   = m.group(3).strip()
         step = {"action": "api.request", "method": method, "url": "${base_url}" + path, "store_as": "last_response"}
-        if data and data not in ("{}", ""):
-            step["body"] = _sub_vars(data)
+        payload = _expand_json_payload(data)
+        if payload is not None:
+            step["body"] = payload
         return step
 
     # ── ws | data | (WebSocket tunHttp) ───────────────────────────────────
     m = re.match(r"^ws\s*\|\s*(.+)\s*\|", line, re.I)
     if m:
-        data = _sub_vars(m.group(1).strip())
+        raw = m.group(1).strip()
+        data = _expand_json_payload(raw)
+        if data is None:
+            data = _sub_vars(raw)
         return {"action": "websocket.send", "data": data, "store_as": "last_response"}
 
     # ── function | {param} | data | ───────────────────────────────────────

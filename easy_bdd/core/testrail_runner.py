@@ -13,14 +13,14 @@ Case prefix taxonomy:
   Var: <name>       — key: value pairs injected as variables into every test
   Setup: <name>     — executes before Test: cases
   Test: <name>      — main test case (body: tag: or file: pointer to local YAML)
-  Inline: <name>    — main test case (steps written directly in TestRail fields)
+  Feature: <name>   — main test case (steps written directly in TestRail fields)
   Teardown: <name>  — executes after all Test: cases
 
 Test: case body format (Steps/Preconditions field):
   tag: <tag>    — run all local YAML tests in tests/cases/ that have this tag
   file: <path>  — run a specific YAML file (relative to tests/cases/ or absolute)
 
-Inline: case body formats (all written in the Preconditions field):
+Feature: case body formats (all written in the Preconditions field):
 
   PREFERRED — same dot-notation format used in local YAML files:
     - aws.list_files:
@@ -226,7 +226,7 @@ def _extract_inline_data(text: str):
 def _normalize_shared_step_refs(steps: List[Any]) -> List[Any]:
     """Normalize ``shared_step`` reference names in a steps list to slug format.
 
-    When a Keyword: case body references another keyword with spaces or special
+    When a Shared: case body references another shared step with spaces or special
     characters (e.g. ``- shared_step: Connect to Device``), the reference must
     match the slugified key used in shared_steps.yaml
     (``Connect_to_Device``).  This function rewrites every ``shared_step``
@@ -279,6 +279,10 @@ def _fix_step_list_indent(text: str) -> str:
             # that a following "- item" at flush-level is treated as its list value
             # rather than as a new step at the same indent.
             last_bare_key_indent: Optional[str] = None
+            # Stack for nested bare keys (e.g. body: → user:/password:)
+            # Each entry is (source_indent, target_prefix) for a bare key seen at
+            # source_indent that should make its children emit at target_prefix.
+            _bare_key_stack: list = []  # list of (src_indent, tgt_prefix)
 
             while i < len(lines):
                 nl = lines[i]
@@ -286,6 +290,7 @@ def _fix_step_list_indent(text: str) -> str:
                     result.append(nl)
                     i += 1
                     last_bare_key_indent = None
+                    _bare_key_stack.clear()
                     break
                 nl_indent = len(nl) - len(nl.lstrip())
                 stripped = nl.lstrip()
@@ -300,9 +305,21 @@ def _fix_step_list_indent(text: str) -> str:
                         continue  # more list items may follow
                     break
 
-                # Any non-list flush-level line resets bare-key tracking
+                # Any non-list flush-level line:
+                # When dash_indent==0 (step starts at col 0), flush-left params
+                # (indent 0) are ALSO at "same level" — re-indent them rather than
+                # treating them as a new step.
                 if nl_indent <= dash_indent:
-                    last_bare_key_indent = None
+                    if dash_indent == 0 and _PARAM_LINE_RE.match(stripped):
+                        # Pop bare-key stack entries that are no longer parents
+                        # (i.e. same or shallower indent than current line)
+                        while _bare_key_stack and _bare_key_stack[-1][0] >= nl_indent:
+                            _bare_key_stack.pop()
+                        # fall through to the re-indent block below
+                        pass
+                    else:
+                        last_bare_key_indent = None
+                        _bare_key_stack.clear()
 
                 # Already correctly indented → keep as-is
                 if nl_indent > dash_indent:
@@ -315,11 +332,22 @@ def _fix_step_list_indent(text: str) -> str:
                     if key in _STEP_ANNOTATION_KEYS:
                         i += 1  # drop bare annotation lines
                         continue
-                    result.append(param_prefix + stripped)
+                    # Determine the correct output prefix:
+                    # if there's an active bare-key parent, nest under it
+                    if _bare_key_stack:
+                        current_prefix = _bare_key_stack[-1][1] + '  '
+                    else:
+                        current_prefix = param_prefix
+                    result.append(current_prefix + stripped)
                     i += 1
-                    # Remember if this was a bare key so following list items can be nested
+                    # Remember if this was a bare key so following list items / child
+                    # params can be nested under it
                     val_part = stripped.split(':', 1)[1].strip() if ':' in stripped else ''
-                    last_bare_key_indent = param_prefix if not val_part else None
+                    if not val_part:
+                        last_bare_key_indent = current_prefix
+                        _bare_key_stack.append((nl_indent, current_prefix))
+                    else:
+                        last_bare_key_indent = None
                 else:
                     result.append(nl)
                     i += 1
@@ -331,10 +359,13 @@ def _fix_step_list_indent(text: str) -> str:
 
 
 # Ordered prefix → role mapping (order matters: longest prefix checked first)
+# "Shared:" replaces "Keyword:", "Feature:" replaces "Inline:" — old prefixes kept for back-compat.
 _CASE_ROLES: Dict[str, str] = {
     "Teardown:": "teardown",
-    "Keyword:":  "keyword",
-    "Inline:":   "inline",
+    "Shared:":   "keyword",
+    "Keyword:":  "keyword",   # legacy alias
+    "Feature:":  "inline",
+    "Inline:":   "inline",    # legacy alias
     "Setup:":    "setup",
     "Test:":     "test",
     "Var:":      "var",
@@ -652,6 +683,7 @@ class TestRailRunner:
         # run_vars.extra are static overrides supplied in the run description;
         # Var: case variables are re-extracted fresh inside each _execute_cases call.
         static_extra = dict(run_vars.extra)
+        static_extra["_testrail_run_id"] = run_id  # available to eval.extract_version etc.
 
         # Phase 4–6: Execute with retry loop
         retry_remaining = run_vars.retry
@@ -922,10 +954,10 @@ class TestRailRunner:
                 f"{list(injected_vars.keys())}"
             )
 
-        # Build shared_steps.yaml from Keyword: cases so Inline: cases can reference them
+        # Build shared_steps.yaml from Shared: cases so Feature: cases can reference them
         self._sync_keyword_cases(classified)
 
-        # Filter Test: / Inline: cases to only those that need running
+        # Filter Test: / Feature: cases to only those that need running
         pending_tests = [
             t for t in classified
             if t["role"] in ("test", "inline")
@@ -965,7 +997,7 @@ class TestRailRunner:
             start_time = time.time()
 
             if role == "inline":
-                test_passed, comment_lines = self._run_inline(case, injected_vars, verbose)
+                test_passed, comment_lines = self._run_feature(case, injected_vars, verbose)
             else:
                 yaml_files = self._resolve(body, title, injected_vars)
                 if not yaml_files:
@@ -974,14 +1006,14 @@ class TestRailRunner:
                         comment = (
                             "Case body is empty.\n"
                             "Test: cases: add 'tag: <tag>' or 'file: <path>' to the Steps field.\n"
-                            "To write steps directly in TestRail, rename to 'Inline: <title>'."
+                            "To write steps directly in TestRail, rename to 'Feature: <title>'."
                         )
                     elif not (body.startswith("tag:") or body.startswith("file:")):
                         comment = (
                             f"Unrecognised body format. Use:\n"
                             f"  tag: <tag>    — run all local YAMLs with that tag\n"
                             f"  file: <path>  — run a specific YAML file\n"
-                            f"Or rename the case to 'Inline: {title}' to write steps directly.\n\n"
+                            f"Or rename the case to 'Feature: {title}' to write steps directly.\n\n"
                             f"Body received:\n{body[:200]}"
                         )
                     else:
@@ -1026,12 +1058,12 @@ class TestRailRunner:
         return passed, failed, skipped
 
     _DEFINITION_ROLES = {
-        "keyword": "Shared step definition",
+        "keyword": "Shared step definition (Shared:)",
         "var": "Variable definition",
     }
 
     def _mark_definitions(self, classified: List[Dict]) -> None:
-        """Mark Keyword: and Var: cases as Passed so they don't stay Untested or Retest in the run."""
+        """Mark Shared: and Var: cases as Passed so they don't stay Untested or Retest in the run."""
         for case in classified:
             role = case.get("role", "")
             if role not in self._DEFINITION_ROLES:
@@ -1043,7 +1075,7 @@ class TestRailRunner:
                 self._tr.add_result(
                     case["id"],
                     status_id=TestRailService.STATUS_PASSED,
-                    comment=f"{label} — not directly executable. Referenced via shared_step actions in Inline: cases.",
+                    comment=f"{label} — not directly executable. Referenced via shared_step actions in Feature: cases.",
                 )
             except Exception:
                 pass
@@ -1104,7 +1136,7 @@ class TestRailRunner:
             return None
 
     def _build_inline_test_dict(self, case: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Build an in-memory Easy BDD test dict from an Inline: case.
+        """Build an in-memory Easy BDD test dict from a Feature: case.
 
         Read priority:
           1. custom_preconds as YAML list  → plain steps list written by UI or converter
@@ -1115,7 +1147,7 @@ class TestRailRunner:
         """
         import yaml as _yaml
 
-        title = case.get("clean_title", case.get("title", "Inline Test"))
+        title = case.get("clean_title", case.get("title", "Feature Test"))
         steps: List[Dict[str, Any]] = []
         variables: Dict[str, Any] = {}
         data_sets: Optional[List[Dict[str, Any]]] = None
@@ -1183,13 +1215,13 @@ class TestRailRunner:
             result["data"] = data_sets
         return result
 
-    def _run_inline(
+    def _run_feature(
         self,
         case: Dict[str, Any],
         injected_vars: Dict[str, Any],
         verbose: bool,
     ) -> Tuple[bool, List[str]]:
-        """Execute an Inline: case by materialising it as a temp YAML file."""
+        """Execute a Feature: case by materialising it as a temp YAML file."""
         import yaml as _yaml
 
         # If the test object from get_tests lacks case body fields, fetch the full case.
@@ -1225,7 +1257,7 @@ class TestRailRunner:
                 f"{len(steps_clean)} clean): {repr(steps_clean[:200])}",
             ]
             return False, [
-                "Inline case has no steps.\n"
+                "Feature case has no steps.\n"
                 + "\n".join(debug_lines) + "\n"
                 "\nPaste steps in the Preconditions field using one of these formats:\n"
                 "\n"
@@ -1271,10 +1303,10 @@ class TestRailRunner:
                 pass
 
     def _sync_keyword_cases(self, classified: List[Dict]) -> None:
-        """Parse Keyword: cases and write them into artifact_dir/shared_steps.yaml.
+        """Parse Shared: cases and write them into artifact_dir/shared_steps.yaml.
 
-        Each Keyword: case becomes one entry in shared_steps.yaml, keyed by its
-        clean_title (title with the 'Keyword: ' prefix stripped).
+        Each Shared: case becomes one entry in shared_steps.yaml, keyed by its
+        clean_title (title with the 'Shared: ' prefix stripped).
 
         Accepted Preconditions formats:
 
@@ -1349,7 +1381,7 @@ class TestRailRunner:
             try:
                 parsed = _yaml_safe_load_lenient(body)
             except Exception as exc:
-                print(f"  [warn] Keyword '{name}': could not parse body: {exc}")
+                print(f"  [warn] Shared '{name}': could not parse body: {exc}")
                 continue
 
             if isinstance(parsed, list):
@@ -1363,7 +1395,7 @@ class TestRailRunner:
                 # Single-step dict
                 entry = {"steps": _normalize_shared_step_refs([parsed])}
             else:
-                print(f"  [warn] Keyword '{name}': unrecognised body format, skipping")
+                print(f"  [warn] Shared '{name}': unrecognised body format, skipping")
                 continue
 
             if existing.get(name) != entry:
@@ -1376,7 +1408,7 @@ class TestRailRunner:
                     _yaml.dump(existing, f, allow_unicode=True,
                                default_flow_style=False, sort_keys=False)
                 print(f"  [info] Wrote {len([c for c in keyword_cases if c.get('clean_title')])} "
-                      f"keyword(s) to {out.name}")
+                      f"shared step(s) to {out.name}")
             except Exception as exc:
                 print(f"  [warn] Could not write shared_steps.yaml: {exc}")
 

@@ -7,18 +7,24 @@ Run Easy BDD tests directly from TestRail — no local YAML files required for s
 ## Table of Contents
 
 1. [Quick Setup](#quick-setup)
-2. [Run Configuration](#run-configuration)
-3. [Case Prefix Taxonomy](#case-prefix-taxonomy)
-4. [Var: Cases — Variable Injection](#var-cases--variable-injection)
-5. [Inline: Cases — Writing Steps in TestRail](#inline-cases--writing-steps-in-testrail)
-6. [Parameterized Tests — Multiple Devices / SKUs](#parameterized-tests--multiple-devices--skus)
-7. [Loops and Iteration](#loops-and-iteration)
-8. [Fault Insertion and Timed Delays](#fault-insertion-and-timed-delays)
-9. [Test: Cases — Pointing to Local YAML](#test-cases--pointing-to-local-yaml)
-10. [Setup: and Teardown: Cases](#setup-and-teardown-cases)
-11. [Scheduling with Cron](#scheduling-with-cron)
-12. [Retry on Failure](#retry-on-failure)
-13. [Running from the CLI](#running-from-the-cli)
+2. [TestRail Author Checklist](#testrail-author-checklist)
+3. [Run Configuration](#run-configuration)
+4. [Case Prefix Taxonomy](#case-prefix-taxonomy)
+5. [Var: Cases — Variable Injection](#var-cases--variable-injection)
+6. [Inline: Cases — Writing Steps in TestRail](#inline-cases--writing-steps-in-testrail)
+7. [TestRail-Safe Syntax (Recommended)](#testrail-safe-syntax-recommended)
+8. [API + Token + Assert Recipes](#api--token--assert-recipes)
+9. [Response Variables and Extraction Rules](#response-variables-and-extraction-rules)
+10. [TestRail Inline Templates](#testrail-inline-templates)
+11. [YAML File Format vs TestRail Inline Format](#yaml-file-format-vs-testrail-inline-format)
+12. [Parameterized Tests — Multiple Devices / SKUs](#parameterized-tests--multiple-devices--skus)
+13. [Loops and Iteration](#loops-and-iteration)
+14. [Fault Insertion and Timed Delays](#fault-insertion-and-timed-delays)
+15. [Test: Cases — Pointing to Local YAML](#test-cases--pointing-to-local-yaml)
+16. [Setup: and Teardown: Cases](#setup-and-teardown-cases)
+17. [Scheduling with Cron](#scheduling-with-cron)
+18. [Retry on Failure](#retry-on-failure)
+19. [Running from the CLI](#running-from-the-cli)
 
 ---
 
@@ -37,6 +43,32 @@ Run Easy BDD tests directly from TestRail — no local YAML files required for s
    # or target a specific run by ID:
    python -m easy_bdd testrail-run <project_id> --run-id <run_id>
    ```
+
+---
+
+## TestRail Author Checklist
+
+Use this checklist before saving any Inline case in TestRail.
+
+- Prefer flow-style YAML in TestRail fields to avoid indentation breakage.
+- Keep one step per line starting with `- action.name: {...}`.
+- Quote variable substitutions and expressions, for example `"${token}"` and `"'systemInfo' in last_json"`.
+- Put `store_as` and `store_response` at step level, not inside `headers` or `body`.
+- For JSON extraction, use `last_json[...]` instead of `last_response[...]`.
+- For authenticated requests, set header as `Authorization: "Bearer ${token}"`.
+- Avoid `Content-Type` on GET requests unless endpoint requires it.
+- Ensure keys in assert expressions are quoted, for example `'errCode'`.
+- Run one smoke case first (`Inline: Token`) before larger suites.
+- If parsing fails, convert multiline nested maps to flow-style objects.
+
+Quick validation snippet:
+
+```yaml
+- api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
+- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}"}}
+- assert: {expression: "last_status == 200"}
+```
 
 ---
 
@@ -150,6 +182,218 @@ folder_prefix: vps/
 file_extension: .bin
 store_as: firmware_files
 ```
+
+---
+
+## TestRail-Safe Syntax (Recommended)
+
+TestRail text fields can flatten indentation, merge lines, or replace spaces with non-standard whitespace. To avoid parse issues, prefer **flow-style YAML** in Inline cases.
+
+### Best-practice pattern (flow style)
+
+```yaml
+- api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
+- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}", Accept: application/json}}
+- assert: {expression: "'systemInfo' in last_json"}
+```
+
+### Why this format is safer in TestRail
+
+- No dependency on indentation for nested objects.
+- Avoids common parse failures like `expected <block end>`.
+- Avoids line merge problems such as `Authorization: Bearer ${token}store_as: last_response`.
+
+### Rules for robust Inline steps
+
+- Quote expressions and interpolated values: `"${var}"`, `"'key' in last_json"`.
+- Keep `store_as` and `store_response` as top-level step params, not inside `headers` or `body`.
+- For GET requests, do not send `Content-Type` unless the endpoint explicitly requires it.
+
+---
+
+## API + Token + Assert Recipes
+
+### Recipe 1: Login and extract token
+
+```yaml
+- api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
+- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- assert: {expression: "token is not None and len(token) > 10"}
+```
+
+### Recipe 2: Authenticated status call
+
+```yaml
+- api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}", Accept: application/json}}
+- assert: {expression: "last_status == 200"}
+- assert: {expression: "'systemInfo' in last_json"}
+```
+
+### Recipe 3: Validate key/value pairs
+
+```yaml
+- assert: {expression: "last_json['restful_res']['errCode'] == 0"}
+- assert: {expression: "last_json['restful_res']['message'] == 'OK'"}
+- assert: {expression: "'token' in last_json['restful_res']"}
+```
+
+### Recipe 4: Reuse login via shared step
+
+```yaml
+- shared_step: Token
+- api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}"}}
+- assert: {expression: "last_status == 200"}
+```
+
+---
+
+## Response Variables and Extraction Rules
+
+After each `api.request`, the runner provides these variables:
+
+| Variable | Type | Use |
+|----------|------|-----|
+| `last_response` | `requests.Response` | Raw response object (status, headers, text access) |
+| `last_status` | `int` | HTTP status code |
+| `last_json` | `dict \| None` | Parsed JSON body when content-type is JSON |
+
+Important:
+
+- `last_response` is not subscriptable. This fails: `last_response['restful_res']`.
+- Use `last_json[...]` for JSON key extraction.
+- `store_as` in `api.request` is not required for token extraction if you use `last_json`.
+- Use `store_response` only if you need a custom captured response dictionary.
+
+### Correct vs incorrect extraction
+
+```yaml
+# Correct
+- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+
+# Incorrect
+- eval.run: {expression: "last_response['restful_res']['token']", store_as: token}
+```
+
+---
+
+## TestRail Inline Templates
+
+Copy/paste these patterns into an Inline case Preconditions field.
+
+### 1) Login and save token
+
+```yaml
+- api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
+- assert: {expression: "last_status == 200"}
+- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+```
+
+### 2) Token reuse for authenticated GET
+
+```yaml
+- shared_step: Token
+- api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}", Accept: application/json}}
+- assert: {expression: "last_status == 200"}
+```
+
+### 3) JSON schema validation
+
+```yaml
+- api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}"}}
+- test.assert_schema:
+    data: last_json
+    schema:
+      type: object
+      required: [restful_res]
+      properties:
+        restful_res:
+          type: object
+          required: [errCode, message]
+          properties:
+            errCode: {type: integer}
+            message: {type: string}
+```
+
+### 4) List extraction by index (for firmware URLs/files)
+
+```yaml
+- aws.list_files: {bucket_name: "${aws_bucket}", folder_prefix: "${folder_prefix}", store_as: last_response}
+- eval.run: {expression: "last_response[0]", store_as: first_item}
+- eval.run: {expression: "last_response[-1]", store_as: latest_item}
+```
+
+Optional version extraction from selected item:
+
+```yaml
+- eval.extract_version: {from_var: latest_item, pattern: "(\\d+\\.\\d+[\\.\\d]*)", store_as: firmware_version}
+```
+
+### 5) Shared-step call chain
+
+```yaml
+- shared_step: Token
+- shared_step: Device Precheck
+- api.request: {method: GET, url: "${url}/system/info", headers: {Authorization: "Bearer ${token}"}}
+- assert: {expression: "'systemInfo' in last_json"}
+```
+
+Template notes:
+
+- Keep expressions quoted.
+- Use last_json for key/value lookups.
+- Prefer flow-style maps in TestRail fields.
+
+---
+
+## YAML File Format vs TestRail Inline Format
+
+Use whichever format fits your workflow. Both run through the same action engine.
+
+### A) Local YAML file (`Test:` case)
+
+```yaml
+name: Token and System Status
+variables:
+  url: http://192.168.30.117:8001/api
+
+steps:
+  - api.request:
+      method: POST
+      url: ${url}/system/login
+      body:
+        user: ${username}
+        password: ${password}
+
+  - eval.run:
+      expression: last_json['restful_res']['token']
+      store_as: token
+
+  - api.request:
+      method: GET
+      url: ${url}/system/status
+      headers:
+        Authorization: Bearer ${token}
+
+  - assert:
+      expression: "'systemInfo' in last_json"
+```
+
+### B) TestRail Inline (`Inline:` case)
+
+```yaml
+- api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
+- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}"}}
+- assert: {expression: "'systemInfo' in last_json"}
+```
+
+### Common parse/runtime pitfalls
+
+- Bad indentation under `body:` causes `body: None` and credentials appear as top-level keys.
+- Non-breaking spaces in pasted text can break YAML parse.
+- Missing newline between fields merges values (for example token + `store_as`).
+- In assert expressions, quote dictionary keys (`'systemInfo'`) to avoid `NameError`.
 
 ---
 
