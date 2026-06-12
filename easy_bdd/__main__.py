@@ -102,16 +102,74 @@ Examples:
 
     # Validate command
     validate_parser = subparsers.add_parser(
-        "validate", help="Validate test files without running them"
+        "validate",
+        help="Validate test files or a YAML step snippet",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Validate Easy BDD test YAML for syntax, action names, parameters,\n"
+            "shared step references, and variable usage.\n\n"
+            "Examples:\n"
+            "  python -m easy_bdd validate tests/cases/my_test.yaml\n"
+            "  python -m easy_bdd validate tests/cases/\n"
+            "  python -m easy_bdd validate --snippet \"- test.assert:\\n    expression: x == 1\"\n"
+            "  python -m easy_bdd validate --snippet-file my_steps.yaml\n"
+            "  cat steps.yaml | python -m easy_bdd validate --stdin"
+        ),
     )
     validate_parser.add_argument(
         "path",
         nargs="?",
-        default="tests/cases/",
+        default=None,
         help="Path to test file or directory (default: tests/cases/)",
     )
     validate_parser.add_argument(
         "--strict", action="store_true", help="Treat warnings as errors"
+    )
+    validate_parser.add_argument(
+        "--snippet", "-s",
+        metavar="YAML",
+        help="Validate a YAML step snippet string instead of a file",
+    )
+    validate_parser.add_argument(
+        "--snippet-file",
+        metavar="FILE",
+        help="Validate a file containing YAML steps (not a full test file)",
+    )
+    validate_parser.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read YAML snippet from stdin",
+    )
+    validate_parser.add_argument(
+        "--shared-steps-dir",
+        metavar="DIR",
+        help="Directory containing shared_steps.yaml for shared step validation",
+    )
+    # TestRail targets
+    _tr_group = validate_parser.add_argument_group("TestRail targets")
+    _tr_group.add_argument(
+        "--testrail-case",
+        metavar="CASE_ID",
+        type=int,
+        help="Validate a single TestRail case by ID",
+    )
+    _tr_group.add_argument(
+        "--testrail-suite",
+        metavar="SUITE_ID",
+        type=int,
+        help="Validate all cases in a TestRail suite",
+    )
+    _tr_group.add_argument(
+        "--testrail-run",
+        metavar="RUN_ID",
+        type=int,
+        help="Validate all Feature:/Shared: cases in a TestRail run",
+    )
+    _tr_group.add_argument(
+        "--project",
+        metavar="PROJECT_ID",
+        type=int,
+        help="TestRail project ID (required with --testrail-suite)",
     )
     
     # Docker-run command
@@ -273,6 +331,28 @@ Examples:
         help="Suppress per-case progress output",
     )
 
+    # MCP serve command
+    mcp_parser = subparsers.add_parser(
+        "mcp-serve",
+        help="Start the Easy BDD MCP (Model Context Protocol) server",
+    )
+    mcp_parser.add_argument(
+        "--sse",
+        action="store_true",
+        help="Use SSE (HTTP) transport instead of STDIO (default)",
+    )
+    mcp_parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Bind address for SSE transport (default: 0.0.0.0)",
+    )
+    mcp_parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="Port for SSE transport (default: 8080)",
+    )
+
     # TestRail list command
     trl_parser = subparsers.add_parser(
         "testrail-list",
@@ -326,6 +406,8 @@ Examples:
             return testrail_list(args)
         elif args.command == "testrail-convert":
             return testrail_convert(args)
+        elif args.command == "mcp-serve":
+            return mcp_serve(args)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -873,31 +955,155 @@ def edit_test(args) -> int:
         return 1
 
 
-def validate_tests(args) -> int:
-    """Validate test files without running them"""
-    from .core.validator import ConfigValidator
+def _validate_testrail(args) -> int:
+    """Validate TestRail cases fetched via the API."""
+    from .core.validator import EasyBDDValidator
+    from .services.testrail_service import TestRailService, TestRailError
 
-    input_path = Path(args.path)
+    try:
+        tr = TestRailService()
+    except TestRailError as e:
+        print(f"TestRail configuration error: {e}", file=sys.stderr)
+        print("Set TESTRAIL_URL, TESTRAIL_USERNAME, and TESTRAIL_API_KEY in .env.", file=sys.stderr)
+        return 1
+
+    cases = []
+    source_desc = ""
+
+    try:
+        if getattr(args, "testrail_case", None):
+            case = tr.get_case(args.testrail_case)
+            cases = [case]
+            source_desc = f"case C{args.testrail_case}"
+
+        elif getattr(args, "testrail_suite", None):
+            if not getattr(args, "project", None):
+                print("Error: --project PROJECT_ID is required with --testrail-suite", file=sys.stderr)
+                return 1
+            cases = tr.get_cases(args.project, suite_id=args.testrail_suite)
+            source_desc = f"suite S{args.testrail_suite} (project {args.project})"
+
+        elif getattr(args, "testrail_run", None):
+            # get_tests returns run instances; fetch their full case data
+            tests = tr.get_tests(args.testrail_run)
+            case_ids = list({t.get("case_id") for t in tests if t.get("case_id")})
+            print(f"Fetching {len(case_ids)} case(s) from run R{args.testrail_run}...")
+            for cid in case_ids:
+                try:
+                    cases.append(tr.get_case(cid))
+                except Exception as e:
+                    print(f"  Warning: could not fetch case C{cid}: {e}", file=sys.stderr)
+            source_desc = f"run R{args.testrail_run}"
+
+    except TestRailError as e:
+        print(f"TestRail API error: {e}", file=sys.stderr)
+        return 1
+
+    if not cases:
+        print(f"No cases found for {source_desc}.")
+        return 0
+
+    # Collect Shared: case names from the fetched set to validate references
+    from .core.testrail_runner import _classify, _strip_prefix
+    shared_step_names: set = set()
+    for c in cases:
+        title = c.get("title", "")
+        if _classify(title) == "keyword":
+            name = re.sub(r"[^A-Za-z0-9_]+", "_", _strip_prefix(title)).strip("_")
+            shared_step_names.add(name)
+
+    validator = EasyBDDValidator()
+    print(f"Validating {len(cases)} case(s) from {source_desc}...\n")
+
+    results = validator.validate_testrail_cases(cases, shared_steps_from_tr=shared_step_names)
+    report, total_errors, total_warnings = EasyBDDValidator.format_testrail_report(results)
+    print(report)
+
+    print("\n" + "=" * 60)
+    print("TESTRAIL VALIDATION SUMMARY")
+    print("=" * 60)
+    print(f"  Cases checked : {len(results)}")
+    print(f"  Total errors  : {total_errors}")
+    print(f"  Total warnings: {total_warnings}")
+
+    if total_errors > 0:
+        print("\n❌ Validation FAILED")
+        return 1
+    if total_warnings > 0 and getattr(args, "strict", False):
+        print("\n⚠️  Validation FAILED (strict mode)")
+        return 1
+    print("\n✅ Validation PASSED")
+    return 0
+
+
+def validate_tests(args) -> int:
+    """Validate test files or a YAML step snippet."""
+    from .core.validator import EasyBDDValidator
+
+    # Route TestRail requests to the dedicated handler
+    if (
+        getattr(args, "testrail_case", None)
+        or getattr(args, "testrail_suite", None)
+        or getattr(args, "testrail_run", None)
+    ):
+        return _validate_testrail(args)
+
+    validator = EasyBDDValidator()
+    shared_steps_dir = (
+        Path(args.shared_steps_dir) if getattr(args, "shared_steps_dir", None) else None
+    )
+
+    # --- Snippet mode ---
+    snippet_text = None
+    snippet_source = None
+    if getattr(args, "stdin", False):
+        snippet_text = sys.stdin.read()
+        snippet_source = "<stdin>"
+    elif getattr(args, "snippet", None):
+        snippet_text = args.snippet
+        snippet_source = "<--snippet>"
+    elif getattr(args, "snippet_file", None):
+        sf = Path(args.snippet_file)
+        if not sf.exists():
+            print(f"Error: snippet file '{sf}' does not exist", file=sys.stderr)
+            return 1
+        snippet_text = sf.read_text(encoding="utf-8")
+        snippet_source = str(sf)
+        if shared_steps_dir is None:
+            shared_steps_dir = sf.parent
+
+    if snippet_text is not None:
+        print(f"Validating snippet from {snippet_source}...\n")
+        issues = validator.validate_snippet(snippet_text, shared_steps_dir)
+        print(EasyBDDValidator.format_report(issues))
+        errors = [i for i in issues if i.severity == "ERROR"]
+        warnings = [i for i in issues if i.severity == "WARNING"]
+        if errors:
+            return 1
+        if warnings and getattr(args, "strict", False):
+            return 1
+        return 0
+
+    # --- File / directory mode ---
+    raw_path = getattr(args, "path", None) or "tests/cases/"
+    input_path = Path(raw_path)
 
     if not input_path.exists():
         print(f"Error: Path '{input_path}' does not exist", file=sys.stderr)
         return 1
 
-    validator = ConfigValidator()
-
-    # Collect test files
     if input_path.is_file():
         test_files = [input_path]
     else:
-        test_files = list(input_path.glob("**/*.yaml")) + list(
-            input_path.glob("**/*.yml")
+        test_files = sorted(
+            list(input_path.glob("**/*.yaml")) + list(input_path.glob("**/*.yml"))
         )
 
     if not test_files:
         print(f"No YAML files found in '{input_path}'", file=sys.stderr)
         return 1
 
-    print(f"Validating {len(test_files)} test file(s)...\\n")
+    print(f"Validating {len(test_files)} file(s)...\n")
 
     total_errors = 0
     total_warnings = 0
@@ -905,49 +1111,49 @@ def validate_tests(args) -> int:
 
     for test_file in test_files:
         try:
-            is_valid, messages = validator.validate_test_file(
-                test_file, strict=args.strict
+            issues = validator.validate_file(test_file, shared_steps_dir)
+            errors = [i for i in issues if i.severity == "ERROR"]
+            warnings = [i for i in issues if i.severity == "WARNING"]
+            file_ok = len(errors) == 0 and (
+                not getattr(args, "strict", False) or len(warnings) == 0
             )
 
-            if not is_valid:
-                files_with_issues += 1
-                print(f"❌ {test_file}")
-                for msg in messages:
-                    if msg.startswith("ERROR:"):
-                        print(f"  {msg}")
-                        total_errors += 1
-                    elif msg.startswith("WARNING:"):
-                        print(f"  {msg}")
-                        total_warnings += 1
+            if not file_ok or issues:
+                status = "❌" if errors else "⚠️ "
+                print(f"{status} {test_file}")
+                print(EasyBDDValidator.format_report(issues))
                 print()
+                if not file_ok:
+                    files_with_issues += 1
             else:
                 print(f"✅ {test_file}")
+
+            total_errors += len(errors)
+            total_warnings += len(warnings)
 
         except Exception as e:
             files_with_issues += 1
             total_errors += 1
             print(f"❌ {test_file}")
-            print(f"  ERROR: Failed to validate: {e}\\n")
+            print(f"  [ERROR] Unexpected validation failure: {e}\n")
 
-    # Print summary
-    print("\\n" + "=" * 60)
+    print("\n" + "=" * 60)
     print("VALIDATION SUMMARY")
     print("=" * 60)
-    print(f"Total files: {len(test_files)}")
-    print(f"Valid files: {len(test_files) - files_with_issues}")
-    print(f"Files with issues: {files_with_issues}")
-    print(f"Total errors: {total_errors}")
-    print(f"Total warnings: {total_warnings}")
+    print(f"  Files checked : {len(test_files)}")
+    print(f"  Files OK      : {len(test_files) - files_with_issues}")
+    print(f"  Files with issues: {files_with_issues}")
+    print(f"  Total errors  : {total_errors}")
+    print(f"  Total warnings: {total_warnings}")
 
     if total_errors > 0:
-        print("\\n❌ Validation FAILED")
+        print("\n❌ Validation FAILED")
         return 1
-    elif total_warnings > 0 and args.strict:
-        print("\\n⚠️  Validation FAILED (strict mode, warnings treated as errors)")
+    if total_warnings > 0 and getattr(args, "strict", False):
+        print("\n⚠️  Validation FAILED (strict mode — warnings treated as errors)")
         return 1
-    else:
-        print("\\n✅ Validation PASSED")
-        return 0
+    print("\n✅ Validation PASSED")
+    return 0
 
 
 def testrail_convert(args) -> int:
@@ -1110,6 +1316,23 @@ def testrail_run(args) -> int:
 
     failed = result.get("failed", 0)
     return 1 if failed > 0 else 0
+
+
+def mcp_serve(args) -> int:
+    """Start the Easy BDD MCP server."""
+    from .mcp_server import serve
+
+    transport = "sse" if getattr(args, "sse", False) else "stdio"
+    host = getattr(args, "host", "0.0.0.0")
+    port = getattr(args, "port", 8080)
+
+    if transport == "sse":
+        print(f"Starting Easy BDD MCP server (SSE) on {host}:{port}")
+    else:
+        print("Starting Easy BDD MCP server (STDIO) — ready for Claude Desktop")
+
+    serve(transport=transport, host=host, port=port)
+    return 0
 
 
 if __name__ == "__main__":
