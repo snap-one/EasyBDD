@@ -409,6 +409,7 @@ class DatalakeLogger:
         run_url: str,
         success: bool,
         type: str = "testrail",
+        run_title: str = "",
     ) -> bool:
         """
         Post test results to datalake.
@@ -424,6 +425,7 @@ class DatalakeLogger:
             run_url: URL to test run
             success: Whether test passed
             type: Test type identifier
+            run_title: TestRail run title (included in parameters)
 
         Returns:
             True if successful
@@ -435,6 +437,10 @@ class DatalakeLogger:
 
         total_time = end_time - start_time
 
+        parameters = {"console": console, "testrail": run_url}
+        if run_title:
+            parameters["run_title"] = run_title
+
         datalake = {
             "start_time": str(start_time),
             "product": product,
@@ -443,7 +449,7 @@ class DatalakeLogger:
             "end_time": str(end_time),
             "total_time": str(total_time),
             "type": type,
-            "parameters": {"console": console, "testrail": run_url},
+            "parameters": parameters,
             "test_name": test_name,
             "time_savings": max(total_time.total_seconds() / 60, time_savings),
             "product_category": product_category,

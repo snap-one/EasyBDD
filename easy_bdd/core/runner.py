@@ -651,12 +651,15 @@ class TestRunner:
                 self.original.flush()
                 self.capture.flush()
 
-        # Initialize datalake logger if post_results enabled
+        # Initialize datalake logger if post_results enabled.
+        # Skip when running under the TestRail runner — it posts one log per run.
         datalake_logger = None
-        try:
-            datalake_logger = DatalakeLogger(artifact_path="reports", post_results=True)
-        except Exception as e:
-            print(f"    ⚠️  Could not initialize datalake logger: {e}")
+        _under_testrail = bool(variables.get("_testrail_run_id"))
+        if not _under_testrail:
+            try:
+                datalake_logger = DatalakeLogger(artifact_path="reports", post_results=True)
+            except Exception as e:
+                print(f"    ⚠️  Could not initialize datalake logger: {e}")
 
         # Redirect stdout to capture console output
         sys.stdout = DualWriter(original_stdout, console_output)
@@ -3577,6 +3580,17 @@ class TestRunner:
                 # Mirrors the S3 folder structure under a local Firmware/ root.
                 # The directory is created automatically if it doesn't exist.
                 folder_prefix = params.get("folder_prefix") or ""
+                # If variable substitution left a string-encoded list (e.g.
+                # "['upgrade','dummy']"), parse it back to an actual list so
+                # aws_service can scan each folder separately.
+                if isinstance(folder_prefix, str) and folder_prefix.startswith('['):
+                    try:
+                        import yaml as _yaml_fp
+                        _fp_parsed = _yaml_fp.safe_load(folder_prefix)
+                        if isinstance(_fp_parsed, list):
+                            folder_prefix = _fp_parsed
+                    except Exception:
+                        pass
                 _raw_download_dir = params.get("download_dir")
                 if _raw_download_dir:
                     effective_download_dir = _raw_download_dir

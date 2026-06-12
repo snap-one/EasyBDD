@@ -113,6 +113,10 @@ def _html_to_text(raw: str) -> str:
     text = _re_mod.sub(r"<[^>]+>", "", text)
     # Unescape HTML entities (&amp; &lt; &gt; &nbsp; etc.)
     text = _html_mod.unescape(text)
+    # Normalize Unicode spaces (e.g. \xa0 from &nbsp;) to ASCII space so YAML
+    # can recognise ':' as a key-value separator even when typed via a rich-text
+    # editor that inserts a non-breaking space after the colon.
+    text = _re_mod.sub(r"[^\S\n\r]", " ", text)
     # Trim each line, drop trailing blank lines
     lines = [ln.rstrip() for ln in text.splitlines()]
     return "\n".join(lines).strip()
@@ -176,6 +180,7 @@ def _yaml_safe_load_lenient(text: str):
 _STEP_LINE_RE = _re_mod.compile(r'^(\s*)- (\S[^:]*):(.*)$')
 _PARAM_LINE_RE = _re_mod.compile(r'^[A-Za-z_][\w. -]*\s*:')
 _STEP_ANNOTATION_KEYS = frozenset({'description', 'comment', 'note', 'label'})
+_GV_VAR_RE = _re_mod.compile(r"gv\.tests\['variables'\]\['([^']+)'\]")
 
 
 def _extract_inline_data(text: str):
@@ -317,6 +322,15 @@ def _fix_step_list_indent(text: str) -> str:
                             _bare_key_stack.pop()
                         # fall through to the re-indent block below
                         pass
+                    elif last_bare_key_indent is not None and stripped and not stripped.startswith('- '):
+                        # Value on next line after a bare key (TestRail sometimes
+                        # splits "folder_prefix: ${val}" into two lines). Merge inline.
+                        if result and result[-1].rstrip().endswith(':'):
+                            result[-1] = result[-1].rstrip() + ' ' + stripped
+                        _bare_key_stack.pop()
+                        last_bare_key_indent = None
+                        i += 1
+                        continue
                     else:
                         last_bare_key_indent = None
                         _bare_key_stack.clear()
@@ -572,6 +586,14 @@ def _coerce(value: str) -> Any:
         return float(value)
     except ValueError:
         pass
+    if value.startswith(('[', '{')):
+        try:
+            import yaml as _yaml_coerce
+            parsed = _yaml_coerce.safe_load(value)
+            if isinstance(parsed, (list, dict)):
+                return parsed
+        except Exception:
+            pass
     return value
 
 
@@ -689,6 +711,7 @@ class TestRailRunner:
         retry_remaining = run_vars.retry
         rerun_count = run_vars.rerun
         total_passed = total_failed = total_skipped = 0
+        run_start_time = datetime.now()
 
         while True:
             passed, failed, skipped = self._execute_cases(
@@ -730,6 +753,16 @@ class TestRailRunner:
                 f"Passed: {total_passed}  Failed: {total_failed}  Skipped: {total_skipped}"
             )
 
+        # Single datalake post for the entire run
+        self._post_run_to_datalake(
+            run_title=run["name"],
+            run_id=run_id,
+            classified=classified,
+            success=total_failed == 0,
+            start_time=run_start_time,
+            verbose=verbose,
+        )
+
         return {
             "run_id": run_id,
             "passed": total_passed,
@@ -737,6 +770,62 @@ class TestRailRunner:
             "skipped": total_skipped,
             "success": total_failed == 0,
         }
+
+    def _post_run_to_datalake(
+        self,
+        run_title: str,
+        run_id: int,
+        classified: List[Dict],
+        success: bool,
+        start_time: datetime,
+        verbose: bool,
+    ) -> None:
+        """Post one datalake entry for the entire TestRail run."""
+        try:
+            from .datalake_logger import DatalakeLogger
+            dl = DatalakeLogger(artifact_path="reports", post_results=True)
+
+            # Pull representative metadata from the first Feature/test case
+            product = "Unknown"
+            product_category = "Test"
+            mac_address = "00:00:00:00:00:00"
+            time_savings = 5.0
+            for case in classified:
+                if case.get("role") in ("inline", "test"):
+                    body = _get_case_body(case)
+                    try:
+                        import yaml as _yaml
+                        parsed = _yaml_safe_load_lenient(body) if body else None
+                        if isinstance(parsed, dict):
+                            v = parsed.get("variables") or {}
+                            product = v.get("product", product)
+                            product_category = v.get("product_category", product_category)
+                            mac_address = v.get("mac_address") or v.get("mac") or mac_address
+                            time_savings = float(v.get("time_savings", time_savings))
+                    except Exception:
+                        pass
+                    break
+
+            run_url = f"https://jpdsauto.testrail.io/index.php?/runs/view/{run_id}"
+
+            dl.datalake_post(
+                test_name=run_title,
+                product=product,
+                product_category=product_category,
+                mac_address=mac_address,
+                time_savings=time_savings,
+                start_time=start_time,
+                console="",
+                run_url=run_url,
+                success=success,
+                type="testrail",
+                run_title=run_title,
+            )
+            if verbose:
+                print(f"\n[TestRail] Datalake posted for run: {run_title!r}")
+        except Exception as exc:
+            if verbose:
+                print(f"\n[TestRail] Datalake post failed: {exc}")
 
     # ------------------------------------------------------------------ #
     # Phase helpers                                                        #
@@ -906,6 +995,16 @@ class TestRailRunner:
                         val = self._config.variable_manager.get_variable(sa)
                         if val is not None:
                             injected_vars[sa] = val
+
+                # Expand gv.tests['variables']['$key'] store_as paths to plain
+                # '$key' entries so Feature tests can access them via the
+                # gv.tests['variables'] shim which returns the variables dict.
+                for k, v in list(injected_vars.items()):
+                    m = _GV_VAR_RE.match(str(k))
+                    if m:
+                        inner = m.group(1)
+                        if inner not in injected_vars:
+                            injected_vars[inner] = v
 
             except Exception as exc:
                 if verbose:
@@ -1127,10 +1226,16 @@ class TestRailRunner:
         verbose: bool,
     ) -> Optional[TestResult]:
         try:
-            # Inject TestRail variables into the collection scope
+            # Inject TestRail variables into the collection scope.
+            # Preserve list/dict types so steps like aws.list_files can receive
+            # folder_prefix as an actual list rather than its string repr.
             if injected_vars:
                 for k, v in injected_vars.items():
-                    self._config.set_variable(k, str(v), scope="collection_vars")
+                    self._config.set_variable(
+                        k,
+                        v if isinstance(v, (list, dict)) else str(v),
+                        scope="collection_vars",
+                    )
 
             runner = TestRunner(self._config, log_dir=self._artifact_dir)
             return runner.run(yaml_path)

@@ -218,6 +218,16 @@ class VariableManager:
     ) -> Any:
         """Recursively substitute variables in data structures with support for nested variables"""
         if isinstance(data, str):
+            # When the entire value is a single ${varname} reference, preserve the
+            # original type (list, dict, int, …) so step params like
+            # "folder_prefix: ${folder_prefix}" keep their list value instead of
+            # being stringified to "['a', 'b']".
+            _m = re.fullmatch(r'\$\{([^}]+)\}', data)
+            if _m:
+                var_name = _m.group(1)
+                _all = {**self.get_all_variables(), **(additional_vars or {})}
+                if var_name in _all and not isinstance(_all[var_name], str):
+                    return _all[var_name]
             # For strings, do multiple passes to handle nested variables
             result = self.substitute_variables(data, additional_vars)
             # Additional pass to ensure nested variables are resolved
