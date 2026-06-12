@@ -537,9 +537,15 @@ def validate_testrail_case(
             return json.dumps({"error": "Provide case_id, suite_id, or run_id."})
     except TestRailError as exc:
         return json.dumps({"error": f"TestRail API error: {exc}"})
+    except Exception as exc:
+        return json.dumps({"error": f"Unexpected error fetching cases: {exc}"})
 
     if not cases:
         return json.dumps({"message": "No cases found.", "cases": []})
+
+    cases = [c for c in cases if isinstance(c, dict)]
+    if not cases:
+        return json.dumps({"message": "No valid cases found.", "cases": []})
 
     shared_names: set = set()
     for c in cases:
