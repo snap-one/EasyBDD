@@ -540,11 +540,18 @@ def _cron_in_window(cron: str, now: datetime = None) -> bool:
     return False
 
 
+_STEP_FIELDS = ("custom_steps_separated", "custom_steps", "custom_preconds")
+# Fields intentionally excluded from step extraction — reserved for documentation only:
+#   custom_summary  (the "Summary" textarea in TestRail)
+_EXCLUDED_FROM_STEPS = frozenset({"custom_summary"})
+
+
 def _get_case_body(test: Dict[str, Any]) -> str:
     """Extract case body text from a TestRail test object.
 
-    Checks in order: custom_steps_separated (structured), custom_steps (text),
-    custom_preconds (preconditions text).
+    Reads ONLY the designated step fields (custom_steps_separated,
+    custom_steps, custom_preconds).  The Summary field (custom_summary) and
+    any other documentation fields are never read here.
     """
     steps = test.get("custom_steps_separated")
     if steps and isinstance(steps, list):
@@ -1342,6 +1349,9 @@ class TestRailRunner:
           3. custom_preconds as plain dict with action key → single-step shorthand
           4. custom_steps_separated rows   → structured content/expected (Option B)
           5. custom_steps text             → raw YAML steps (Option A, legacy)
+
+        The Summary field (custom_summary) is never read; it is reserved for
+        documentation and has no effect on test execution.
         """
         import yaml as _yaml
 

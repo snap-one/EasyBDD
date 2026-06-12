@@ -343,6 +343,10 @@ class EasyBDDValidator:
         Imports helper functions from testrail_runner to reuse the same HTML
         stripping, YAML fixup, and body-extraction logic the runner uses.
 
+        Step content is read only from: custom_preconds, custom_steps,
+        custom_steps_separated.  The Summary field (custom_summary) is never
+        read and has no bearing on validation or test execution.
+
         Returns a dict:
           {case_id: {"title": str, "role": str, "issues": List[Issue]}}
         """
