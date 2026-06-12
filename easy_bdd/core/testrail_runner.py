@@ -363,6 +363,11 @@ def _fix_step_list_indent(text: str) -> str:
             dash_indent = len(m.group(1))
             result.append(line)
             i += 1
+            # Steps with an inline value (e.g. "- shared_step: Foo", "- power_fault_time: 70")
+            # cannot have sub-parameters.  Skip the inner collection loop entirely so that
+            # a following structural key like "steps:" is never consumed as a parameter.
+            if m.group(3).strip():
+                continue
             param_prefix = ' ' * (dash_indent + 4)
             # Track if last emitted param was a bare key (e.g. "subprotocols:") so
             # that a following "- item" at flush-level is treated as its list value

@@ -437,7 +437,7 @@ class TestRunner:
 
         return all_passed
 
-
+    def _execute_data_driven_test(self, test: "TestDefinition") -> bool:
         """Execute test with multiple data sets"""
         all_passed = True
         data_sets = test.data
