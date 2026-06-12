@@ -503,6 +503,15 @@ def validate_testrail_case(
     from .core.testrail_runner import _classify, _strip_prefix
     import re
 
+    if case_id is not None:
+        case_id = int(case_id)
+    if suite_id is not None:
+        suite_id = int(suite_id)
+    if run_id is not None:
+        run_id = int(run_id)
+    if project_id is not None:
+        project_id = int(project_id)
+
     try:
         tr = TestRailService()
     except TestRailError as exc:
