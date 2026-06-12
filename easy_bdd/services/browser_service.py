@@ -365,13 +365,13 @@ class BrowserService:
         }
 
         # Configure video recording
-        video_enabled_raw = self._get_browser_config("video_recording.enabled", True)
+        video_enabled_raw = self._get_browser_config("video_recording.enabled", False)
         # Handle string "true"/"false" and boolean
         if isinstance(video_enabled_raw, str):
             video_enabled = video_enabled_raw.lower() == "true"
         else:
             video_enabled = (
-                bool(video_enabled_raw) if video_enabled_raw is not None else True
+                bool(video_enabled_raw) if video_enabled_raw is not None else False
             )
 
         video_mode = self._get_browser_config("video_recording.mode", "on-failure")

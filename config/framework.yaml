@@ -18,9 +18,9 @@ config:
       - "--disable-web-security"
       - "--disable-features=VizDisplayCompositor"
     
-    # Video recording configuration
+    # Video recording configuration (disabled by default; enable per-test via record_video: true or CLI --record-video)
     video_recording:
-      enabled: true
+      enabled: false
       mode: "on-failure"  # Options: "on-failure", "always", "never"
       dir: "reports/videos"
       size:

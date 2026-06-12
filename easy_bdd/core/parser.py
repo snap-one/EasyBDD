@@ -70,6 +70,7 @@ class TestDefinition:
     max_workers: int = 1
     device_config: Optional[str] = None  # Device configuration file reference
     browsers: Optional[List[str]] = None  # Run test on multiple browsers e.g. [chromium, firefox, webkit]
+    record_video: Optional[bool] = None  # Enable video recording for this test (browser actions only)
 
     def __post_init__(self):
         # Ensure all list fields are lists
@@ -364,6 +365,7 @@ class YAMLParser:
         browsers = data.get("browsers")  # e.g. [chromium, firefox, webkit]
         if isinstance(browsers, str):
             browsers = [b.strip() for b in browsers.split(",") if b.strip()]
+        record_video = data.get("record_video")  # Optional per-test video recording flag
 
         # Extract data-driven fields
         test_data = data.get("data", None)
@@ -390,6 +392,7 @@ class YAMLParser:
             max_workers=max_workers,
             device_config=device_config,
             browsers=browsers,
+            record_video=record_video,
         )
 
     def _parse_steps(self, steps_data: List[Dict[str, Any]]) -> List[TestStep]:

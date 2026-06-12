@@ -144,9 +144,10 @@ class TestRunner:
         # action_registry.load_action_modules(config)
 
     def run(
-        self, test_path: Path, tags: List[str] = None, parallel_workers: int = 1
+        self, test_path: Path, tags: List[str] = None, parallel_workers: int = 1, record_video: bool = False
     ) -> TestResult:
         """Run tests from the specified path"""
+        self._record_video = record_video
         # Parse test definitions
         try:
             if test_path.is_file():
@@ -709,6 +710,15 @@ class TestRunner:
                     print(
                         f"    ⚠️  Warning: Could not load device config: {test.device_config}"
                     )
+
+            # Configure video recording: only enabled when explicitly requested via test
+            # definition (record_video: true) or the --record-video CLI flag.
+            should_record = bool(
+                getattr(test, "record_video", None) or getattr(self, "_record_video", False)
+            )
+            self.config.set_variable(
+                "browser.video_recording.enabled", should_record, "session_overrides"
+            )
 
             # Execute setup steps first
             if test.setup:

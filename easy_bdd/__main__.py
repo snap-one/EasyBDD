@@ -69,6 +69,11 @@ Examples:
         "--export-results",
         help="Export test results to file (JSON, CSV, XML format auto-detected by extension)",
     )
+    run_parser.add_argument(
+        "--record-video",
+        action="store_true",
+        help="Enable video recording for all browser actions in this test run",
+    )
 
     # Generate command
     gen_parser = subparsers.add_parser(
@@ -546,7 +551,8 @@ def run_tests(args) -> int:
         tags = [tag.strip() for tag in args.tags.split(",")]
 
     # Run tests
-    result = runner.run(test_path=Path(args.path), tags=tags)
+    record_video = getattr(args, "record_video", False)
+    result = runner.run(test_path=Path(args.path), tags=tags, record_video=record_video)
 
     # Export results if requested
     if args.export_results:
