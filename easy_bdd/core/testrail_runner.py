@@ -741,19 +741,20 @@ class TestRailRunner:
         project_id: int,
         run_id: int = None,
         verbose: bool = True,
+        no_datalake: bool = False,
     ) -> Dict[str, Any]:
         """Execute the full TestRail-driven lifecycle.
 
         Returns a summary dict: run_id, passed, failed, skipped, success.
         """
-        return self._lifecycle(project_id, run_id, verbose)
+        return self._lifecycle(project_id, run_id, verbose, no_datalake=no_datalake)
 
     # ------------------------------------------------------------------ #
     # Lifecycle phases                                                     #
     # ------------------------------------------------------------------ #
 
     def _lifecycle(
-        self, project_id: int, run_id: int = None, verbose: bool = True
+        self, project_id: int, run_id: int = None, verbose: bool = True, no_datalake: bool = False
     ) -> Dict[str, Any]:
         # Phase 1: Find run
         if run_id is not None:
@@ -849,15 +850,16 @@ class TestRailRunner:
                 f"Passed: {total_passed}  Failed: {total_failed}  Skipped: {total_skipped}"
             )
 
-        # Single datalake post for the entire run
-        self._post_run_to_datalake(
-            run_title=run["name"],
-            run_id=run_id,
-            classified=classified,
-            success=total_failed == 0,
-            start_time=run_start_time,
-            verbose=verbose,
-        )
+        # Single datalake post for the entire run (skipped if --no-datalake)
+        if not no_datalake:
+            self._post_run_to_datalake(
+                run_title=run["name"],
+                run_id=run_id,
+                classified=classified,
+                success=total_failed == 0,
+                start_time=run_start_time,
+                verbose=verbose,
+            )
 
         return {
             "run_id": run_id,

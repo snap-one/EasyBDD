@@ -253,6 +253,12 @@ Examples:
         action="store_true",
         help="Suppress per-test progress output",
     )
+    tr_parser.add_argument(
+        "--no-datalake",
+        action="store_true",
+        dest="no_datalake",
+        help="Skip posting results to the datalake for this run",
+    )
 
     # TestRail convert command
     trc_parser = subparsers.add_parser(
@@ -1308,6 +1314,7 @@ def testrail_run(args) -> int:
         project_id=args.project_id,
         run_id=args.run_id,
         verbose=not args.quiet,
+        no_datalake=getattr(args, "no_datalake", False),
     )
 
     if result.get("skipped"):
