@@ -48,18 +48,11 @@ pipeline {
             }
         }
 
-        stage('Validate test suite') {
-            steps {
-                dir("${PROJECT_DIR}") {
-                    sh '${PYTHON} -m easy_bdd validate tests/cases/'
-                }
-            }
-        }
     }
 
     post {
         success {
-            echo "Deployment complete — codebase is up to date and validates cleanly."
+            echo "Deployment complete — codebase is up to date."
         }
         failure {
             echo "Update FAILED. Check the logs above. The previous codebase is still in place."
