@@ -17,10 +17,10 @@ pipeline {
     }
 
     environment {
-        PROJECT_DIR = '/home/jenkins/Easy_BDD'
-        VENV        = '/home/jenkins/Easy_BDD/env'
-        PYTHON      = '/home/jenkins/Easy_BDD/env/bin/python'
-        PIP         = '/home/jenkins/Easy_BDD/env/bin/pip'
+        PROJECT_DIR = '/var/lib/jenkins/workspace/EASY_BDD'
+        VENV        = '/var/lib/jenkins/workspace/EASY_BDD/env'
+        PYTHON      = '/var/lib/jenkins/workspace/EASY_BDD/env/bin/python'
+        PIP         = '/var/lib/jenkins/workspace/EASY_BDD/env/bin/pip'
     }
 
     stages {
