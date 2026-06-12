@@ -559,14 +559,15 @@ def validate_testrail_case(
     _report_str, total_errors, total_warnings = EasyBDDValidator.format_testrail_report(results)
 
     case_results = []
-    for r in results:
+    for case_id_key, r in results.items():
+        issues = r.get("issues", [])
         case_results.append(
             {
-                "case_id": r.get("case_id"),
+                "case_id": case_id_key,
                 "title": r.get("title"),
                 "role": r.get("role"),
-                "errors": r.get("errors", 0),
-                "warnings": r.get("warnings", 0),
+                "errors": sum(1 for i in issues if i.severity == "ERROR"),
+                "warnings": sum(1 for i in issues if i.severity == "WARNING"),
                 "issues": [
                     {
                         "severity": i.severity,
@@ -576,7 +577,7 @@ def validate_testrail_case(
                         "suggestion": i.suggestion,
                         "correction": i.correction,
                     }
-                    for i in r.get("issues", [])
+                    for i in issues
                 ],
                 "suggested_preconditions": r.get("suggested_preconditions"),
             }
