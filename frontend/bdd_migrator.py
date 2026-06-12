@@ -34,13 +34,16 @@ Key syntax being migrated
   gv.log[-1]['response']      (YAML param context)  → ${last_response}
   gv.log[-1]['response_dict'] (YAML param context)  → ${last_response_dict}
   gv.log[-1]['response_code'] (YAML param context)  → ${last_response_code}
-  gv.message                  (YAML param context)  → ${last_eval}
+  gv.message                  (YAML param context)  → ${message}
+  gv.tests['variables']['k']  (YAML param context)  → ${k}
   gv.log[-1]['response_txt']  (Python code context) → str(last_response)
   gv.log[-1]['response']      (Python code context) → str(last_response)
   gv.log[-1]['response_dict'] (Python code context) → last_response_dict
-  gv.tests['variables']['k']  (Python code context) → kept as-is (valid Easy BDD runtime)
-  gv.tests['variables']['k']  (YAML param context)  → ${k}
-  gv.tests['variables']['k']=v (Python assignment)  → eval.exec: code + store_as: k
+  gv.tests['variables']['k']  (Python code context) → k  (plain variable name)
+  gv.message                  (Python code context) → message
+  gv.tests['variables']['k']=v (Python assignment)  → eval.exec: "k = v" + store_as: k
+  gv.message = v              (Python assignment)   → eval.exec: "message = v" + store_as: message
+  gv.attr = v                 (Python assignment)   → eval.exec: "attr = v" + store_as: attr
   pure boolean Python expression                    → test.assert: expression
 """
 
@@ -93,12 +96,12 @@ def _sub_vars(text: str) -> str:
     text = re.sub(r"gv\.log\[-1\]\['(?:response_code|status_code)'\]",  "${last_response_code}",    text)
     text = re.sub(r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "${last_response_headers}", text)
 
-    # gv.tests['variables']['key'] access (single-quoted and double-quoted)
-    text = re.sub(r"gv\.tests\['variables'\]\['(\w+)'\]", r"${\1}", text)
-    text = re.sub(r'gv\.tests\["variables"\]\["(\w+)"\]', r"${\1}", text)
+    # gv.tests['variables']['key'] / gv.tests['variables']['$key'] access
+    text = re.sub(r"gv\.tests\['variables'\]\['\$?(\w+)'\]", r"${\1}", text)
+    text = re.sub(r'gv\.tests\["variables"\]\["\$?(\w+)"\]', r"${\1}", text)
 
-    # gv.message — the last eval/message result
-    text = re.sub(r"\bgv\.message\b", "${last_eval}", text)
+    # gv.message — migrated to a plain ${message} variable
+    text = re.sub(r"\bgv\.message\b", "${message}", text)
 
     # <$varname$> or <${varname}$> or <${varname}> — Gherkin Scenario Outline params
     text = re.sub(r"<\$\{([A-Za-z_][A-Za-z0-9_]*)\}\$?>", r"${\1}", text)
@@ -134,10 +137,11 @@ _CODE_PATTERNS: List[Tuple[str, Any]] = [
     (r"gv\.log\[(-?\d+)\]\['response_dict'\]",
         lambda m: "last_response_dict" if m.group(1) in ("-1",)
                   else f"log_response_dict_{m.group(1).lstrip('-')}"),
-    # gv.tests['variables']['key'] — in Python code context keep the gv API;
-    # READS: leave as-is so the code is valid Easy BDD Python.
-    # (The YAML-string variant is handled by _sub_vars.)
-    # gv.message is a valid Easy BDD runtime global — leave it as-is.
+    # gv.tests['variables']['key'] / ['$key'] reads → plain variable name (strips $ prefix)
+    (r"gv\.tests\['variables'\]\['\$?(\w+)'\]", r"\1"),
+    (r'gv\.tests\["variables"\]\["\$?(\w+)"\]', r"\1"),
+    # gv.message / gv.<attr> reads (not log/tests — those are handled above) → plain name
+    (r"gv\.(?!log\b|tests\b)(\w+)\b", r"\1"),
 ]
 
 
@@ -168,25 +172,49 @@ def _smart_eval_step(code: str) -> Dict:
     Convert a Python code string to the most appropriate Easy BDD step dict.
 
     Rules (in priority order):
-      1. Pure variable assignment  gv.tests['variables']['key'] = <expr>
-         → eval.exec with store_as so the intent is visible.
-      2. Pure boolean / comparison expression (no assignment, no side-effect call)
-         → test.assert so the failure produces a clear message.
-      3. Everything else → eval.exec.
-    """
-    code = _translate_code(code.strip())
+      1. gv.tests['variables']['key'] = <expr>
+         → eval.exec: "key = <expr_translated>"  store_as: key
+      2. gv.<attr> = <expr>  (gv.message, etc.)
+         → eval.exec: "<attr> = <expr_translated>"  store_as: attr
+      3. Pure boolean / comparison expression (no assignment, no side-effect call)
+         → test.assert: expression
+      4. Everything else → eval.exec.
 
-    # Rule 1 — variable assignment
+    Rules 1 & 2 are detected BEFORE _translate_code so the gv. prefix is still
+    present in the raw string; the RHS is translated separately to eliminate any
+    nested gv.* references.
+    """
+    raw = code.strip()
+
+    # Rule 1 — gv.tests['variables']['key'] = expr  (single or double quotes)
     m = re.match(
-        r"^gv\.tests\['variables'\]\['(\w+)'\]\s*=\s*(.+)$",
-        code, re.DOTALL
+        r"^gv\.tests\[(?:'variables'|\"variables\")\]\[(?:'\$?(\w+)'|\"\$?(\w+)\")\]\s*=\s*(.+)$",
+        raw, re.DOTALL,
     )
     if m:
-        return {"action": "eval.exec", "code": code, "store_as": m.group(1)}
+        var_name = m.group(1) or m.group(2)
+        rhs = _translate_code(m.group(3).strip())
+        return {"action": "eval.exec", "code": f"{var_name} = {rhs}", "store_as": var_name}
 
-    # Rule 2 — pure boolean expression (no assignment, no function call with side effects)
-    # Heuristic: if the code contains a comparison / containment operator and no '='
-    # (but allow '==' and '!=') then treat as assertion.
+    # Rule 2 — gv.<attr> = expr  (e.g. gv.message = ..., gv.result = ...)
+    # Excludes gv.log and gv.tests which are shim objects, not settable scalars.
+    m = re.match(r"^gv\.(?!log\b|tests\b)(\w+)\s*=\s*(.+)$", raw, re.DOTALL)
+    if m:
+        var_name = m.group(1)
+        rhs = _translate_code(m.group(2).strip())
+        return {"action": "eval.exec", "code": f"{var_name} = {rhs}", "store_as": var_name}
+
+    # All other code — apply full translation now
+    code = _translate_code(raw)
+
+    # Rule 3 — bare variable reference after translation (no operators, no calls).
+    # These are no-ops in Python; convert to test.print so the value is at least
+    # visible in the test log rather than silently discarded.
+    if re.match(r'^[A-Za-z_]\w*$', code.strip()):
+        return {"action": "test.print", "message": f"${{{code.strip()}}}"}
+
+    # Rule 4 — pure boolean expression (no assignment, no side-effect call)
+    # Heuristic: contains a comparison / containment operator and no bare '='.
     _no_assign = not re.search(r"(?<![=!<>])=(?!=)", code)  # lone = but not == != <= >=
     _is_bool   = bool(re.search(
         r"\bin\b|\bnot\s+in\b|\b(?:is|is\s+not)\b|==|!=|<=|>=|<(?!=)|>(?!=)|"
@@ -194,9 +222,6 @@ def _smart_eval_step(code: str) -> Dict:
         code
     ))
     if _no_assign and _is_bool and "(" not in code.split("in")[0]:
-        # Extra guard: don't promote if the expression contains a function call
-        # before the first boolean keyword (e.g. `some_fn() in result` is fine,
-        # but `fetch_data()` alone is not a boolean).
         return {"action": "test.assert", "expression": code}
 
     return {"action": "eval.exec", "code": code}
@@ -305,31 +330,36 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         step = {"action": "browser.refresh"}
     elif cmd in ("type", "fill", "input"):
         s = {"action": "browser.fill", "value": text or value}
-        if target:
-            s["selector"] = target
+        sel = target or param
+        if sel:
+            s["selector"] = sel
         step = s
     elif cmd in ("click",):
         s = {"action": "browser.click"}
-        if target:
-            s["selector"] = target
+        sel = target or param
+        if sel:
+            s["selector"] = sel
         elif text:
             s["text"] = text
         step = s
     elif cmd in ("press",):
         step = {"action": "browser.press_key", "key": key}
-        if target:
-            step["selector"] = target
+        sel = target or param
+        if sel:
+            step["selector"] = sel
     elif cmd in ("gettext", "get_text", "innertext"):
         s = {"action": "browser.get_text", "store_as": name or "last_text"}
-        if target:
-            s["selector"] = target
+        sel = target or param
+        if sel:
+            s["selector"] = sel
         step = s
     elif cmd in ("screenshot", "capture"):
         step = {"action": "browser.screenshot", "name": name or param or "screenshot"}
     elif cmd in ("wait", "waitfor", "wait_for_element"):
         s = {"action": "browser.wait_for_element"}
-        if target:
-            s["selector"] = target
+        sel = target or param
+        if sel:
+            s["selector"] = sel
         if timeout:
             s["timeout"] = timeout
         step = s
@@ -339,8 +369,9 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         step = {"action": "eval.exec", "code": param or text}
     elif cmd in ("select",):
         s = {"action": "browser.select", "value": value or text}
-        if target:
-            s["selector"] = target
+        sel = target or param
+        if sel:
+            s["selector"] = sel
         step = s
     elif cmd in ("hover",):
         step = {"action": "browser.hover", "selector": target or param}
@@ -414,9 +445,61 @@ _ASSERT_OP_MAP = {
 }
 
 
-def _map_function(param_dict: Dict, data_str: str) -> Dict:
+def _firmware_manager_steps(param_dict: Optional[Dict] = None) -> List[Dict]:
+    """Return the canonical firmware-manager Var-case step sequence.
+
+    Produces ten steps covering local firmware download, file classification,
+    path extraction, CloudFront URL fetching, and version extraction / run rename.
+    Callers must flatten the returned list into the surrounding step list.
+    """
+    p = param_dict or {}
+    bucket  = _sub_vars(str(p.get("aws_bucket",       "${aws_bucket}")))
+    pattern = _sub_vars(str(p.get("filename_pattern",  "${filename_pattern}")))
+    folder  = _sub_vars(str(p.get("folder_prefix",     "${folder_prefix}")))
+    cf_url  = _sub_vars(str(p.get("cloudfront_url",    "${cloudfront_url}")))
+    ver_pat = str(p.get("version_pattern", r"wattboxvps_(.*?)\.sec\.bin"))
+
+    return [
+        {
+            "action":           "aws.list_files",
+            "bucket_name":      bucket,
+            "filename_pattern": pattern,
+            "folder_prefix":    folder,
+            "local_paths_as":   "firmware_local_paths",
+            "store_as":         "firmware_files",
+        },
+        {
+            "action": "eval.exec",
+            "code": "upgrade_file = next((f for f in firmware_files if '-DM' not in f), None); dm_file = next((f for f in firmware_files if '-DM' in f), None)",
+        },
+        {"action": "eval.run", "expression": "firmware_files[0]",       "store_as": "upgrade_file"},
+        {"action": "eval.run", "expression": "firmware_files[1]",       "store_as": "downgrade_file"},
+        {"action": "eval.run", "expression": "firmware_local_paths[0]", "store_as": "firmware_upgrade_path"},
+        {"action": "eval.run", "expression": "firmware_local_paths[1]", "store_as": "firmware_downgrade_path"},
+        {
+            "action":           "aws.list_files",
+            "bucket_name":      bucket,
+            "filename_pattern": pattern,
+            "folder_prefix":    folder,
+            "cloudfront_url":   cf_url,
+            "store_as":         "cloudfront_firmwares",
+        },
+        {"action": "eval.run", "expression": "cloudfront_firmwares[0]", "store_as": "cloudfront_upgrade_file"},
+        {"action": "eval.run", "expression": "cloudfront_firmwares[1]", "store_as": "cloudfront_downgrade_file"},
+        {
+            "action":   "eval.extract_version",
+            "from_var": "firmware_files",
+            "pattern":  ver_pat,
+            "store_as": "firmware_version",
+            "run_name": "EASY_BDD: ${product} Smoke Test - ${firmware_version}",
+        },
+    ]
+
+
+def _map_function(param_dict: Dict, data_str: str) -> Any:
     name = param_dict.get("name", "").lower()
-    data_str = _sub_vars(data_str.strip())
+    raw_data_str = data_str.strip()   # keep original for JSON re-parsing (before _sub_vars mangles $ vars)
+    data_str = _sub_vars(raw_data_str)
 
     if name == "sleep":
         sec = param_dict.get("sec", param_dict.get("seconds", 1))
@@ -427,6 +510,22 @@ def _map_function(param_dict: Dict, data_str: str) -> Dict:
         return _smart_eval_step(str(param_dict.get("string", "")))
 
     if name == "eval":
+        # Detect paired conditional: {"name":"eval","string":"condition"} | {"name":"exec","string":"code"}
+        # This is the old framework's inline if-then pattern: if condition → run code.
+        # Use raw_data_str (pre-_sub_vars) so gv.tests variable names are still recognisable.
+        paired = _parse_json(raw_data_str) if raw_data_str else None
+        if paired and paired.get("name", "").lower() in ("exec", "execute"):
+            condition_raw = str(param_dict.get("string", param_dict.get("expression", "")))
+            condition     = _translate_code(condition_raw)
+            exec_raw      = str(paired.get("string", ""))
+            exec_step     = _smart_eval_step(exec_raw)
+            exec_code     = exec_step.get("code", _translate_code(exec_raw))
+            store_var     = exec_step.get("store_as", "")
+            combined      = f"if {condition}: {exec_code}"
+            step: Dict[str, Any] = {"action": "eval.exec", "code": combined}
+            if store_var:
+                step["store_as"] = store_var
+            return step
         # "string" key → exec-style, "expression" key → eval-style
         if "string" in param_dict:
             return _smart_eval_step(str(param_dict["string"]))
@@ -460,10 +559,10 @@ def _map_function(param_dict: Dict, data_str: str) -> Dict:
         method  = param_dict.get("method", "get").upper()
         url     = _sub_vars(str(param_dict.get("url", "")))
         path    = _sub_vars(str(param_dict.get("path", param_dict.get("command", ""))))
-        full_url = f"{url}{path}" if path else url
+        full_url = (url.rstrip("/") + "/" + path.lstrip("/")) if path else url
         is_ws = method == "SEND" or full_url.startswith("wss://") or full_url.startswith("ws://")
         if is_ws:
-            body_val = _expand_json_payload(data_str) if data_str and data_str not in ("{}", "") else _sub_vars(path)
+            body_val = _expand_json_payload(data_str) if data_str and data_str not in ("{}", "") else None
             return {"action": "websocket.send", "url": full_url, "data": body_val, "store_as": "last_response"}
         step: Dict[str, Any] = {"action": "api.request", "method": method, "url": full_url, "store_as": "last_response"}
         payload = _expand_json_payload(data_str)
@@ -499,6 +598,7 @@ def _map_function(param_dict: Dict, data_str: str) -> Dict:
             "host":    _sub_vars(str(param_dict.get("host", ""))),
             "port":    _int_or_var(param_dict.get("port", 23), 23),
             "command": _sub_vars(str(param_dict.get("command", ""))),
+            "prompt":  param_dict.get("prompt", ">"),
         }
 
     if name == "ssh":
@@ -549,32 +649,24 @@ def _map_function(param_dict: Dict, data_str: str) -> Dict:
         return step
 
     if name == "upload_cloud_firmware":
-        bucket   = _sub_vars(str(param_dict.get("aws_bucket", "")))
-        dl_dir   = _sub_vars(str(param_dict.get("download_dir", "")))
-        regex    = _sub_vars(str(param_dict.get("regex_pattern", "")))
-        cf_url   = _sub_vars(str(param_dict.get("cloudfront_url", "")))
-        step: Dict = {
-            "action": "aws.list_files",
-            "bucket_name": bucket,
-            "folder_prefix": dl_dir,
-            "store_as": "last_response",
+        # Expand to the full firmware-manager Var-case template sequence.
+        merged = {
+            "aws_bucket":      param_dict.get("aws_bucket", ""),
+            "filename_pattern": param_dict.get("regex_pattern", ""),
+            "folder_prefix":   param_dict.get("download_dir", ""),
+            "cloudfront_url":  param_dict.get("cloudfront_url", ""),
         }
-        if regex:
-            step["filename_pattern"] = regex
-        if cf_url:
-            step["cloudfront_url"] = cf_url
-        return step
+        return _firmware_manager_steps(merged)
 
     if name == "extract_firmware_version":
-        bucket  = _sub_vars(str(param_dict.get("aws_bucket", "")))
-        file_url = _sub_vars(str(param_dict.get("aws_file_url", "")))
+        # Covered by eval.extract_version at the end of _firmware_manager_steps.
+        # Emit a single step so standalone calls still produce something useful.
         return {
-            "action": "eval.exec",
-            "code": (
-                f"# extract_firmware_version from S3 bucket '{bucket}'\n"
-                f"# file: {file_url}\n"
-                f"# result → firmware_version variable"
-            ),
+            "action":   "eval.extract_version",
+            "from_var": "firmware_files",
+            "pattern":  r"wattboxvps_(.*?)\.sec\.bin",
+            "store_as": "firmware_version",
+            "run_name": "EASY_BDD: ${product} Smoke Test - ${firmware_version}",
         }
 
     # Fallback
@@ -699,6 +791,7 @@ def _parse_step_line(line: str) -> Optional[Dict]:
             "host":     _sub_vars(str(d.get("host", ""))),
             "port":     _int_or_var(d.get("port", 23), 23),
             "command":  _sub_vars(str(d.get("command", ""))),
+            "prompt":   d.get("prompt", ">"),
         }
 
     # ── ssh | {...} | ─────────────────────────────────────────────────────
@@ -731,12 +824,18 @@ def _parse_step_line(line: str) -> Optional[Dict]:
         method = m.group(2).strip().upper()
         path   = _sub_vars(m.group(3).strip())
         data   = m.group(4).strip()
-        full_url = f"{url}{path}"
+        # Always append path to URL with a proper separator (the path may omit the leading slash)
+        if path:
+            full_url = url.rstrip("/") + "/" + path.lstrip("/")
+        else:
+            full_url = url
         is_ws = method == "SEND" or url.startswith("wss://") or url.startswith("ws://")
         if is_ws:
-            body_val = _expand_json_payload(data) if data and data not in ("{}", "") else _sub_vars(path)
-            return {"action": "websocket.send", "url": full_url if method != "SEND" else url,
-                    "data": body_val, "store_as": "last_response"}
+            body_val = _expand_json_payload(data) if data and data not in ("{}", "") else None
+            ws_step: Dict[str, Any] = {"action": "websocket.send", "url": full_url, "store_as": "last_response"}
+            if body_val is not None:
+                ws_step["data"] = body_val
+            return ws_step
         step: Dict[str, Any] = {"action": "api.request", "method": method, "url": full_url, "store_as": "last_response"}
         payload = _expand_json_payload(data)
         if payload is not None:
@@ -911,7 +1010,10 @@ def parse_step_block(text: str) -> List[Dict]:
 
         step = _parse_step_line(stripped)
         if step:
-            steps.append(_to_dot_notation(step))
+            if isinstance(step, list):
+                steps.extend(_to_dot_notation(s) for s in step)
+            else:
+                steps.append(_to_dot_notation(step))
 
     # Handle Examples: at end of block
     _flush_examples()
@@ -993,7 +1095,10 @@ def parse_feature_file(content: str) -> List[Dict[str, Any]]:
                 continue
             step = _parse_step_line(stripped)
             if step:
-                current_test["steps"].append(_to_dot_notation(step))
+                if isinstance(step, list):
+                    current_test["steps"].extend(_to_dot_notation(s) for s in step)
+                else:
+                    current_test["steps"].append(_to_dot_notation(step))
 
     if current_test:
         tests.append(current_test)

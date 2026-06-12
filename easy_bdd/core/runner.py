@@ -1233,9 +1233,17 @@ class TestRunner:
                 return True
 
             # Log / print action (no service required — just prints a message)
+            # Supports:
+            #   - action: test.print / message: "..."   (explicit)
+            #   - test.print: "..."                     (shorthand scalar)
             if action_lower in ["test.log", "log", "test.print", "print"]:
                 params = self._get_params(step_params)
-                message = str(params.get("message", params.get("text", "")))
+                message = str(
+                    params.get("message")
+                    or params.get("text")
+                    or params.get("value")
+                    or ""
+                )
                 if hasattr(self.config, "substitute_variables"):
                     message = self.config.substitute_variables(message, variables)
                 print(f"      📝 {message}")
@@ -3063,6 +3071,15 @@ class TestRunner:
         params = self._get_params(step_params)
         action_lower = action.lower()
         store_as = params.get("store_as", "")
+        # Normalise legacy mybdd store_as keys: gv.tests['variables']['$key'] → key
+        if store_as:
+            import re as _re_sa
+            _m = _re_sa.match(
+                r"gv\.tests\[(?:'variables'|\"variables\")\]\[(?:'\$?(\w+)'|\"\$?(\w+)\")\]",
+                store_as.strip(),
+            )
+            if _m:
+                store_as = _m.group(1) or _m.group(2)
 
         import platform as _platform
         # Build the execution context: shared state + current test variables
@@ -3075,10 +3092,12 @@ class TestRunner:
             "datetime": _datetime,
             "collections": _collections,
             "platform": _platform,
-            "gv": _Gv(variables),  # mybdd compatibility shim
         }
         ctx.update(self._eval_state)
         ctx.update(variables)
+        # Always set the gv shim last so variables["gv"] (a plain dict used for
+        # ${gv.x} substitution) never overwrites the _Gv object in exec context.
+        ctx["gv"] = _Gv(variables)
 
         if "set" in action_lower and "extract" not in action_lower:
             key = params.get("key", "")
@@ -3218,6 +3237,19 @@ class TestRunner:
                 if not k.startswith("_") and k not in ("state", "variables", "math", "re", "json", "datetime", "collections"):
                     self._eval_state[k] = v
                     variables[k] = v
+            # Mirror attributes set on the gv shim (e.g. gv.message = "...") into
+            # variables["gv"] as a plain dict so ${gv.message} resolves correctly.
+            _gv_obj = ctx.get("gv")
+            if _gv_obj is not None:
+                _gv_builtins = {"log", "tests"}
+                _gv_dict = variables.get("gv")
+                if not isinstance(_gv_dict, dict):
+                    _gv_dict = {}
+                    variables["gv"] = _gv_dict
+                for _attr, _val in vars(_gv_obj).items():
+                    if not _attr.startswith("_") and _attr not in _gv_builtins:
+                        _gv_dict[_attr] = _val
+                        self._eval_state[f"gv.{_attr}"] = _val
             return True
 
         # Default: eval.run — evaluate an expression

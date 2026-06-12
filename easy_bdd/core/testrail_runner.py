@@ -165,16 +165,100 @@ def _fix_yaml_indent(text: str) -> str:
     return "\n".join(result)
 
 
+_BARE_QUOTED_LINE_RE = _re_mod.compile(r'^(\s*)(["\'])([^:]*)\2\s*$')
+# Matches lines where a block-scalar indicator has content on the same line (invalid YAML):
+#   code: | some content here
+_INLINE_BLOCK_SCALAR_RE = _re_mod.compile(r'^(\s*)(\S[^:]*)\s*:\s*\|\s+(.+)$')
+# Matches lines that look like YAML keys or list items (stop collecting block scalar content)
+_YAML_KEY_OR_LIST_RE = _re_mod.compile(r'^\s*(-\s+\S|#|\w[\w.\s]*:)')
+
+
+def _fix_inline_block_scalars(text: str) -> str:
+    """Convert 'key: | content' (invalid YAML) to a proper block scalar.
+
+    TestRail sometimes collapses newlines when saving multi-line field values.
+    Two failure modes are handled:
+
+    Mode A — content on the same line as |:
+        code: | line1 line2
+      →
+        code: |
+          line1 line2
+
+    Mode B — first content line inline, subsequent continuation lines unindented:
+        code: | line1
+        line2
+      →
+        code: |
+          line1
+          line2
+
+    Lines that look like YAML keys (word: ...) or list items (- ...) stop the
+    absorption so they are not accidentally swallowed into the block scalar.
+    """
+    lines = text.splitlines()
+    result = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = _INLINE_BLOCK_SCALAR_RE.match(line)
+        if m:
+            indent, key, first_content = m.group(1), m.group(2), m.group(3)
+            result.append(f"{indent}{key}: |")
+            result.append(f"{indent}  {first_content}")
+            i += 1
+            # Absorb following unindented lines that are block-scalar continuations
+            while i < len(lines):
+                nxt = lines[i]
+                stripped = nxt.strip()
+                if not stripped:
+                    break
+                if _YAML_KEY_OR_LIST_RE.match(nxt):
+                    break
+                result.append(f"{indent}  {stripped}")
+                i += 1
+        else:
+            result.append(line)
+            i += 1
+    return "\n".join(result)
+
+
+def _unquote_bare_string_lines(text: str) -> str:
+    """Strip surrounding quotes from lines that are just a quoted string with no colon.
+
+    TestRail editors sometimes wrap variable references in quotes, producing
+    lines like:  "${gv.message}"
+    YAML treats these as mapping keys and fails when no ':' follows.
+    Removing the outer quotes turns them into bare scalars that parse cleanly.
+    Only lines whose quoted content contains no ':' are touched, to avoid
+    accidentally unquoting  "key: value"  strings that are valid YAML values.
+    """
+    result = []
+    for line in text.splitlines():
+        m = _BARE_QUOTED_LINE_RE.match(line)
+        if m:
+            line = m.group(1) + m.group(3)
+        result.append(line)
+    return "\n".join(result)
+
+
 def _yaml_safe_load_lenient(text: str):
-    """Parse YAML, retrying with indent-fix if the first attempt fails."""
+    """Parse YAML, retrying with several fixup passes if the first attempt fails."""
     import yaml as _yaml
     try:
         return _yaml.safe_load(text)
     except _yaml.YAMLError:
-        fixed = _fix_yaml_indent(text)
+        pass
+
+    for fixer in (_fix_yaml_indent, _fix_inline_block_scalars, _unquote_bare_string_lines):
+        fixed = fixer(text)
         if fixed != text:
-            return _yaml.safe_load(fixed)   # may still raise — caller handles it
-        raise
+            try:
+                return _yaml.safe_load(fixed)
+            except _yaml.YAMLError:
+                text = fixed   # carry forward fixes before trying the next fixer
+
+    return _yaml.safe_load(text)   # final attempt — raises if still broken
 
 
 _STEP_LINE_RE = _re_mod.compile(r'^(\s*)- (\S[^:]*):(.*)$')
@@ -874,7 +958,12 @@ class TestRailRunner:
                 if isinstance(parsed, list):
                     continue
             except Exception:
-                pass
+                # If YAML parsing failed but the body contains list markers it's a
+                # step list with syntax errors — skip it so we don't accidentally
+                # pull step parameters (e.g. "folder_prefix: [upgrade, dummy]")
+                # into the variable dict as if they were Var: key-value definitions.
+                if any(ln.lstrip().startswith("- ") for ln in body.splitlines()):
+                    continue
             for line in body.splitlines():
                 line = line.strip()
                 if ":" in line and not line.startswith(("-", "#")):
