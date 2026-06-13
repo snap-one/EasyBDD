@@ -58,6 +58,16 @@ pipeline {
     }
 
     post {
+        always {
+            publishHTML(target: [
+                allowMissing: true,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: "${PROJECT_DIR}/reports",
+                reportFiles: '**/*_report_*.html',
+                reportName: 'Easy BDD Report'
+            ])
+        }
         success {
             echo "Deployment complete — codebase is up to date and validates cleanly."
         }
