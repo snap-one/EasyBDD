@@ -14,6 +14,7 @@ import re
 import boto3
 from typing import Optional, List, Dict, Any, Tuple, Union
 from pathlib import Path
+from urllib.parse import quote as _url_quote
 
 
 class AWSService:
@@ -332,14 +333,15 @@ class AWSService:
 
                 self._log(f"  MATCH {key}")
 
-                # Build S3 URL
-                s3_url = f"{protocol}://{bucket_name}.s3.amazonaws.com/{key}"
+                # Build S3 URL — encode path so spaces become %20
+                encoded_key = _url_quote(key, safe="/")
+                s3_url = f"{protocol}://{bucket_name}.s3.amazonaws.com/{encoded_key}"
                 object_urls.append(s3_url)
 
                 # Build CloudFront URL if specified
                 if cloudfront_url:
                     if cloudfront_filename_only:
-                        filename = os.path.basename(key)
+                        filename = _url_quote(os.path.basename(key), safe="")
                         cf_url = f"{protocol}://{cloudfront_url}/{filename}"
                     else:
                         cf_url = s3_url.replace(

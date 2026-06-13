@@ -44,6 +44,7 @@ Login shortcut (no explicit telnet.connect required):
 """
 
 import socket
+import sys
 import time
 from typing import Any, Dict, Optional
 
@@ -160,8 +161,13 @@ class _TelnetConn:
         timeout: float = 45.0,
         encoding: str = "utf-8",
         idle_timeout: float = 1.0,
+        stream: bool = False,
     ) -> str:
         prompt_bytes = prompt.encode(encoding)
+        if prompt_bytes in self._buf:
+            result = self._buf.decode(encoding, errors="replace")
+            self._buf = b""
+            return result
         deadline = time.time() + timeout
         last_recv: float = 0.0
         received_any = False
@@ -177,6 +183,12 @@ class _TelnetConn:
                     break
                 received_any = True
                 last_recv = time.time()
+                if stream:
+                    text = chunk.decode(encoding, errors="replace")
+                    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+                        if line.strip():
+                            print(f"             {line}")
+                    sys.stdout.flush()
                 self._buf += chunk
                 if prompt_bytes in self._buf:
                     result = self._buf.decode(encoding, errors="replace")
@@ -377,9 +389,8 @@ class TelnetService:
         print(f"         📤 Sending: {command!r}")
         try:
             conn.send(data, encoding)
-            result = conn.read_until(prompt, timeout, encoding)
-            preview = result.strip()[:120].replace("\n", "\\n").replace("\r", "")
-            print(f"         📥 Received {len(result)} chars: {preview!r}")
+            result = conn.read_until(prompt, timeout, encoding, stream=True)
+            print(f"         📥 Done ({len(result)} chars)")
             return result
         except OSError as exc:
             print(f"         ⚠️  Connection lost: {exc}")
@@ -390,9 +401,8 @@ class TelnetService:
             try:
                 print(f"         📤 Resending: {command!r}")
                 new_conn.send(data, encoding)
-                result = new_conn.read_until(prompt, timeout, encoding)
-                preview = result.strip()[:120].replace("\n", "\\n").replace("\r", "")
-                print(f"         📥 Received {len(result)} chars: {preview!r}")
+                result = new_conn.read_until(prompt, timeout, encoding, stream=True)
+                print(f"         📥 Done ({len(result)} chars)")
                 return result
             except Exception:
                 self._pool.evict(key)

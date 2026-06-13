@@ -2,17 +2,13 @@ pipeline {
     agent any
 
     options {
-        // Keep last 10 builds; abort if a run takes longer than 10 minutes
         buildDiscarder(logRotator(numToKeepStr: '10'))
         timeout(time: 10, unit: 'MINUTES')
-        // Don't run concurrent builds (prevents two pulls fighting each other)
         disableConcurrentBuilds()
         timestamps()
     }
 
     triggers {
-        // Fires when GitHub sends a push webhook to Jenkins.
-        // In the job config: enable "GitHub hook trigger for GITScm polling".
         githubPush()
     }
 

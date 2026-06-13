@@ -942,40 +942,41 @@ def _parse_step_line(line: str) -> Optional[Dict]:
 # Step block parser (list of lines → list of step dicts)
 # ────────────────────────────────────────────────────────────────────────────
 
-def _wrap_for_each(steps: List[Dict], headers: List[str], rows: List[List[str]]) -> List[Dict]:
-    """Wrap a step list in a for_each loop using an Examples table."""
-    if not rows:
-        return steps
+def _build_data_list(headers: List[str], rows: List[List[str]]) -> List[Dict[str, Any]]:
+    """Convert an Examples table into a data: list of variable dicts."""
     if len(headers) == 1:
-        loop_var = headers[0]
-        typed_values: List[Any] = []
+        key = headers[0]
+        result = []
         for row in rows:
             v = row[0] if row else ""
             try:
-                typed_values.append(int(v))
+                result.append({key: int(v)})
             except ValueError:
                 try:
-                    typed_values.append(float(v))
+                    result.append({key: float(v)})
                 except ValueError:
-                    typed_values.append(v)
-        return [{"for_each": typed_values, "loop_var": loop_var, "steps": steps}]
+                    result.append({key: v})
+        return result
     else:
-        # Multiple columns → list of dicts per iteration
-        iterations = [dict(zip(headers, row)) for row in rows]
-        return [{"for_each": iterations, "loop_var": "iteration", "steps": steps}]
+        return [dict(zip(headers, row)) for row in rows]
 
 
-def parse_step_block(text: str) -> List[Dict]:
-    """Parse a raw step block (pipe-delimited lines) into Easy BDD step list."""
+def parse_step_block(text: str) -> tuple:
+    """Parse a raw step block into (steps, data).
+
+    steps — list of Easy BDD step dicts
+    data  — list of variable dicts from an Examples table, or empty list
+    """
     steps: List[Dict] = []
+    data: List[Dict] = []
     in_examples = False
     ex_headers: List[str] = []
     ex_rows: List[List[str]] = []
 
     def _flush_examples():
-        nonlocal steps, in_examples, ex_headers, ex_rows
+        nonlocal data, in_examples, ex_headers, ex_rows
         if in_examples and ex_headers and ex_rows:
-            steps = _wrap_for_each(steps, ex_headers, ex_rows)
+            data = _build_data_list(ex_headers, ex_rows)
         in_examples = False
         ex_headers = []
         ex_rows = []
@@ -1017,7 +1018,7 @@ def parse_step_block(text: str) -> List[Dict]:
 
     # Handle Examples: at end of block
     _flush_examples()
-    return steps
+    return steps, data
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -1145,7 +1146,7 @@ def parse_shared_step(name: str, body: str) -> Optional[Dict[str, Any]]:
     body = (body or "").strip()
     if not body:
         return None
-    steps = parse_step_block(body)
+    steps, _ = parse_step_block(body)
     slug  = re.sub(r"^Shared:\s*", "", name).strip()
     slug  = re.sub(r"[^A-Za-z0-9_]+", "_", slug).strip("_")
     return {"name": slug, "description": name, "steps": steps}
@@ -1197,8 +1198,10 @@ def migrate(content: str) -> Dict[str, Any]:
                     "steps": entry["steps"],
                 }
         for feat_name, feat_body in (doc.get("feature", {}) or {}).items():
-            steps = parse_step_block(feat_body)
+            steps, data = parse_step_block(feat_body)
             test_dict = {"name": feat_name, "variables": variables_out.copy(), "steps": steps}
+            if data:
+                test_dict["data"] = data
             slug = re.sub(r"[^A-Za-z0-9_-]", "_", feat_name).strip("_")
             tests_out.append({"name": slug, "display_name": feat_name,
                                "yaml": yaml.dump(test_dict, sort_keys=False, allow_unicode=True)})
@@ -1219,14 +1222,10 @@ def migrate(content: str) -> Dict[str, Any]:
             test_dict["steps"] = t["steps"]
 
             if t.get("loop_count", 0) > 1:
-                # Wrap in for loop
-                loop_step = {
-                    "for_each": list(range(1, t["loop_count"] + 1)),
-                    "loop_var": "loop_iteration",
-                    "steps": t["steps"],
-                }
-                test_dict["steps"] = [loop_step]
-                warnings.append(f"Test '{name}' had {t['loop_count']} loop iterations — wrapped in for_each.")
+                test_dict["data"] = [
+                    {"loop_iteration": i} for i in range(1, t["loop_count"] + 1)
+                ]
+                warnings.append(f"Test '{name}' had {t['loop_count']} loop iterations — added data: list.")
 
             _flag_todos(test_dict["steps"], name, warnings)
             tests_out.append({"name": slug, "display_name": name,
@@ -1234,8 +1233,10 @@ def migrate(content: str) -> Dict[str, Any]:
 
     else:
         # Raw step block (e.g., content of custom_preconds)
-        steps = parse_step_block(content)
+        steps, data = parse_step_block(content)
         test_dict = {"name": "Migrated Test", "steps": steps}
+        if data:
+            test_dict["data"] = data
         _flag_todos(steps, "Migrated Test", warnings)
         tests_out.append({"name": "migrated_test", "display_name": "Migrated Test",
                            "yaml": yaml.dump(test_dict, sort_keys=False, allow_unicode=True)})
@@ -1269,7 +1270,7 @@ def _to_dot_notation(step: Dict) -> Dict:
     """Convert flat {'action': 'x.y', 'param': val} → {'x.y': {'param': val}}.
 
     Recursively converts steps inside loop/conditional bodies.
-    Leaves special structures (shared_step, for_each, condition, etc.) untouched.
+    Leaves special structures (shared_step, condition, etc.) untouched.
     """
     if not isinstance(step, dict):
         return step

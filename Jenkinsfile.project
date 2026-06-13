@@ -1,0 +1,59 @@
+def WORKSPACE = '/var/lib/jenkins/workspace/EASY_BDD'
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'PROJECT_ID',   defaultValue: '', description: 'TestRail project ID')
+        string(name: 'PROJECT_NAME', defaultValue: '', description: 'TestRail project name')
+    }
+
+    options {
+        buildDiscarder(logRotator(daysToKeepStr: '7', numToKeepStr: '500'))
+        timestamps()
+        timeout(time: 60, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Run TestRail Project') {
+            when {
+                expression { params.PROJECT_ID?.trim() }
+            }
+            steps {
+                sh """#!/bin/bash
+                    cd ${WORKSPACE}
+                    rm -f reports/run_${params.PROJECT_ID}.properties
+                    set -a && . .env && set +a
+                    . env/bin/activate
+                    python -m easy_bdd testrail-run ${params.PROJECT_ID} || true
+                """
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                if (!params.PROJECT_ID?.trim()) {
+                    currentBuild.displayName = "#${BUILD_NUMBER} — No PROJECT_ID supplied"
+                    currentBuild.description = ''
+                    return
+                }
+                def propsFile = "${WORKSPACE}/reports/run_${params.PROJECT_ID}.properties"
+                if (fileExists(propsFile)) {
+                    def props = readProperties file: propsFile
+                    def runName = props['RUN_NAME'] ?: ''
+                    def runUrl  = props['RUN_URL']  ?: ''
+                    if (runName) {
+                        currentBuild.displayName = "#${BUILD_NUMBER} — ${params.PROJECT_NAME}: ${runName}"
+                        currentBuild.description = "<a href=\"${runUrl}\">${runName}</a>"
+                        return
+                    }
+                }
+                currentBuild.displayName = "#${BUILD_NUMBER} — No runs found"
+                currentBuild.description = ''
+            }
+        }
+    }
+}
