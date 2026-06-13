@@ -85,6 +85,7 @@ import html as _html_mod
 import json
 import os
 import re as _re_mod
+import signal
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -719,12 +720,14 @@ class TestRailRunner:
         self._run_prefix = run_prefix or os.getenv(
             "TESTRAIL_RUN_PREFIX", self.DEFAULT_PREFIX
         )
-        # Optional custom "Running" status ID — omit if your TestRail instance lacks it
+        # Custom "Running" status ID — defaults to STATUS_RUNNING (6) if not overridden
         running_env = os.getenv("TESTRAIL_RUNNING_STATUS_ID")
-        self._running_status_id: Optional[int] = (
+        self._running_status_id: int = (
             running_status_id
-            or (int(running_env) if running_env else None)
+            or (int(running_env) if running_env else TestRailService.STATUS_RUNNING)
         )
+        # Tracks the test_id currently executing so signal handlers can mark it failed
+        self._inflight_test_id: Optional[int] = None
 
     def list_runs(self, project_id: int) -> List[Dict]:
         """Return all runs in a project that match the configured prefix."""
@@ -1179,21 +1182,39 @@ class TestRailRunner:
         teardowns = [t for t in classified if t["role"] == "teardown"]
         execution_order = setups + pending_tests + teardowns
 
-        for case in execution_order:
-            test_id = case["id"]
-            title = case["clean_title"]
-            role = case["role"]
-            body = _get_case_body(case)
+        def _on_cancel(signum, frame):
+            if self._inflight_test_id is not None:
+                try:
+                    self._tr.add_result(
+                        self._inflight_test_id,
+                        status_id=TestRailService.STATUS_FAILED,
+                        comment="Test cancelled — Jenkins job was aborted",
+                    )
+                except Exception:
+                    pass
+            signal.signal(signal.SIGTERM, _prev_sigterm)
+            signal.signal(signal.SIGINT, _prev_sigint)
+            raise SystemExit(1)
 
-            if verbose:
-                role_label = {
-                    "inline": "FEATURE",
-                    "keyword": "SHARED",
-                }.get(role, role.upper())
-                print(f"\n  [{role_label}] {title}")
+        _prev_sigterm = signal.signal(signal.SIGTERM, _on_cancel)
+        _prev_sigint = signal.signal(signal.SIGINT, _on_cancel)
 
-            # Post "running" status immediately (best-effort — only if configured)
-            if self._running_status_id is not None:
+        try:
+            for case in execution_order:
+                test_id = case["id"]
+                title = case["clean_title"]
+                role = case["role"]
+                body = _get_case_body(case)
+
+                if verbose:
+                    role_label = {
+                        "inline": "FEATURE",
+                        "keyword": "SHARED",
+                    }.get(role, role.upper())
+                    print(f"\n  [{role_label}] {title}")
+
+                # Mark test as Running immediately so TestRail reflects live state
+                self._inflight_test_id = test_id
                 try:
                     self._tr.add_result(
                         test_id,
@@ -1203,62 +1224,69 @@ class TestRailRunner:
                 except Exception:
                     pass
 
-            start_time = time.time()
+                start_time = time.time()
 
-            if role == "inline":
-                test_passed, comment_lines = self._run_feature(case, injected_vars, verbose)
-            else:
-                yaml_files = self._resolve(body, title, injected_vars)
-                if not yaml_files:
-                    elapsed = _format_elapsed(time.time() - start_time)
-                    if not body:
-                        comment = (
-                            "Case body is empty.\n"
-                            "Test: cases: add 'tag: <tag>' or 'file: <path>' to the Steps field.\n"
-                            "To write steps directly in TestRail, rename to 'Feature: <title>'."
+                if role == "inline":
+                    test_passed, comment_lines = self._run_feature(case, injected_vars, verbose)
+                else:
+                    yaml_files = self._resolve(body, title, injected_vars)
+                    if not yaml_files:
+                        elapsed = _format_elapsed(time.time() - start_time)
+                        if not body:
+                            comment = (
+                                "Case body is empty.\n"
+                                "Test: cases: add 'tag: <tag>' or 'file: <path>' to the Steps field.\n"
+                                "To write steps directly in TestRail, rename to 'Feature: <title>'."
+                            )
+                        elif not (body.startswith("tag:") or body.startswith("file:")):
+                            comment = (
+                                f"Unrecognised body format. Use:\n"
+                                f"  tag: <tag>    — run all local YAMLs with that tag\n"
+                                f"  file: <path>  — run a specific YAML file\n"
+                                f"Or rename the case to 'Feature: {title}' to write steps directly.\n\n"
+                                f"Body received:\n{body[:200]}"
+                            )
+                        else:
+                            comment = f"No YAML tests found matching: {body[:200]}"
+                        self._tr.add_result(
+                            test_id,
+                            status_id=TestRailService.STATUS_FAILED,
+                            comment=comment,
+                            elapsed=elapsed,
                         )
-                    elif not (body.startswith("tag:") or body.startswith("file:")):
-                        comment = (
-                            f"Unrecognised body format. Use:\n"
-                            f"  tag: <tag>    — run all local YAMLs with that tag\n"
-                            f"  file: <path>  — run a specific YAML file\n"
-                            f"Or rename the case to 'Feature: {title}' to write steps directly.\n\n"
-                            f"Body received:\n{body[:200]}"
-                        )
-                    else:
-                        comment = f"No YAML tests found matching: {body[:200]}"
-                    self._tr.add_result(
-                        test_id,
-                        status_id=TestRailService.STATUS_FAILED,
-                        comment=comment,
-                        elapsed=elapsed,
+                        self._inflight_test_id = None
+                        failed += 1
+                        if verbose:
+                            print(f"    FAIL — {comment.splitlines()[0]}")
+                        continue
+                    test_passed, comment_lines = self._run_yaml_files(
+                        yaml_files, injected_vars, verbose
                     )
-                    failed += 1
-                    if verbose:
-                        print(f"    FAIL — {comment.splitlines()[0]}")
-                    continue
-                test_passed, comment_lines = self._run_yaml_files(
-                    yaml_files, injected_vars, verbose
+
+                elapsed = _format_elapsed(time.time() - start_time)
+                comment = "\n".join(comment_lines) or ("Passed" if test_passed else "Failed")
+                status_id = (
+                    TestRailService.STATUS_PASSED
+                    if test_passed
+                    else TestRailService.STATUS_FAILED
                 )
 
-            elapsed = _format_elapsed(time.time() - start_time)
-            comment = "\n".join(comment_lines) or ("Passed" if test_passed else "Failed")
-            status_id = (
-                TestRailService.STATUS_PASSED
-                if test_passed
-                else TestRailService.STATUS_FAILED
-            )
+                self._tr.add_result(test_id, status_id=status_id, comment=comment, elapsed=elapsed)
+                self._inflight_test_id = None
 
-            self._tr.add_result(test_id, status_id=status_id, comment=comment, elapsed=elapsed)
+                if test_passed:
+                    passed += 1
+                    if verbose:
+                        print(f"    PASS ({elapsed})")
+                else:
+                    failed += 1
+                    if verbose:
+                        print(f"    FAIL ({elapsed})")
 
-            if test_passed:
-                passed += 1
-                if verbose:
-                    print(f"    PASS ({elapsed})")
-            else:
-                failed += 1
-                if verbose:
-                    print(f"    FAIL ({elapsed})")
+        finally:
+            signal.signal(signal.SIGTERM, _prev_sigterm)
+            signal.signal(signal.SIGINT, _prev_sigint)
+            self._inflight_test_id = None
 
         # Mark definition cases (Shared: / Var:) as passed so they don't
         # remain "untested" in the run. They are not executable directly.
