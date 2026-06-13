@@ -405,6 +405,32 @@ Examples:
         help="Milestone ID to associate the run with",
     )
     trcr_parser.add_argument(
+        "--given-section",
+        metavar="SECTION",
+        default=None,
+        help=(
+            "Name of the section containing 'Given:' cases (one per SKU/variant). "
+            "When set, creates one run per Given: case found in that section. "
+            "The Given: case is always included; --sections controls the rest of the cases. "
+            'Example: --given-section "VPS" --sections "Functions" "Firmware Resiliency" "VPS Web UI" "VPS API"'
+        ),
+    )
+    trcr_parser.add_argument(
+        "--run-name-template",
+        default=None,
+        metavar="TEMPLATE",
+        help=(
+            'Python format string for per-Given run names. '
+            'Available variables: {prefix}, {sku}, {product_category}. '
+            'Default: "{prefix} {sku} Smoke Test"'
+        ),
+    )
+    trcr_parser.add_argument(
+        "--product-category",
+        default="",
+        help="Product category label substituted into --run-name-template as {product_category}",
+    )
+    trcr_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print what would be created without actually creating it",
@@ -1332,7 +1358,13 @@ def testrail_list(args) -> int:
 
 
 def testrail_create_run(args) -> int:
-    """Create a TestRail run from a suite, optionally filtered to named sections."""
+    """Create TestRail run(s) from a suite filtered to named sections.
+
+    Two modes:
+      - Default: one run for the whole suite (or --sections subset).
+      - --given-section MODE: find Given: cases in a section, create one
+        run per Given: case (one per SKU/variant).
+    """
     from .services.testrail_service import TestRailService, TestRailError
 
     try:
@@ -1343,97 +1375,163 @@ def testrail_create_run(args) -> int:
 
     prefix = args.prefix or os.getenv("TESTRAIL_RUN_PREFIX", "EASY_BDD:").rstrip()
 
-    # Resolve suite name for default run name
     try:
         suite = tr.get_suite(args.suite_id)
     except Exception as e:
         print(f"Error fetching suite {args.suite_id}: {e}", file=sys.stderr)
         return 1
-
     suite_name = suite.get("name", f"Suite {args.suite_id}")
-    run_name = args.name or f"{prefix} {suite_name}"
 
-    # Fetch all sections in the suite
     try:
-        sections = tr.get_sections(args.project_id, suite_id=args.suite_id)
+        all_sections = tr.get_sections(args.project_id, suite_id=args.suite_id)
     except Exception as e:
         print(f"Error fetching sections: {e}", file=sys.stderr)
         return 1
 
-    # Build a name → id map (case-insensitive)
-    section_map = {s["name"].lower(): s["id"] for s in sections}
-
-    # Resolve which section IDs to include
-    if args.sections:
-        matched_ids = []
-        for label in args.sections:
-            label_lower = label.lower()
-            # Exact match first, then substring
-            hits = [
-                sid for name, sid in section_map.items()
-                if label_lower == name or label_lower in name
-            ]
-            if not hits:
-                print(f"  ⚠  Section not found: '{label}' (available: {', '.join(s['name'] for s in sections)})")
-            else:
-                matched_ids.extend(hits)
-        if not matched_ids:
-            print("No matching sections found — aborting.", file=sys.stderr)
-            return 1
-        matched_names = [s["name"] for s in sections if s["id"] in matched_ids]
-        print(f"Matched sections: {', '.join(matched_names)}")
-    else:
-        matched_ids = None  # include all cases
-        print("No --sections filter: including all cases in suite")
-
-    # Fetch cases (optionally filter by section)
     try:
         all_cases = tr.get_cases(args.project_id, suite_id=args.suite_id)
     except Exception as e:
         print(f"Error fetching cases: {e}", file=sys.stderr)
         return 1
 
-    if matched_ids is not None:
+    section_by_id = {s["id"]: s for s in all_sections}
+    testrail_base = os.getenv("TESTRAIL_URL", "").rstrip("/")
+
+    def _resolve_section_ids(labels):
+        """Return set of section IDs (and all their descendants) matching labels."""
+        matched = set()
+        for label in labels:
+            ll = label.lower()
+            for s in all_sections:
+                if ll == s["name"].lower() or ll in s["name"].lower():
+                    matched.add(s["id"])
+        # Expand to descendants
+        grew = True
+        while grew:
+            grew = False
+            for s in all_sections:
+                if s.get("parent_id") in matched and s["id"] not in matched:
+                    matched.add(s["id"])
+                    grew = True
+        return matched
+
+    def _create_one_run(run_name, case_ids, description=""):
+        payload = {
+            "name": run_name,
+            "suite_id": args.suite_id,
+            "case_ids": list(dict.fromkeys(case_ids)),  # dedupe, preserve order
+            "include_all": False,
+        }
+        if description:
+            payload["description"] = description
+        if args.milestone_id:
+            payload["milestone_id"] = args.milestone_id
+        run = tr.add_run(args.project_id, **payload)
+        run_url = f"{testrail_base}/index.php?/runs/view/{run['id']}"
+        print(f"  ✅ [{run['id']}] {run['name']}  ({len(payload['case_ids'])} cases)")
+        print(f"     {run_url}")
+        return run
+
+    # ── MODE: --given-section ───────────────────────────────────────────────
+    if args.given_section:
+        given_section_label = args.given_section.lower()
+        given_section_ids = {
+            s["id"] for s in all_sections
+            if given_section_label == s["name"].lower() or given_section_label in s["name"].lower()
+        }
+        if not given_section_ids:
+            print(f"Given section '{args.given_section}' not found.", file=sys.stderr)
+            print(f"Available: {', '.join(s['name'] for s in all_sections)}", file=sys.stderr)
+            return 1
+
+        given_cases = [
+            c for c in all_cases
+            if c.get("section_id") in given_section_ids
+            and c.get("title", "").startswith("Given:")
+        ]
+        if not given_cases:
+            print(f"No 'Given:' cases found in section '{args.given_section}'.")
+            return 0
+
+        print(f"\nFound {len(given_cases)} Given: case(s) in '{args.given_section}':")
+        for gc in given_cases:
+            sku = gc["title"].replace("Given:", "").strip()
+            print(f"  → {sku}")
+
+        # Resolve the shared sections (Functions, Firmware Resiliency, etc.)
+        shared_section_ids = _resolve_section_ids(args.sections) if args.sections else set()
+        shared_case_ids = [
+            c["id"] for c in all_cases
+            if c.get("section_id") in shared_section_ids
+            and not c.get("title", "").startswith("Given:")
+        ]
+
+        name_template = (
+            args.run_name_template or "{prefix} {sku} Smoke Test"
+        )
+        product_category = getattr(args, "product_category", "") or ""
+
+        if args.dry_run:
+            print("\n[dry-run] Would create:")
+            for gc in given_cases:
+                sku = gc["title"].replace("Given:", "").strip()
+                run_name = name_template.format(
+                    prefix=prefix, sku=sku, product_category=product_category
+                )
+                total = 1 + len(shared_case_ids)
+                print(f"  Run: '{run_name}'  ({total} cases: 1 Given + {len(shared_case_ids)} shared)")
+            return 0
+
+        print()
+        created = 0
+        for gc in given_cases:
+            sku = gc["title"].replace("Given:", "").strip()
+            run_name = name_template.format(
+                prefix=prefix, sku=sku, product_category=product_category
+            )
+            case_ids = [gc["id"]] + shared_case_ids
+            try:
+                _create_one_run(run_name, case_ids, description=args.description)
+                created += 1
+            except Exception as e:
+                print(f"  ❌ Failed to create run for '{sku}': {e}", file=sys.stderr)
+
+        print(f"\nCreated {created}/{len(given_cases)} run(s).")
+        return 0 if created == len(given_cases) else 1
+
+    # ── MODE: single run ────────────────────────────────────────────────────
+    run_name = args.name or f"{prefix} {suite_name}"
+
+    if args.sections:
+        matched_ids = _resolve_section_ids(args.sections)
+        if not matched_ids:
+            print("No matching sections found — aborting.", file=sys.stderr)
+            return 1
+        matched_names = [s["name"] for s in all_sections if s["id"] in matched_ids]
+        print(f"Matched sections: {', '.join(matched_names)}")
         case_ids = [c["id"] for c in all_cases if c.get("section_id") in matched_ids]
     else:
+        print("No --sections filter: including all cases in suite")
         case_ids = [c["id"] for c in all_cases]
 
     if not case_ids:
-        print("No cases found for the specified sections — aborting.", file=sys.stderr)
+        print("No cases found — aborting.", file=sys.stderr)
         return 1
 
     print(f"\nRun name : {run_name}")
     print(f"Suite    : [{args.suite_id}] {suite_name}")
     print(f"Cases    : {len(case_ids)} case(s)")
-    if args.milestone_id:
-        print(f"Milestone: {args.milestone_id}")
 
     if args.dry_run:
         print("\n[dry-run] Would create run with the above settings — no changes made.")
         return 0
 
-    # Create the run
-    payload = {
-        "name": run_name,
-        "suite_id": args.suite_id,
-        "case_ids": case_ids,
-        "include_all": False,
-    }
-    if args.description:
-        payload["description"] = args.description
-    if args.milestone_id:
-        payload["milestone_id"] = args.milestone_id
-
     try:
-        run = tr.add_run(args.project_id, **payload)
+        _create_one_run(run_name, case_ids, description=args.description)
     except Exception as e:
         print(f"Error creating run: {e}", file=sys.stderr)
         return 1
 
-    testrail_base = os.getenv("TESTRAIL_URL", "").rstrip("/")
-    run_url = f"{testrail_base}/index.php?/runs/view/{run['id']}"
-    print(f"\n✅ Run created: [{run['id']}] {run['name']}")
-    print(f"   URL: {run_url}")
     return 0
 
 

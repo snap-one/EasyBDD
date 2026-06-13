@@ -1,0 +1,132 @@
+// Jenkinsfile for jpdsauto/Wattbox-Firmware
+// Detects which firmware types changed (.bin files) and creates one
+// TestRail run per SKU (Given: case) in the matching subsections.
+
+pipeline {
+    agent { label 'built-in' }
+
+    environment {
+        PROJECT_ID    = '77'
+        SUITE_ID      = '52630'
+        EASY_BDD_DIR  = '/var/lib/jenkins/workspace/EASY_BDD'
+        PYTHON        = '/var/lib/jenkins/workspace/EASY_BDD/env/bin/python'
+    }
+
+    stages {
+
+        stage('Detect Changed Firmware') {
+            steps {
+                script {
+                    def changedFiles = []
+
+                    if (env.GIT_PREVIOUS_COMMIT && env.GIT_PREVIOUS_COMMIT != env.GIT_COMMIT) {
+                        def diff = sh(
+                            script: "git diff --name-only ${env.GIT_PREVIOUS_COMMIT} ${env.GIT_COMMIT}",
+                            returnStdout: true
+                        ).trim()
+                        changedFiles = diff ? diff.split('\n').toList() : []
+                    } else {
+                        // First build or manual trigger — check the most recent commit
+                        def diff = sh(
+                            script: "git show --name-only --pretty=format: HEAD",
+                            returnStdout: true
+                        ).trim()
+                        changedFiles = diff ? diff.split('\n').findAll { it.trim() } : []
+                    }
+
+                    echo "Changed files: ${changedFiles}"
+
+                    // Map filename keywords → firmware type config
+                    def firmwareTypes = [
+                        vps : [
+                            keyword   : 'vps',
+                            sections  : ['Functions', 'Firmware Resiliency', 'VPS Web UI',  'VPS API'],
+                            givenSection: 'VPS',
+                        ],
+                        wifi: [
+                            keyword   : 'wifi',
+                            sections  : ['Functions', 'Firmware Resiliency', 'WiFi Web UI', 'WiFi API'],
+                            givenSection: 'WiFi',
+                        ],
+                        ns  : [
+                            keyword   : 'ns',
+                            sections  : ['Functions', 'Firmware Resiliency', 'NS Web UI',   'NS API'],
+                            givenSection: 'NS',
+                        ],
+                    ]
+
+                    def detected = [] as Set
+                    changedFiles.each { f ->
+                        def fn = f.toLowerCase()
+                        if (fn.endsWith('.bin')) {
+                            firmwareTypes.each { type, cfg ->
+                                if (fn.contains(cfg.keyword)) {
+                                    detected << type
+                                    echo "✅  Detected ${type.toUpperCase()} firmware: ${f}"
+                                }
+                            }
+                        }
+                    }
+
+                    if (detected.isEmpty()) {
+                        echo "No .bin firmware files changed — nothing to do."
+                        currentBuild.result = 'SUCCESS'
+                        env.DETECTED_TYPES = ''
+                        return
+                    }
+
+                    env.DETECTED_TYPES = detected.join(',')
+                    echo "Firmware types to create runs for: ${env.DETECTED_TYPES}"
+                }
+            }
+        }
+
+        stage('Create TestRail Runs') {
+            when { expression { env.DETECTED_TYPES?.trim() } }
+            steps {
+                script {
+                    def types = env.DETECTED_TYPES.split(',')
+
+                    def firmwareTypes = [
+                        vps : [
+                            sections    : ['Functions', 'Firmware Resiliency', 'VPS Web UI',  'VPS API'],
+                            givenSection: 'VPS',
+                        ],
+                        wifi: [
+                            sections    : ['Functions', 'Firmware Resiliency', 'WiFi Web UI', 'WiFi API'],
+                            givenSection: 'WiFi',
+                        ],
+                        ns  : [
+                            sections    : ['Functions', 'Firmware Resiliency', 'NS Web UI',   'NS API'],
+                            givenSection: 'NS',
+                        ],
+                    ]
+
+                    types.each { type ->
+                        def cfg = firmwareTypes[type]
+                        if (!cfg) { echo "⚠ Unknown firmware type '${type}' — skipping"; return }
+
+                        def sectionsArg = cfg.sections.collect { "\"${it}\"" }.join(' ')
+                        echo "Creating runs for ${type.toUpperCase()} (Given: section: '${cfg.givenSection}')"
+
+                        sh """
+                            set -a && . ${EASY_BDD_DIR}/.env && set +a
+                            . ${EASY_BDD_DIR}/env/bin/activate
+                            python -m easy_bdd testrail-create-run \\
+                                ${PROJECT_ID} ${SUITE_ID} \\
+                                --given-section "${cfg.givenSection}" \\
+                                --sections ${sectionsArg} \\
+                                --description "Firmware drop detected in commit ${env.GIT_COMMIT?.take(8) ?: 'unknown'} (branch: ${env.GIT_BRANCH ?: 'main'})"
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Firmware drop pipeline complete. Detected types: ${env.DETECTED_TYPES ?: 'none'}"
+        }
+    }
+}
