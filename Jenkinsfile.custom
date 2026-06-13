@@ -1,0 +1,42 @@
+pipeline {
+    agent any
+    triggers { cron('H/5 * * * *') }
+    options {
+        buildDiscarder(logRotator(daysToKeepStr: '7', numToKeepStr: '2016'))
+        timestamps()
+        timeout(time: 4, unit: 'MINUTES')
+    }
+    stages {
+        stage('Run TestRail Project') {
+            steps {
+                script {
+                    ws('/home/jenkins/Easy_BDD') {
+                        sh '''#!/bin/bash
+                            git fetch origin
+                            git checkout main
+                            git pull origin main
+                        '''
+                        sh '''#!/bin/bash
+                            set -e
+                            set -a && . /var/lib/jenkins/workspace/EASY_BDD/.env && set +a
+                            . /var/lib/jenkins/workspace/EASY_BDD/env/bin/activate
+                            python -m easy_bdd testrail-run 77
+                        '''
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            publishHTML(target: [
+                allowMissing: true,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: '/home/jenkins/Easy_BDD/reports',
+                reportFiles: '**/*_report_*.html',
+                reportName: 'Easy BDD Report'
+            ])
+        }
+    }
+}
