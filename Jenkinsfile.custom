@@ -82,6 +82,14 @@ pipeline {
                 currentBuild.displayName = "#${BUILD_NUMBER} — No runs found [${branch}]"
                 currentBuild.description = "Project: ${projectName} | Prefix: ${runPrefix} | Branch: ${branch}"
             }
+            publishHTML(target: [
+                allowMissing: true,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: "${WORKSPACE}/reports",
+                reportFiles: '**/*_report_*.html',
+                reportName: 'Easy BDD Report'
+            ])
         }
     }
 }

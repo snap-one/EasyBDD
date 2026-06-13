@@ -809,14 +809,24 @@ class TestRunner:
                             details=self._get_step_description(step),
                         )
 
+                        # Add failed step to step_logs
+                        step_logs.append(
+                            {"step": i, "action": step.action, "status": "failed"}
+                        )
+
+                        # Capture failure screenshot (of state after last successful step)
                         failed_step_info = {
                             "step_number": i,
                             "step_action": step.action,
                             "step_details": self._get_step_description(step),
                         }
-                        failure_screenshot = self._capture_failure_screenshot(
-                            services.get("browser"), test.name, i
-                        )
+                        # Use the screenshot captured after the last successful step
+                        failure_screenshot = getattr(self, "_last_step_screenshot", None)
+                        if not failure_screenshot:
+                            # Fallback: capture screenshot now if we don't have one
+                            failure_screenshot = self._capture_failure_screenshot(
+                                services.get("browser"), test.name, i
+                            )
 
                         if test_detail is not None:
                             test_detail["failed_step"] = failed_step_info
@@ -829,6 +839,28 @@ class TestRunner:
                         step_logs.append(
                             {"step": i, "action": step.action, "status": "passed"}
                         )
+                        
+                        # Capture screenshot after each successful browser step
+                        # This ensures we have a screenshot of the state before failure
+                        browser_service = services.get("browser")
+                        if browser_service and service_type == "browser":
+                            try:
+                                screenshot_path = self._capture_step_screenshot(
+                                    browser_service, test.name, i
+                                )
+                                if screenshot_path:
+                                    self._last_step_screenshot = screenshot_path
+                                    # Also store in test_detail for report
+                                    if test_detail is not None:
+                                        if "step_screenshots" not in test_detail:
+                                            test_detail["step_screenshots"] = []
+                                        test_detail["step_screenshots"].append({
+                                            "step": i,
+                                            "screenshot": screenshot_path
+                                        })
+                            except Exception as e:
+                                # Don't fail the test if screenshot capture fails
+                                pass
                 except Exception as e:
                     import traceback
                     self._run_logger.step_fail(
@@ -836,6 +868,11 @@ class TestRunner:
                         error=str(e),
                         details=self._get_step_description(step),
                         traceback_str=traceback.format_exc(),
+                    )
+
+                    # Add failed step to step_logs
+                    step_logs.append(
+                        {"step": i, "action": step.action, "status": "failed"}
                     )
 
                     # Capture failure screenshot
@@ -867,7 +904,14 @@ class TestRunner:
                 if test_detail is not None:
                     test_detail["soft_assertions"] = soft_assert_manager.to_dict()
                 test_passed = False
+                # Store step_logs even on soft assertion failure
+                if test_detail is not None:
+                    test_detail["step_logs"] = step_logs
                 return False
+
+            # Store step_logs when test passes
+            if test_detail is not None:
+                test_detail["step_logs"] = step_logs
 
             test_passed = True
             return True
@@ -1072,6 +1116,38 @@ class TestRunner:
                 # Get test file name if available
                 test_file = getattr(self, "_current_test_file", "test")
                 filename = f"{test_file}_failure_step{step_number}_{timestamp}"
+
+                # Take screenshot
+                browser_service.take_screenshot(filename)
+
+                # Return relative path for HTML report (with .png extension)
+                return f"screenshots/{filename}.png"
+        except Exception as e:
+            # Silently skip screenshot for non-UI tests
+            pass
+        return None
+
+    def _capture_step_screenshot(
+        self, browser_service, test_name: str, step_number: int
+    ) -> Optional[str]:
+        """Capture screenshot after successful step (for failure preview)"""
+        try:
+            # Only capture screenshot if browser service exists and page is active
+            if (
+                browser_service
+                and hasattr(browser_service, "take_screenshot")
+                and hasattr(browser_service, "page")
+                and browser_service.page
+            ):
+                # Create screenshots directory
+                screenshots_dir = Path("reports/screenshots")
+                screenshots_dir.mkdir(parents=True, exist_ok=True)
+
+                # Generate filename with test file prefix (without .png)
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                # Get test file name if available
+                test_file = getattr(self, "_current_test_file", "test")
+                filename = f"{test_file}_step{step_number}_{timestamp}"
 
                 # Take screenshot
                 browser_service.take_screenshot(filename)
@@ -1948,7 +2024,7 @@ class TestRunner:
             # Handle WebSocket connection
             if "connect" in action_lower:
                 # Extract connection parameters
-                server_url = params.get("server_url", "")
+                server_url = params.get("url", "") or params.get("server_url", "")
                 device_id = params.get("device_id", "")
                 protocol = params.get("protocol", "firmware-protocol")
                 session_id = params.get("session_id", None)
@@ -3512,9 +3588,9 @@ class TestRunner:
             # Handle Python code execution
             # Support both "command.python" and "command python" formats
             elif "command" in action_lower and "python" in action_lower:
-                code = params.get("code", "")
+                code = params.get("script", "") or params.get("code", "")
                 if not code:
-                    raise ValueError("Python command requires 'code' parameter")
+                    raise ValueError("Python command requires 'script' parameter")
 
                 print(f"      🐍 Executing Python code: {code[:50]}...")
                 output, result, exit_code = self._command_service.execute_python_code(
@@ -3663,6 +3739,8 @@ class TestRunner:
                     access_key_id=eff_key,
                     secret_access_key=eff_secret,
                     region=params.get("region"),
+                    discover_prefix=params.get("discover_prefix", False),
+                    repo_root=params.get("repo_root") or os.getcwd(),
                 )
 
                 # Store URLs in variable if requested
@@ -3692,7 +3770,7 @@ class TestRunner:
 
                 if not urls:
                     print(f"      ⚠  0 files matched — check filter params above")
-                return len(urls) > 0
+                return True
 
             elif "get latest firmware" in action_lower:
                 # Get latest firmware file
@@ -3713,6 +3791,8 @@ class TestRunner:
                     access_key_id=params.get("access_key_id"),
                     secret_access_key=params.get("secret_access_key"),
                     region=params.get("region"),
+                    discover_prefix=params.get("discover_prefix", False),
+                    repo_root=params.get("repo_root") or os.getcwd(),
                 )
 
                 # Store individual values if requested
@@ -3735,7 +3815,12 @@ class TestRunner:
                     variables[params["store_url_as"]] = result["url"]
                     print(f"      Stored URL as: {params['store_url_as']}")
 
-                return result["filename"] is not None
+                store_as = params.get("store_as", "")
+                if store_as:
+                    variables[store_as] = result
+                    print(f"      Stored result as: {store_as}")
+
+                return True
 
             elif "upload" in action_lower:
                 # Upload file to S3
@@ -4372,8 +4457,11 @@ class TestRunner:
                     print(f"         Status: {response.status_code}")
 
                 # Store response in custom variable if specified
-                store_as = step_params.get("store_response") or params_dict.get(
-                    "store_response"
+                store_as = (
+                    step_params.get("store_response")
+                    or params_dict.get("store_response")
+                    or step_params.get("store_as")
+                    or params_dict.get("store_as")
                 )
                 if store_as:
                     response_dict = {

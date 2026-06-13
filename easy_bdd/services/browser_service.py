@@ -403,6 +403,16 @@ class BrowserService:
         # Set MCP bridge page reference
         self.mcp_bridge.page = self.playwright_page
 
+        # Maximize browser window (only in headed mode)
+        if not self._get_browser_config("headless", False):
+            try:
+                # Get the first page and maximize it
+                # Playwright doesn't have a direct maximize, so we set viewport to screen size
+                # or use window.maximize() via JavaScript
+                self.playwright_page.evaluate("window.moveTo(0, 0); window.resizeTo(screen.width, screen.height);")
+            except Exception as e:
+                print(f"      ⚠️  Could not maximize browser window: {e}")
+
         # Enhanced error handling and retry logic
         try:
             self.playwright_page.goto(url, wait_until="networkidle", timeout=30000)
@@ -610,14 +620,33 @@ class BrowserService:
             click_options["button"] = button
 
         try:
-            # Handle get_by_role (e.g., page.get_by_role("link", name="..."))
-            if role and name:
-                print(f"      Finding element by role '{role}' with name: {name}")
+            # Handle get_by_label (e.g., page.get_by_label("SourceAnalogTosLinkCoaxHDMI"))
+            if label:
+                print(f"      Finding element by label: {label}")
                 exact = kwargs.get("exact", False)
-                self.playwright_page.get_by_role(role, name=name, exact=exact).click(
-                    timeout=5000
+                self.playwright_page.get_by_label(label, exact=exact).click(
+                    timeout=5000, **click_options
                 )
-                print(f"      ✓ Clicked {role}: {name}")
+                print(f"      ✓ Clicked element with label: {label}")
+                return
+
+            # Handle get_by_role (e.g., page.get_by_role("link", name="...") or just role)
+            if role:
+                exact = kwargs.get("exact", False)
+                if name:
+                    # Role with name (more specific)
+                    print(f"      Finding element by role '{role}' with name: {name}")
+                    self.playwright_page.get_by_role(role, name=name, exact=exact).click(
+                        timeout=5000, **click_options
+                    )
+                    print(f"      ✓ Clicked {role}: {name}")
+                else:
+                    # Role alone (clicks first element with that role)
+                    print(f"      Finding element by role: {role}")
+                    self.playwright_page.get_by_role(role).first.click(
+                        timeout=5000, **click_options
+                    )
+                    print(f"      ✓ Clicked first element with role: {role}")
                 return
 
             # Handle get_by_label — explicit label= param or 'label:Text' selector prefix
@@ -1220,54 +1249,97 @@ class BrowserService:
         if self.playwright_page:
             try:
                 from playwright.sync_api import expect
-                # If selector already has :has-text(), use it directly
-                # Otherwise, try to find any element matching selector that contains the text
-                if ":has-text(" in selector:
-                    locator = self.playwright_page.locator(selector)
-                else:
-                    # Try to find the element that contains the text
-                    # First wait for at least one element matching the selector to be visible
-                    locator = self.playwright_page.locator(selector).first
-                    # Wait for element to be visible first
-                    locator.wait_for(state="visible", timeout=timeout)
-                    # Then check all matching elements to find one with the text
-                    all_elements = self.playwright_page.locator(selector).all()
-                    found = False
-                    for elem in all_elements:
-                        try:
-                            elem_text = elem.text_content() or ""
-                            if text in elem_text:
-                                found = True
-                                locator = elem
-                                break
-                        except:
-                            continue
-                    if not found:
-                        # Fall back to expect which will wait and retry
-                        locator = self.playwright_page.locator(selector)
                 
-                expect(locator).to_contain_text(text, timeout=timeout)
-                print(f"      ✓ Asserted element '{selector}' contains text '{text}'")
+                # Handle label= selector syntax for select elements
+                label_text = None
+                if selector and selector.startswith("label="):
+                    label_text = selector.replace("label=", "", 1).strip()
+                    locator = self.playwright_page.get_by_label(label_text)
+                else:
+                    locator = self.playwright_page.locator(selector)
+                
+                # Wait for element to be visible
+                locator.wait_for(state="visible", timeout=timeout)
+                
+                # Check if it's a select element - if so, get the selected option's text
+                is_select = locator.evaluate("el => el.tagName === 'SELECT'")
+                
+                if is_select:
+                    # For select elements, get the selected option's text
+                    selected_text = locator.evaluate("""
+                        el => {
+                            const selectedOption = el.options[el.selectedIndex];
+                            return selectedOption ? selectedOption.textContent.trim() : '';
+                        }
+                    """)
+                    
+                    if text not in selected_text:
+                        raise AssertionError(
+                            f"Select element '{selector}' selected option text does not contain '{text}'. "
+                            f"Actual selected text: '{selected_text}'"
+                        )
+                    print(f"      ✓ Asserted select element '{selector}' selected option contains text '{text}'")
+                else:
+                    # For non-select elements, use normal text content check
+                    if ":has-text(" in selector:
+                        pass  # Already using the selector as-is
+                    else:
+                        # Try to find the element that contains the text
+                        all_elements = locator.all()
+                        found = False
+                        for elem in all_elements:
+                            try:
+                                elem_text = elem.text_content() or ""
+                                if text in elem_text:
+                                    found = True
+                                    locator = elem
+                                    break
+                            except:
+                                continue
+                        if not found:
+                            # Fall back to expect which will wait and retry
+                            pass
+                    
+                    expect(locator).to_contain_text(text, timeout=timeout)
+                    print(f"      ✓ Asserted element '{selector}' contains text '{text}'")
             except Exception as e:
                 actual_text = ""
                 try:
-                    # Try to get text from the first matching element
-                    first_locator = self.playwright_page.locator(selector).first
-                    if first_locator.count() > 0:
-                        actual_text = first_locator.text_content() or ""
-                    # If that's empty, try all elements
-                    if not actual_text:
-                        all_elements = self.playwright_page.locator(selector).all()
-                        texts = []
-                        for elem in all_elements[:5]:  # Check first 5 elements
-                            try:
-                                txt = elem.text_content() or ""
-                                if txt:
-                                    texts.append(txt)
-                            except:
-                                pass
-                        if texts:
-                            actual_text = f"[Found {len(texts)} elements with text: {', '.join(texts[:3])}]"
+                    # Handle label= selector
+                    if selector and selector.startswith("label="):
+                        label_text = selector.replace("label=", "", 1).strip()
+                        locator = self.playwright_page.get_by_label(label_text)
+                    else:
+                        locator = self.playwright_page.locator(selector)
+                    
+                    # Check if it's a select element
+                    is_select = locator.evaluate("el => el.tagName === 'SELECT'")
+                    
+                    if is_select:
+                        # Get selected option text
+                        actual_text = locator.evaluate("""
+                            el => {
+                                const selectedOption = el.options[el.selectedIndex];
+                                return selectedOption ? selectedOption.textContent.trim() : '';
+                            }
+                        """)
+                    else:
+                        # Try to get text from the first matching element
+                        if locator.count() > 0:
+                            actual_text = locator.first.text_content() or ""
+                        # If that's empty, try all elements
+                        if not actual_text:
+                            all_elements = locator.all()
+                            texts = []
+                            for elem in all_elements[:5]:  # Check first 5 elements
+                                try:
+                                    txt = elem.text_content() or ""
+                                    if txt:
+                                        texts.append(txt)
+                                except:
+                                    pass
+                            if texts:
+                                actual_text = f"[Found {len(texts)} elements with text: {', '.join(texts[:3])}]"
                 except:
                     pass
                 raise AssertionError(f"Element '{selector}' text does not contain '{text}'. Actual: '{actual_text}'")
@@ -1293,13 +1365,63 @@ class BrowserService:
         if self.playwright_page:
             try:
                 from playwright.sync_api import expect
-                locator = self.playwright_page.locator(selector)
-                expect(locator).to_have_text(text, timeout=timeout)
-                print(f"      ✓ Asserted element '{selector}' text equals '{text}'")
+                
+                # Handle label= selector syntax for select elements
+                label_text = None
+                if selector and selector.startswith("label="):
+                    label_text = selector.replace("label=", "", 1).strip()
+                    locator = self.playwright_page.get_by_label(label_text)
+                else:
+                    locator = self.playwright_page.locator(selector)
+                
+                # Wait for element to be visible
+                locator.wait_for(state="visible", timeout=timeout)
+                
+                # Check if it's a select element - if so, get the selected option's text
+                is_select = locator.evaluate("el => el.tagName === 'SELECT'")
+                
+                if is_select:
+                    # For select elements, get the selected option's text
+                    selected_text = locator.evaluate("""
+                        el => {
+                            const selectedOption = el.options[el.selectedIndex];
+                            return selectedOption ? selectedOption.textContent.trim() : '';
+                        }
+                    """)
+                    
+                    if selected_text != text:
+                        raise AssertionError(
+                            f"Select element '{selector}' selected option text does not equal '{text}'. "
+                            f"Actual selected text: '{selected_text}'"
+                        )
+                    print(f"      ✓ Asserted select element '{selector}' selected option text equals '{text}'")
+                else:
+                    # For non-select elements, use normal text check
+                    expect(locator).to_have_text(text, timeout=timeout)
+                    print(f"      ✓ Asserted element '{selector}' text equals '{text}'")
             except Exception as e:
                 actual_text = ""
                 try:
-                    actual_text = locator.text_content() or ""
+                    # Handle label= selector
+                    if selector and selector.startswith("label="):
+                        label_text = selector.replace("label=", "", 1).strip()
+                        locator = self.playwright_page.get_by_label(label_text)
+                    else:
+                        locator = self.playwright_page.locator(selector)
+                    
+                    # Check if it's a select element
+                    is_select = locator.evaluate("el => el.tagName === 'SELECT'")
+                    
+                    if is_select:
+                        # Get selected option text
+                        actual_text = locator.evaluate("""
+                            el => {
+                                const selectedOption = el.options[el.selectedIndex];
+                                return selectedOption ? selectedOption.textContent.trim() : '';
+                            }
+                        """)
+                    else:
+                        actual_text = locator.text_content() or ""
                 except:
                     pass
                 raise AssertionError(f"Element '{selector}' text does not equal '{text}'. Actual: '{actual_text}'")
@@ -1775,11 +1897,52 @@ class BrowserService:
     def select_option(
         self, selector: str, value: str = None, label: str = None, **kwargs
     ) -> None:
-        """Playwright select option equivalent with wildcard support"""
+        """Playwright select option equivalent with wildcard and label support"""
         if not self.playwright_page:
             raise RuntimeError("Playwright session not active")
 
         try:
+            # Handle label= selector syntax (e.g., "label=SourceAnalogTosLinkCoaxHDMI")
+            # Check for both "label=" prefix and also handle if selector parameter contains label
+            label_text = None
+            if selector:
+                # Debug: print what we're checking
+                if selector.startswith("label="):
+                    label_text = selector.replace("label=", "", 1).strip()
+                    print(f"      [DEBUG] Detected label= selector, extracted: '{label_text}'")
+            elif not selector and kwargs.get("label"):
+                label_text = kwargs.get("label")
+                print(f"      [DEBUG] Using label from kwargs: '{label_text}'")
+            
+            if label_text:
+                print(f"      Finding select element by label: '{label_text}'")
+                
+                # Use get_by_label to find the select element
+                exact = kwargs.get("exact", False)
+                select_locator = self.playwright_page.get_by_label(label_text, exact=exact)
+                
+                # Wait for the select element to be visible
+                select_locator.wait_for(state="visible", timeout=10000)
+                
+                # Try to scroll into view
+                try:
+                    select_locator.scroll_into_view_if_needed(timeout=5000)
+                except:
+                    pass
+                
+                # Select the option
+                select_kwargs = {}
+                if value:
+                    select_kwargs["value"] = value
+                elif label:
+                    select_kwargs["label"] = label
+                
+                select_locator.select_option(**select_kwargs)
+                print(
+                    f"      ✓ Selected option '{value or label}' in select with label '{label_text}'"
+                )
+                return
+
             # Convert wildcard selectors to CSS attribute selectors
             processed_selector = self._process_wildcard_selector(selector)
             print(f"      Selecting from: '{processed_selector}'")
