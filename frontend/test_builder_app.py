@@ -245,6 +245,9 @@ environments_directory.mkdir(exist_ok=True)
 collections_directory = Path(__file__).parent.parent / "collections"
 collections_directory.mkdir(exist_ok=True)
 
+# Shared steps — global file + workspace-local convention
+shared_steps_global_path = Path(__file__).parent.parent / "shared_steps.yaml"
+
 running_tests: Dict[str, Dict] = {}
 test_results: Dict[str, Any] = {}
 websocket_connections: List[WebSocket] = []
@@ -298,8 +301,16 @@ def convert_test_to_yaml(test_def: TestDefinition) -> str:
     def convert_steps(steps: List[TestStep]) -> List[Dict]:
         result = []
         for step in steps:
-            # Use new dot notation format
-            step_dict = {step.action: step.parameters}
+            params = step.parameters or {}
+            if "_value" in params:
+                # Reconstruct a complex step (shared_step, for_each, etc.) that was
+                # stored with a scalar/list value plus optional sibling keys.
+                step_dict = {step.action: params["_value"]}
+                for k, v in params.items():
+                    if k != "_value":
+                        step_dict[k] = v
+            else:
+                step_dict = {step.action: params}
             if step.description:
                 step_dict["description"] = step.description
             result.append(step_dict)
@@ -337,9 +348,22 @@ def convert_yaml_to_test(yaml_content: str) -> TestDefinition:
                 action = list(step_dict.keys())[0]
                 if action == "description":
                     continue
-                params = (
-                    step_dict[action] if isinstance(step_dict[action], dict) else {}
-                )
+                action_value = step_dict[action]
+                if isinstance(action_value, dict):
+                    # Normal case: {browser.open: {url: ...}}
+                    params = action_value
+                    # Absorb any sibling keys (e.g. 'description' already handled above)
+                    for k, v in step_dict.items():
+                        if k != action and k != "description":
+                            params[k] = v
+                else:
+                    # Complex step: value is a scalar or list (shared_step, for_each).
+                    # Store under _value; sibling keys (parameters, loop_var, steps…)
+                    # are preserved alongside it so the round-trip is lossless.
+                    params = {"_value": action_value}
+                    for k, v in step_dict.items():
+                        if k != action and k != "description":
+                            params[k] = v
 
             result.append(
                 TestStep(
@@ -684,28 +708,35 @@ async def list_tests(
             raise HTTPException(status_code=404, detail=f"Folder not found: {folder}")
 
     for test_file in search_path.rglob("*.yaml"):
+        # Skip shared step library files — they are not test cases
+        if test_file.name == "shared_steps.yaml":
+            continue
+
+        relative_path = test_file.relative_to(tests_directory)
+        # Always use forward slashes so the JS startsWith(workspace+'/') check works on Windows
+        folder_path = (
+            relative_path.parent.as_posix() if relative_path.parent.as_posix() != "." else None
+        )
+        workspace_name = (
+            relative_path.parts[0] if len(relative_path.parts) > 1 else None
+        )
+
         try:
-            with open(test_file, "r") as f:
+            with open(test_file, "r", encoding="utf-8") as f:
                 content = f.read()
                 data = yaml.safe_load(content)
 
-            # Count steps
+            if not isinstance(data, dict):
+                continue  # skip files that don't parse as a mapping (e.g. empty files)
+
+            # Count steps (top-level entries only; nested loop steps counted via the loop step itself)
             step_count = len(data.get("steps", []))
             step_count += len(data.get("setup", []))
             step_count += len(data.get("cleanup", []))
 
-            # Get folder info
-            relative_path = test_file.relative_to(tests_directory)
-            folder_path = (
-                str(relative_path.parent) if relative_path.parent != Path(".") else None
-            )
-            workspace_name = (
-                relative_path.parts[0] if len(relative_path.parts) > 1 else None
-            )
-
             tests.append(
                 TestFile(
-                    id=str(relative_path),
+                    id=relative_path.as_posix(),
                     path=str(test_file),
                     name=data.get("name", test_file.stem),
                     description=data.get("description"),
@@ -720,21 +751,12 @@ async def list_tests(
                 )
             )
         except Exception as e:
-            # Include broken files
-            relative_path = test_file.relative_to(tests_directory)
-            folder_path = (
-                str(relative_path.parent) if relative_path.parent != Path(".") else None
-            )
-            workspace_name = (
-                relative_path.parts[0] if len(relative_path.parts) > 1 else None
-            )
-
             tests.append(
                 TestFile(
-                    id=str(relative_path),
+                    id=relative_path.as_posix(),
                     path=str(test_file),
                     name=test_file.stem,
-                    description=f"Error: {str(e)}",
+                    description=f"Error loading: {str(e)}",
                     tags=["error"],
                     step_count=0,
                     created=None,
@@ -897,6 +919,55 @@ async def get_test_reports(
 
     print(f"[DEBUG] Found {len(reports)} reports for test_id: {test_id}")
     return {"reports": reports}
+
+
+@app.get("/api/tests/{test_id:path}/testrail-export")
+async def testrail_export(test_id: str):
+    """Return the test steps as a TestRail Preconditions-compatible YAML string."""
+    # Guard against path traversal: reject suspicious segments before joining
+    if ".." in test_id.replace("\\", "/").split("/") or test_id.startswith("/"):
+        raise HTTPException(status_code=400, detail="Invalid test id")
+
+    base = tests_directory.resolve()
+    test_path = (base / test_id).resolve()
+
+    # Confirm the resolved path is still inside tests_directory
+    if base not in test_path.parents:
+        raise HTTPException(status_code=400, detail="Invalid test id")
+
+    # Only serve YAML files
+    if test_path.suffix.lower() not in {".yaml", ".yml"}:
+        raise HTTPException(status_code=400, detail="Invalid test id")
+
+    if not test_path.is_file():
+        raise HTTPException(status_code=404, detail="Test not found")
+
+    try:
+        with open(test_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f.read())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading test: {str(e)}")
+
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Test file is not a valid YAML mapping")
+
+    # Build the preconditions block: variables (if any) + setup + steps + cleanup
+    preconds: dict = {}
+    if data.get("variables"):
+        preconds["variables"] = data["variables"]
+    if data.get("setup"):
+        preconds["setup"] = data["setup"]
+    preconds["steps"] = data.get("steps", [])
+    if data.get("cleanup"):
+        preconds["cleanup"] = data["cleanup"]
+
+    preconditions_text = yaml.dump(preconds, sort_keys=False, allow_unicode=True, default_flow_style=False)
+
+    return {
+        "test_id": test_id,
+        "name": data.get("name", test_path.stem),
+        "preconditions": preconditions_text,
+    }
 
 
 @app.get("/api/tests/{test_id:path}")
@@ -7263,6 +7334,235 @@ async def test_error_403():
 async def test_error_401():
     """Test endpoint to trigger 401 error page"""
     raise HTTPException(status_code=401, detail="Unauthorized - test endpoint")
+
+
+# ==================== SHARED STEPS ====================
+
+
+class SharedStepModel(BaseModel):
+    name: str
+    description: str = ""
+    scope: str = "global"       # "global" or a workspace name
+    parameters: List[str] = []
+    steps: List[Dict[str, Any]] = []
+
+
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _assert_safe_name(value: str, label: str = "scope") -> None:
+    """Reject any name that isn't a simple word (no slashes, dots, etc.)."""
+    if not _SAFE_NAME_RE.fullmatch(value):
+        raise HTTPException(status_code=400, detail=f"Invalid {label}: must match [A-Za-z0-9_-]+")
+
+
+def _shared_steps_path(scope: str) -> Path:
+    """Return the validated YAML file path for the given scope."""
+    if scope == "global":
+        return shared_steps_global_path
+    _assert_safe_name(scope, "scope")
+    candidate = (tests_directory / scope).resolve()
+    # Ensure the resolved path stays inside tests_directory
+    if candidate.parent.resolve() != tests_directory.resolve():
+        raise HTTPException(status_code=400, detail="Invalid scope")
+    return candidate / "shared_steps.yaml"
+
+
+def _load_shared_steps_file(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_shared_steps_file(path: Path, data: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, sort_keys=False, allow_unicode=True)
+
+
+def _all_scopes() -> List[str]:
+    scopes = ["global"]
+    if tests_directory.exists():
+        for d in tests_directory.iterdir():
+            if d.is_dir() and (d / "shared_steps.yaml").exists():
+                scopes.append(d.name)
+    return scopes
+
+
+@app.get("/api/shared-steps")
+async def list_shared_steps(scope: Optional[str] = None):
+    """List shared steps across all scopes or a specific one."""
+    scopes = [scope] if scope else _all_scopes()
+    items = []
+    for sc in scopes:
+        path = _shared_steps_path(sc)
+        data = _load_shared_steps_file(path)
+        for name, body in data.items():
+            if not isinstance(body, dict):
+                continue
+            items.append({
+                "name": name,
+                "description": body.get("description", ""),
+                "scope": sc,
+                "parameters": body.get("parameters", []),
+                "steps": body.get("steps", []),
+            })
+    return {"shared_steps": items, "total": len(items), "scopes": _all_scopes()}
+
+
+@app.post("/api/shared-steps")
+async def create_shared_step(step: SharedStepModel):
+    path = _shared_steps_path(step.scope)
+    data = _load_shared_steps_file(path)
+    if step.name in data:
+        raise HTTPException(status_code=409, detail=f"Shared step '{step.name}' already exists in scope '{step.scope}'")
+    entry: Dict[str, Any] = {"description": step.description}
+    if step.parameters:
+        entry["parameters"] = step.parameters
+    entry["steps"] = step.steps
+    data[step.name] = entry
+    _save_shared_steps_file(path, data)
+    return {"name": step.name, "scope": step.scope, "status": "created"}
+
+
+@app.put("/api/shared-steps/{name}")
+async def update_shared_step(name: str, step: SharedStepModel, scope: str = "global"):
+    path = _shared_steps_path(scope)
+    data = _load_shared_steps_file(path)
+    entry: Dict[str, Any] = {"description": step.description}
+    if step.parameters:
+        entry["parameters"] = step.parameters
+    entry["steps"] = step.steps
+    # Handle rename
+    if step.name != name and name in data:
+        del data[name]
+    data[step.name] = entry
+    _save_shared_steps_file(path, data)
+    return {"name": step.name, "scope": scope, "status": "updated"}
+
+
+@app.delete("/api/shared-steps/{name}")
+async def delete_shared_step(name: str, scope: str = "global"):
+    path = _shared_steps_path(scope)
+    data = _load_shared_steps_file(path)
+    if name not in data:
+        raise HTTPException(status_code=404, detail=f"Shared step '{name}' not found in scope '{scope}'")
+    del data[name]
+    _save_shared_steps_file(path, data)
+    return {"name": name, "scope": scope, "status": "deleted"}
+
+
+# ==================== MIGRATION ====================
+
+
+class MigrateRobotRequest(BaseModel):
+    content: str
+    save_to_workspace: Optional[str] = None   # if set, save immediately
+
+
+@app.post("/api/migrate/robot")
+async def migrate_robot_file(req: MigrateRobotRequest):
+    """Convert a Robot Framework .robot file to Easy BDD YAML test files + shared steps."""
+    try:
+        from robot_migrator import migrate
+    except ImportError:
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).parent))
+            from robot_migrator import migrate
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=f"robot_migrator not available: {e}")
+
+    try:
+        result = migrate(req.content)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Migration failed: {e}")
+
+    if req.save_to_workspace:
+        workspace = req.save_to_workspace.strip("/")
+        _assert_safe_name(workspace, "workspace")
+        target_dir = (tests_directory / workspace).resolve()
+        if target_dir.parent.resolve() != tests_directory.resolve():
+            raise HTTPException(status_code=400, detail="Invalid workspace")
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        saved_tests = []
+        for t in result["tests"]:
+            # Sanitise the generated filename too
+            safe_fname = re.sub(r"[^A-Za-z0-9_-]", "_", t["name"]) + ".yaml"
+            fpath = (target_dir / safe_fname).resolve()
+            if fpath.parent != target_dir:
+                continue  # skip any path that escapes the target dir
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(t["yaml"])
+            saved_tests.append(str(fpath.relative_to(tests_directory)))
+
+        if result["shared_steps"]:
+            sc_path = _shared_steps_path(workspace)
+            existing = _load_shared_steps_file(sc_path)
+            existing.update(result["shared_steps"])
+            _save_shared_steps_file(sc_path, existing)
+
+        result["saved"] = {"tests": saved_tests, "workspace": workspace}
+
+    return result
+
+
+class MigrateBddRequest(BaseModel):
+    content: str
+    save_to_workspace: Optional[str] = None
+
+
+@app.post("/api/migrate/bdd")
+async def migrate_bdd_file(req: MigrateBddRequest):
+    """Convert a mybdd/pytest-bdd pipe-delimited step file to Easy BDD YAML."""
+    try:
+        from bdd_migrator import migrate
+    except ImportError:
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).parent))
+            from bdd_migrator import migrate
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=f"bdd_migrator not available: {e}")
+
+    try:
+        result = migrate(req.content)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Migration failed: {e}")
+
+    if req.save_to_workspace:
+        workspace = req.save_to_workspace.strip("/")
+        _assert_safe_name(workspace, "workspace")
+        target_dir = (tests_directory / workspace).resolve()
+        if target_dir.parent.resolve() != tests_directory.resolve():
+            raise HTTPException(status_code=400, detail="Invalid workspace")
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        saved_tests = []
+        for t in result["tests"]:
+            safe_fname = re.sub(r"[^A-Za-z0-9_-]", "_", t["name"]) + ".yaml"
+            fpath = (target_dir / safe_fname).resolve()
+            if fpath.parent != target_dir:
+                continue
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(t["yaml"])
+            saved_tests.append(str(fpath.relative_to(tests_directory)))
+
+        if result.get("shared_steps"):
+            sc_path = _shared_steps_path(workspace)
+            existing = _load_shared_steps_file(sc_path)
+            existing.update(result["shared_steps"])
+            _save_shared_steps_file(sc_path, existing)
+
+        result["saved"] = {"tests": saved_tests, "workspace": workspace}
+
+    return result
 
 
 # ==================== ERROR HANDLERS ====================

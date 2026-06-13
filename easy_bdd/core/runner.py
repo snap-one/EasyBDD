@@ -32,6 +32,14 @@ from .variable_manager import GlobalConfigManager
 # from ..actions import action_registry
 
 
+class _BreakSignal(Exception):
+    """Raised by a 'break' step to exit the nearest enclosing loop."""
+
+
+class _ContinueSignal(Exception):
+    """Raised by a 'continue' step to skip to the next loop iteration."""
+
+
 @dataclass
 class TestResult:
     """Test execution result"""
@@ -50,22 +58,96 @@ class TestResult:
             self.test_details = []
 
 
+class _GvLogEntry:
+    """Mimics a single gv.log[n] dict entry from mybdd."""
+    def __init__(self, variables: dict, offset: int = -1):
+        self._vars = variables
+        self._offset = offset
+
+    def __getitem__(self, key: str):
+        if self._offset in (-1, 0):
+            mapping = {
+                "response_txt":  self._vars.get("last_response", ""),
+                "response":      self._vars.get("last_response", ""),
+                "response_dict": self._vars.get("last_response_dict", {}),
+                "status_code":   self._vars.get("last_status_code", 0),
+                "response_code": self._vars.get("last_status_code", 0),
+            }
+        elif self._offset == -2:
+            mapping = {
+                "response_txt":  self._vars.get("prev_response", ""),
+                "response_dict": self._vars.get("prev_response_dict", {}),
+                "status_code":   0,
+                "response_code": 0,
+            }
+        else:
+            mapping = {"response_txt": "", "response_dict": {}, "status_code": 0, "response_code": 0}
+        return mapping.get(key, "")
+
+    def get(self, key, default=None):
+        val = self[key]
+        return val if val != "" else default
+
+
+class _GvLog:
+    """Mimics gv.log[] from mybdd — indexed access to response history."""
+    def __init__(self, variables: dict):
+        self._vars = variables
+
+    def __getitem__(self, idx: int):
+        return _GvLogEntry(self._vars, idx)
+
+
+class _GvTests:
+    """Mimics gv.tests from mybdd — variable store access."""
+    def __init__(self, variables: dict):
+        self._vars = variables
+
+    def __getitem__(self, key: str):
+        if key == "variables":
+            return self._vars
+        return {}
+
+    def get(self, key, default=None):
+        if key == "variables":
+            return self._vars
+        return default
+
+
+class _Gv:
+    """mybdd gv compatibility shim for eval.exec steps.
+
+    Allows converted test code that still references gv.log[-1]['response_txt'],
+    gv.tests['variables']['key'], etc. to run unchanged under Easy BDD.
+    """
+    def __init__(self, variables: dict):
+        self.log = _GvLog(variables)
+        self.tests = _GvTests(variables)
+
+
 class TestRunner:
     """Main test runner for Easy BDD Framework"""
 
-    def __init__(self, config: GlobalConfigManager):
+    def __init__(self, config: GlobalConfigManager, log_dir: Path = None):
         self.config = config
         self.parser = YAMLParser()
         self.generator = GherkinGenerator()
+        from .connection_pool import ConnectionPool
+        self._connection_pool = ConnectionPool()
+        self._eval_state: dict = {}
+        from .run_logger import RunLogger, _fmt_duration
+        self._run_logger = RunLogger(log_dir)
+        self._fmt_duration = _fmt_duration
 
         # Load custom actions
         # Load action modules if available
         # action_registry.load_action_modules(config)
 
     def run(
-        self, test_path: Path, tags: List[str] = None, parallel_workers: int = 1
+        self, test_path: Path, tags: List[str] = None, parallel_workers: int = 1, record_video: bool = False
     ) -> TestResult:
         """Run tests from the specified path"""
+        self._record_video = record_video
         # Parse test definitions
         try:
             if test_path.is_file():
@@ -223,7 +305,7 @@ class TestRunner:
 
         print(f"\n{'='*60}")
         print(f"Test Results: {passed} passed, {failed} failed")
-        print(f"Execution time: {execution_time:.2f} seconds")
+        print(f"Execution time: {self._fmt_duration(execution_time)}")
         print(f"{'='*60}")
 
         # Generate HTML report
@@ -282,6 +364,11 @@ class TestRunner:
                     print(f"      ❌ Failed to load data from {data_file}: {e}")
                     return False
 
+            # Multi-browser run: repeat test for each browser in the list
+            browsers = getattr(test, "browsers", None) or []
+            if len(browsers) > 1:
+                return self._execute_multi_browser_test(test, browsers, test_detail)
+
             # Check for data-driven testing
             if hasattr(test, "data") and test.data:
                 return self._execute_data_driven_test(test)
@@ -291,7 +378,66 @@ class TestRunner:
             print(f"      Test execution failed: {e}")
             return False
 
-    def _execute_data_driven_test(self, test: TestDefinition) -> bool:
+    def _execute_multi_browser_test(
+        self,
+        test: TestDefinition,
+        browsers: List[str],
+        test_detail: Dict[str, Any] = None,
+    ) -> bool:
+        """Run _execute_single_test once per browser; all must pass."""
+        import copy
+
+        all_passed = True
+        results: Dict[str, bool] = {}
+
+        print(f"    🌐 Multi-browser run: {browsers}")
+
+        for browser in browsers:
+            print(f"\n    {'─'*44}")
+            print(f"    🖥  Browser: {browser.upper()}")
+            print(f"    {'─'*44}")
+
+            # Deep-copy the test so each run gets a fresh variable state
+            test_copy = copy.deepcopy(test)
+            # Inject the browser override so BrowserService picks it up
+            if test_copy.variables is None:
+                test_copy.variables = {}
+            test_copy.variables["_browser_override"] = browser
+            # Clear the browsers list so nested call doesn't recurse
+            test_copy.browsers = [browser]
+
+            # Build a per-browser sub-detail that feeds into the parent detail
+            browser_detail: Dict[str, Any] = {
+                "name": f"{test.name} [{browser}]",
+                "browser": browser,
+            }
+
+            if hasattr(test_copy, "data") and test_copy.data:
+                ok = self._execute_data_driven_test(test_copy)
+            else:
+                ok = self._execute_single_test(test_copy, browser_detail)
+
+            results[browser] = ok
+            status = "✅ PASSED" if ok else "❌ FAILED"
+            print(f"    {status} [{browser}]")
+            if not ok:
+                all_passed = False
+
+        # Summary
+        print(f"\n    {'─'*44}")
+        print(f"    Multi-browser results:")
+        for browser, ok in results.items():
+            icon = "✅" if ok else "❌"
+            print(f"      {icon} {browser}")
+
+        if test_detail is not None:
+            test_detail["multi_browser_results"] = {
+                b: ("PASSED" if ok else "FAILED") for b, ok in results.items()
+            }
+
+        return all_passed
+
+    def _execute_data_driven_test(self, test: "TestDefinition") -> bool:
         """Execute test with multiple data sets"""
         all_passed = True
         data_sets = test.data
@@ -324,8 +470,12 @@ class TestRunner:
             thread_id = threading.get_ident()
 
             try:
-                # Merge test variables with current data set
-                iteration_variables = test.variables.copy() if test.variables else {}
+                # Merge test variables with current data set (include config vars)
+                try:
+                    _cfg_vars = self.config.variable_manager.get_all_variables()
+                except Exception:
+                    _cfg_vars = {}
+                iteration_variables = {**_cfg_vars, **(test.variables or {})}
                 iteration_variables.update(data_set)
 
                 # Create a copy of the test for this iteration
@@ -426,8 +576,12 @@ class TestRunner:
         for i, data_set in enumerate(data_sets, 1):
             print(f"\n    === Data Iteration {i}/{len(data_sets)} ===")
 
-            # Merge test variables with current data set
-            iteration_variables = test.variables.copy() if test.variables else {}
+            # Merge config vars + test vars + data set (data set wins)
+            try:
+                _cfg_vars = self.config.variable_manager.get_all_variables()
+            except Exception:
+                _cfg_vars = {}
+            iteration_variables = {**_cfg_vars, **(test.variables or {})}
             iteration_variables.update(data_set)
 
             # Create a copy of the test for this iteration
@@ -470,9 +624,16 @@ class TestRunner:
         soft_assert_manager = SoftAssertionManager()
         console_output = StringIO()
         test_passed = False
-        variables = (
-            test.variables.copy() if test.variables else {}
-        )  # Initialize variables for cleanup
+        # Start with config-level vars (collection_vars set by TestRail injected_vars),
+        # then overlay test-level variables so the test's own vars take priority.
+        # Assign back to test.variables so every reference in the loop below picks up
+        # the full merged dict without needing individual call-site changes.
+        try:
+            config_vars = self.config.variable_manager.get_all_variables()
+        except Exception:
+            config_vars = {}
+        variables = {**config_vars, **(test.variables or {})}
+        test.variables = variables  # single source of truth for the rest of _run_test
 
         # Store original stdout to capture console output
         original_stdout = sys.stdout
@@ -491,12 +652,15 @@ class TestRunner:
                 self.original.flush()
                 self.capture.flush()
 
-        # Initialize datalake logger if post_results enabled
+        # Initialize datalake logger if post_results enabled.
+        # Skip when running under the TestRail runner — it posts one log per run.
         datalake_logger = None
-        try:
-            datalake_logger = DatalakeLogger(artifact_path="reports", post_results=True)
-        except Exception as e:
-            print(f"    ⚠️  Could not initialize datalake logger: {e}")
+        _under_testrail = bool(variables.get("_testrail_run_id"))
+        if not _under_testrail:
+            try:
+                datalake_logger = DatalakeLogger(artifact_path="reports", post_results=True)
+            except Exception as e:
+                print(f"    ⚠️  Could not initialize datalake logger: {e}")
 
         # Redirect stdout to capture console output
         sys.stdout = DualWriter(original_stdout, console_output)
@@ -547,6 +711,15 @@ class TestRunner:
                         f"    ⚠️  Warning: Could not load device config: {test.device_config}"
                     )
 
+            # Configure video recording: only enabled when explicitly requested via test
+            # definition (record_video: true) or the --record-video CLI flag.
+            should_record = bool(
+                getattr(test, "record_video", None) or getattr(self, "_record_video", False)
+            )
+            self.config.set_variable(
+                "browser.video_recording.enabled", should_record, "session_overrides"
+            )
+
             # Execute setup steps first
             if test.setup:
                 print(f"    === Setup Phase ===")
@@ -588,14 +761,15 @@ class TestRunner:
                     time.sleep(0.5)
 
             # Execute main test steps
-            print(f"    === Main Test Phase ===")
+            self._run_logger.phase("Main Test Phase")
             total_steps = len(test.steps)
-            
+
             for i, step in enumerate(test.steps, 1):
-                step_description = self._get_step_description(step)
-                print(f"    Step {i}/{len(test.steps)}: {step.action}")
-                if step_description:
-                    print(f"           → {step_description}")
+                display_step_params = self._resolve_step_params(step, test.variables or {})
+                step_params = display_step_params.get("parameters", {}) if isinstance(display_step_params, dict) else {}
+                prev_response = (test.variables or {}).get("last_response")
+
+                self._run_logger.step_start(i, total_steps, step.action, step_params)
 
                 # Determine which service to use based on action
                 service_type = self._get_service_type(step.action)
@@ -604,22 +778,20 @@ class TestRunner:
                     services[service_type] = self._create_service(service_type)
 
                 # Show step indicator in browser if browser service is available
-                # Check both "browser" service and if current service is browser
                 browser_service = services.get("browser")
                 if not browser_service and service_type == "browser":
                     browser_service = services.get(service_type)
-                
+
                 if browser_service and hasattr(browser_service, "show_step_indicator"):
                     try:
                         browser_service.show_step_indicator(
                             step_number=i,
                             total_steps=total_steps,
                             step_action=step.action,
-                            step_description=step_description
+                            step_description=self._get_step_description(step),
                         )
-                    except Exception as e:
-                        # Log error for debugging but don't fail the test
-                        print(f"      ⚠️  Could not show step indicator: {e}")
+                    except Exception:
+                        pass
 
                 # Execute the step
                 try:
@@ -631,8 +803,11 @@ class TestRunner:
                         i,
                     )
                     if not success:
-                        print(f"    ❌ STEP {i} FAILED: {step.action}")
-                        print(f"       Details: {step_description}")
+                        self._run_logger.step_fail(
+                            i, step.action,
+                            error="step returned False",
+                            details=self._get_step_description(step),
+                        )
 
                         # Add failed step to step_logs
                         step_logs.append(
@@ -643,7 +818,7 @@ class TestRunner:
                         failed_step_info = {
                             "step_number": i,
                             "step_action": step.action,
-                            "step_details": step_description,
+                            "step_details": self._get_step_description(step),
                         }
                         # Use the screenshot captured after the last successful step
                         failure_screenshot = getattr(self, "_last_step_screenshot", None)
@@ -653,7 +828,6 @@ class TestRunner:
                                 services.get("browser"), test.name, i
                             )
 
-                        # Store failure info in test_detail if provided
                         if test_detail is not None:
                             test_detail["failed_step"] = failed_step_info
                             test_detail["failure_screenshot"] = failure_screenshot
@@ -661,7 +835,7 @@ class TestRunner:
 
                         return False
                     else:
-                        print(f"    ✅ Step {i} completed successfully")
+                        self._run_logger.step_pass(i, test.variables or {}, prev_response)
                         step_logs.append(
                             {"step": i, "action": step.action, "status": "passed"}
                         )
@@ -688,13 +862,13 @@ class TestRunner:
                                 # Don't fail the test if screenshot capture fails
                                 pass
                 except Exception as e:
-                    print(f"    ❌ STEP {i} FAILED WITH EXCEPTION: {step.action}")
-                    print(f"       Error: {str(e)}")
-                    print(f"       Details: {step_description}")
                     import traceback
-
-                    traceback_str = traceback.format_exc()
-                    print(f"       Traceback: {traceback_str}")
+                    self._run_logger.step_fail(
+                        i, step.action,
+                        error=str(e),
+                        details=self._get_step_description(step),
+                        traceback_str=traceback.format_exc(),
+                    )
 
                     # Add failed step to step_logs
                     step_logs.append(
@@ -886,26 +1060,16 @@ class TestRunner:
                 else:
                     try:
                         # Get test metadata from variables or use defaults
-                        product = (
-                            test.variables.get("product", "Unknown")
-                            if test.variables
-                            else "Unknown"
-                        )
-                        product_category = (
-                            test.variables.get("product_category", "Test")
-                            if test.variables
-                            else "Test"
-                        )
+                        _tvars = test.variables or {}
+                        product = _tvars.get("product", "Unknown")
+                        product_category = _tvars.get("product_category", "Test")
+                        # Accept both 'mac_address' and 'mac' variable names
                         mac_address = (
-                            test.variables.get("mac_address", "00:00:00:00:00:00")
-                            if test.variables
-                            else "00:00:00:00:00:00"
+                            _tvars.get("mac_address")
+                            or _tvars.get("mac")
+                            or "00:00:00:00:00:00"
                         )
-                        time_savings = (
-                            test.variables.get("time_savings", 5.0)
-                            if test.variables
-                            else 5.0
-                        )
+                        time_savings = _tvars.get("time_savings", 5.0)
 
                         # Get console output (captured during test)
                         console = console_output.getvalue() if console_output else ""
@@ -1027,6 +1191,10 @@ class TestRunner:
         """Determine which service type to use for an action"""
         action_lower = action.lower()
 
+        # Control-flow pseudo-actions need no service
+        if action_lower in ("for_loop", "while_loop", "try_except", "break", "continue"):
+            return "eval"
+
         # Handle dot notation (e.g., browser.click, aws.get_latest)
         if "." in action_lower:
             service_prefix = action_lower.split(".")[0]
@@ -1044,6 +1212,9 @@ class TestRunner:
                 "command": "command",  # Command execution service
                 "pagerduty": "pagerduty",  # PagerDuty incident management
                 "pd": "pagerduty",  # Short alias for PagerDuty
+                "serial": "serial",  # Serial port communication
+                "telnet": "telnet",  # Telnet communication
+                "eval": "eval",  # Session-stateful Python eval
             }
             return service_map.get(service_prefix, "browser")
 
@@ -1100,6 +1271,17 @@ class TestRunner:
         elif service_type == "pagerduty":
             from ..services.pagerduty_service import PagerDutyService
             return PagerDutyService(logger=print)
+        elif service_type == "serial":
+            from ..services.serial_service import SerialService
+            return SerialService(self._connection_pool)
+        elif service_type == "telnet":
+            from ..services.telnet_service import TelnetService
+            return TelnetService(self._connection_pool)
+        elif service_type == "websocket":
+            from ..services.websocket_service import WebSocketService
+            return WebSocketService(self._connection_pool)
+        elif service_type == "eval":
+            return None  # eval actions are handled directly in _execute_custom_action
         else:
             # For now, return a mock service for other types
             return MockService(service_type)
@@ -1121,6 +1303,36 @@ class TestRunner:
                     soft_assert_manager.raise_if_failures()
                 else:
                     print("      ✓ No soft assertion failures")
+                return True
+
+            # Sleep / wait action (no browser required)
+            if action_lower in ["test.sleep", "sleep", "test.wait", "wait"]:
+                params = self._get_params(step_params)
+                seconds = float(
+                    params.get("seconds")
+                    or params.get("duration")
+                    or params.get("timeout")
+                    or 1
+                )
+                print(f"      ⏳ Sleeping {seconds}s...")
+                time.sleep(seconds)
+                return True
+
+            # Log / print action (no service required — just prints a message)
+            # Supports:
+            #   - action: test.print / message: "..."   (explicit)
+            #   - test.print: "..."                     (shorthand scalar)
+            if action_lower in ["test.log", "log", "test.print", "print"]:
+                params = self._get_params(step_params)
+                message = str(
+                    params.get("message")
+                    or params.get("text")
+                    or params.get("value")
+                    or ""
+                )
+                if hasattr(self.config, "substitute_variables"):
+                    message = self.config.substitute_variables(message, variables)
+                print(f"      📝 {message}")
                 return True
 
             # Custom assertion actions (support both formats)
@@ -1171,6 +1383,22 @@ class TestRunner:
             ):
                 return self._handle_command_action(action, step_params, variables)
 
+            # Serial port actions
+            if action_lower.startswith("serial"):
+                return self._handle_serial_action(action, step_params, variables)
+
+            # Telnet actions
+            if action_lower.startswith("telnet"):
+                return self._handle_telnet_action(action, step_params, variables)
+
+            # WebSocket actions
+            if action_lower.startswith("websocket") or action_lower.startswith("ws."):
+                return self._handle_websocket_action(action, step_params, variables)
+
+            # Eval actions (session-stateful Python execution)
+            if action_lower.startswith("eval"):
+                return self._handle_eval_action(action, step_params, variables)
+
             # Check if we have custom actions defined
             if hasattr(self.config, "get_custom_action"):
                 custom_action = self.config.get_custom_action(action)
@@ -1198,6 +1426,22 @@ class TestRunner:
                 action_lower_check.startswith("jsonrpc")
                 or action_lower_check.startswith("ovrc")
                 or action_lower_check.startswith("command")
+            ):
+                raise
+            # Re-raise eval failures — they should not silently fall through to
+            # the browser handler which would report a confusing "Unknown action" error.
+            if action_lower_check.startswith("eval"):
+                raise
+            # Re-raise assert/websocket/telnet/serial failures so they propagate
+            # as proper step failures rather than "Unknown action" browser fallthrough.
+            if (
+                action_lower_check in ("assert", "test.assert", "assert json schema",
+                                       "test.assert_schema", "assert response",
+                                       "test.assert_response")
+                or action_lower_check.startswith("websocket")
+                or action_lower_check.startswith("ws.")
+                or action_lower_check.startswith("telnet")
+                or action_lower_check.startswith("serial")
             ):
                 raise
             print(f"      Warning: Custom action '{action}' failed: {e}")
@@ -1268,6 +1512,150 @@ class TestRunner:
         except Exception as e:
             print(f"      ✗ Condition evaluation failed: {e}")
             raise ValueError(f"Invalid condition '{condition}': {e}")
+
+    # ------------------------------------------------------------------ #
+    # Control flow: FOR / WHILE / TRY                                      #
+    # ------------------------------------------------------------------ #
+
+    def _eval_expr(self, expr: str, variables: dict) -> object:
+        """Substitute variables then evaluate a Python expression safely."""
+        if hasattr(self.config, "substitute_variables"):
+            expr = self.config.substitute_variables(expr, variables)
+        ctx = {**variables, **self._eval_state}
+        return safe_eval(expr, ctx)
+
+    def _run_loop_body(
+        self,
+        body: list,
+        variables: dict,
+        soft_assert_manager,
+        step_number: int,
+        break_if: str = None,
+        continue_if: str = None,
+    ) -> bool:
+        """Execute loop body steps; propagates _BreakSignal / _ContinueSignal."""
+        for loop_step in body:
+            # Inline break_if / continue_if guards on the step itself
+            if getattr(loop_step, "action", "") == "break":
+                raise _BreakSignal()
+            if getattr(loop_step, "action", "") == "continue":
+                raise _ContinueSignal()
+
+            svc_type = self._get_service_type(loop_step.action)
+            svc = self._create_service(svc_type)
+            success = self._execute_step(svc, loop_step, variables, soft_assert_manager, step_number)
+            if not success:
+                return False
+
+        # Per-iteration guards declared on the loop itself
+        if continue_if and self._eval_expr(continue_if, variables):
+            raise _ContinueSignal()
+        if break_if and self._eval_expr(break_if, variables):
+            raise _BreakSignal()
+        return True
+
+    def _execute_for_loop(self, step, variables: dict, soft_assert_manager, step_number: int) -> bool:
+        """Execute a for_each loop step."""
+        iterable = self._eval_expr(step.for_each, variables)
+        loop_var = step.loop_var or "item"
+        limit = step.loop_limit or 1000
+
+        if not hasattr(iterable, "__iter__"):
+            raise ValueError(f"for_each expression is not iterable: {step.for_each!r}")
+
+        items = list(iterable)
+        if len(items) > limit:
+            print(f"      ⚠ FOR loop: clamping {len(items)} items to limit {limit}")
+            items = items[:limit]
+
+        print(f"      → FOR {loop_var} in <{len(items)} items>")
+        for idx, item in enumerate(items):
+            variables[loop_var] = item
+            try:
+                ok = self._run_loop_body(
+                    step.loop_steps or [],
+                    variables,
+                    soft_assert_manager,
+                    step_number,
+                    break_if=step.break_if,
+                    continue_if=step.continue_if,
+                )
+                if not ok:
+                    return False
+            except _BreakSignal:
+                print(f"      → FOR loop: BREAK at iteration {idx + 1}")
+                break
+            except _ContinueSignal:
+                continue
+
+        variables.pop(loop_var, None)
+        return True
+
+    def _execute_while_loop(self, step, variables: dict, soft_assert_manager, step_number: int) -> bool:
+        """Execute a while loop step."""
+        condition = step.while_condition
+        limit = step.loop_limit or 1000
+        iteration = 0
+
+        print(f"      → WHILE {condition}")
+        while iteration < limit:
+            if not self._eval_expr(condition, variables):
+                break
+            iteration += 1
+            try:
+                ok = self._run_loop_body(
+                    step.loop_steps or [],
+                    variables,
+                    soft_assert_manager,
+                    step_number,
+                    break_if=step.break_if,
+                    continue_if=step.continue_if,
+                )
+                if not ok:
+                    return False
+            except _BreakSignal:
+                print(f"      → WHILE loop: BREAK at iteration {iteration}")
+                break
+            except _ContinueSignal:
+                continue
+        else:
+            print(f"      ⚠ WHILE loop reached iteration limit ({limit})")
+
+        return True
+
+    def _execute_try_except(self, step, variables: dict, soft_assert_manager, step_number: int) -> bool:
+        """Execute a try/except/finally step."""
+        success = True
+        try:
+            for try_step in (step.try_steps or []):
+                svc_type = self._get_service_type(try_step.action)
+                svc = self._create_service(svc_type)
+                ok = self._execute_step(svc, try_step, variables, soft_assert_manager, step_number)
+                if not ok:
+                    success = False
+                    break
+        except Exception as exc:
+            print(f"      → TRY failed: {exc}")
+            if step.except_steps:
+                variables["_exception"] = str(exc)
+                for ex_step in step.except_steps:
+                    svc_type = self._get_service_type(ex_step.action)
+                    svc = self._create_service(svc_type)
+                    self._execute_step(svc, ex_step, variables, soft_assert_manager, step_number)
+            else:
+                success = False
+        finally:
+            if step.finally_steps:
+                print(f"      → FINALLY")
+                for fin_step in step.finally_steps:
+                    svc_type = self._get_service_type(fin_step.action)
+                    svc = self._create_service(svc_type)
+                    try:
+                        self._execute_step(svc, fin_step, variables, soft_assert_manager, step_number)
+                    except Exception as fin_exc:
+                        print(f"      ⚠ FINALLY step error: {fin_exc}")
+
+        return success
 
     def _resolve_url_with_variables(self, url: str, variables: dict) -> str:
         """Resolve URL with variable substitution, handling URL-encoded variables"""
@@ -2633,6 +3021,338 @@ class TestRunner:
             else:
                 raise
 
+    def _handle_serial_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle serial port actions (serial.send, serial.receive, serial.flush, serial.close)."""
+        from ..services.serial_service import SerialService
+        params = self._get_params(step_params)
+        service = SerialService(self._connection_pool)
+        result = service.execute(action, params, variables)
+        store_as = params.get("store_as", "")
+        if store_as and result is not None:
+            variables[store_as] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, result, "runtime_data")
+        if result is False:
+            return False
+        print(f"      serial: {action.split('.')[-1]} OK")
+        return True
+
+    def _handle_telnet_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle telnet actions (telnet.connect, telnet.send, telnet.receive, telnet.close)."""
+        from ..services.telnet_service import TelnetService
+        params = self._get_params(step_params)
+        service = TelnetService(self._connection_pool)
+        result = service.execute(action, params, variables)
+        if result is False:
+            return False
+        # Always store string responses as last_response so downstream steps
+        # (eval.exec, test.assert, etc.) can reference the device output.
+        if isinstance(result, str) and result:
+            variables["last_response"] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable("last_response", result, "runtime_data")
+        store_as = params.get("store_as", "")
+        if store_as and result is not None:
+            variables[store_as] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, result, "runtime_data")
+        print(f"      telnet: {action.split('.')[-1]} OK")
+        return True
+
+    def _handle_websocket_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle websocket actions (websocket.connect, websocket.send, websocket.receive, websocket.close)."""
+        import json as _json
+        from ..services.websocket_service import WebSocketService
+        params = self._get_params(step_params)
+        # Reuse the same WebSocketService instance across steps so the token
+        # cache and connection pool are shared for the duration of the test.
+        if not hasattr(self, "_websocket_service"):
+            self._websocket_service = WebSocketService(self._connection_pool)
+        service = self._websocket_service
+        action_verb = action.split(".")[-1].lower()
+        url = params.get("url", "")
+
+        # --- pre-call logging ---
+        if action_verb == "connect":
+            protos = params.get("subprotocols") or params.get("protocol") or []
+            if isinstance(protos, str):
+                protos = [p.strip() for p in protos.split(",") if p.strip()]
+            print(f"      🔌 websocket.connect → {url}")
+            if protos:
+                print(f"         subprotocols: {protos}")
+            hdrs = {k: v for k, v in (params.get("headers") or {}).items()
+                    if k.lower() != "authorization"}
+            if hdrs:
+                print(f"         headers: {hdrs}")
+        elif action_verb == "send":
+            data = params.get("data", "")
+            method = params.get("method")
+            print(f"      📤 websocket.send → {url}")
+            if method:
+                print(f"         method (JSON-RPC): {method}")
+            if data:
+                try:
+                    payload_str = _json.dumps(data, indent=2) if isinstance(data, (dict, list)) else str(data)
+                    # Indent each line for alignment
+                    indented = "\n".join("         " + ln for ln in payload_str.splitlines())
+                    print(f"         payload:\n{indented}")
+                except Exception:
+                    print(f"         payload: {data}")
+        elif action_verb in ("receive", "read"):
+            print(f"      📥 websocket.receive ← {url}")
+        elif action_verb == "close":
+            print(f"      🔒 websocket.close → {url}")
+
+        result = service.execute(action, params, variables)
+        if result is False:
+            return False
+
+        # --- post-call logging ---
+        if isinstance(result, str) and result:
+            variables["last_response"] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable("last_response", result, "runtime_data")
+            # Pretty-print response
+            try:
+                parsed = _json.loads(result)
+                resp_str = _json.dumps(parsed, indent=2)
+            except Exception:
+                resp_str = result
+            indented = "\n".join("         " + ln for ln in resp_str.splitlines())
+            print(f"      📥 response:\n{indented}")
+
+        store_as = params.get("store_as", "")
+        if store_as and result is not None:
+            variables[store_as] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, result, "runtime_data")
+            if store_as != "last_response":
+                print(f"         stored as: {store_as}")
+
+        if action_verb not in ("send", "receive", "read"):
+            print(f"      ✅ websocket.{action_verb} OK")
+        return True
+
+    def _handle_eval_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle session-stateful Python eval/exec actions.
+
+        Actions:
+          eval.run             — evaluate an expression, store result
+          eval.exec            — execute a code block (state mutations persist)
+          eval.set             — set a key in shared eval state
+          eval.get             — read a key from shared eval state into variables
+          eval.clear           — clear the entire eval state
+          eval.extract_version — extract version string from a URL/filename/list
+        """
+        import math, re as _re, json as _json, datetime as _datetime, collections as _collections
+
+        params = self._get_params(step_params)
+        action_lower = action.lower()
+        store_as = params.get("store_as", "")
+        # Normalise legacy mybdd store_as keys: gv.tests['variables']['$key'] → key
+        if store_as:
+            import re as _re_sa
+            _m = _re_sa.match(
+                r"gv\.tests\[(?:'variables'|\"variables\")\]\[(?:'\$?(\w+)'|\"\$?(\w+)\")\]",
+                store_as.strip(),
+            )
+            if _m:
+                store_as = _m.group(1) or _m.group(2)
+
+        import platform as _platform
+        # Build the execution context: shared state + current test variables
+        ctx = {
+            "state": self._eval_state,
+            "variables": variables,
+            "math": math,
+            "re": _re,
+            "json": _json,
+            "datetime": _datetime,
+            "collections": _collections,
+            "platform": _platform,
+        }
+        ctx.update(self._eval_state)
+        ctx.update(variables)
+        # Always set the gv shim last so variables["gv"] (a plain dict used for
+        # ${gv.x} substitution) never overwrites the _Gv object in exec context.
+        ctx["gv"] = _Gv(variables)
+
+        if "set" in action_lower and "extract" not in action_lower:
+            key = params.get("key", "")
+            value = params.get("value")
+            if key:
+                self._eval_state[key] = value
+                variables[key] = value
+            return True
+
+        if "extract_version" in action_lower or action_lower == "eval.extract_version":
+            import re as _rev
+            # Source: explicit 'from' string, or a variable name in 'from_var', or 'url'
+            from_val = (
+                params.get("from")
+                or params.get("url")
+                or params.get("source")
+            )
+            from_var = params.get("from_var") or params.get("list_var")
+            if from_var:
+                from_val = variables.get(from_var, "")
+
+            # Resolve ${var} references in the source string
+            if isinstance(from_val, list):
+                # list of URLs — pick the index specified (default 0 = first/oldest; -1 = latest)
+                idx = int(params.get("index", 0))
+                from_val = from_val[idx] if from_val else ""
+            elif not isinstance(from_val, str):
+                from_val = str(from_val or "")
+
+            # Default pattern: semver-style digits e.g. 1.0.02.00 or v2.3.1
+            pattern = params.get("pattern", r"(\d+\.\d+[\.\d]*)")
+            match = _rev.search(pattern, from_val)
+            version = match.group(1) if match else ""
+
+            store_as = params.get("store_as", "firmware_version")
+            variables[store_as] = version
+            self._eval_state[store_as] = version
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, version, "runtime_data")
+            print(f"      🏷  Extracted version: {version!r} from {from_val!r} → stored as '{store_as}'")
+
+            # Optionally update the TestRail run name
+            run_name_template = params.get("run_name")
+            append_to_run_name = params.get("append_to_run_name")
+            if (run_name_template or append_to_run_name) and version:
+                tr_run_id = int(variables.get("_testrail_run_id", 0))
+                if tr_run_id:
+                    try:
+                        from ..services.testrail_service import TestRailService
+                        cfg = self.config
+                        tr = TestRailService(
+                            url=cfg.get_variable("testrail.url") or cfg.get_variable("testrail_url", None),
+                            username=cfg.get_variable("testrail.username") or cfg.get_variable("testrail_username", None),
+                            api_key=cfg.get_variable("testrail.api_key") or cfg.get_variable("testrail_api_key", None),
+                        )
+
+                        def _subst_run_name(value: str) -> str:
+                            return _rev.sub(
+                                r"\$\{(\w+)\}",
+                                lambda m: str(variables.get(m.group(1), m.group(0))),
+                                str(value),
+                            )
+
+                        if run_name_template:
+                            new_name = _subst_run_name(run_name_template)
+                        else:
+                            current_run = tr.get_run(tr_run_id)
+                            current_name = str(current_run.get("name", "") or "")
+                            suffix = _subst_run_name(append_to_run_name)
+                            if suffix and current_name.endswith(suffix):
+                                print(f"      ℹ  TestRail run [{tr_run_id}] already ends with: {suffix!r}")
+                                return True
+                            new_name = f"{current_name}{suffix}" if current_name else suffix
+
+                        if new_name:
+                            tr.update_run(tr_run_id, name=new_name)
+                            print(f"      ✅ TestRail run [{tr_run_id}] renamed to: {new_name!r}")
+                    except Exception as _e:
+                        print(f"      ⚠  Could not update run name: {_e}")
+            return True
+
+        if "get" in action_lower:
+            key = params.get("key", "")
+            value = self._eval_state.get(key)
+            if store_as:
+                variables[store_as] = value
+                if hasattr(self.config, "set_variable"):
+                    self.config.set_variable(store_as, value, "runtime_data")
+            return True
+
+        if "clear" in action_lower:
+            self._eval_state.clear()
+            return True
+
+        if "exec" in action_lower:
+            code = params.get("code", "")
+            if not code:
+                raise ValueError("eval.exec requires 'code'")
+
+            # Detect comment-only stubs generated by bdd_migrator and execute them.
+            # e.g. "# upload_cloud_firmware: list S3 bucket 'X' path 'Y'\n# filter by regex 'Z'..."
+            _exec_lines = [ln for ln in code.strip().splitlines() if ln.strip() and not ln.strip().startswith("#")]
+            if not _exec_lines:
+                import re as _re_stub
+                _flat = " ".join(ln.strip().lstrip("# ") for ln in code.strip().splitlines())
+
+                def _resolve_stub_var(val: str) -> str:
+                    """Resolve ${var} references left in stub comments."""
+                    return _re_stub.sub(
+                        r"\$\{(\w+)\}",
+                        lambda m: str(variables.get(m.group(1), m.group(0))),
+                        val,
+                    )
+
+                _uc = _re_stub.search(
+                    r"upload_cloud_firmware: list S3 bucket '(.+?)' path '(.+?)'", _flat
+                )
+                if _uc:
+                    _bucket = _resolve_stub_var(_uc.group(1))
+                    _path   = _resolve_stub_var(_uc.group(2))
+                    _rx     = _re_stub.search(r"filter by regex '(.+?)'", _flat)
+                    _aws_params: dict = {"bucket_name": _bucket, "folder_prefix": _path}
+                    if _rx and _rx.group(1):
+                        _aws_params["filename_pattern"] = _resolve_stub_var(_rx.group(1))
+                    return self._handle_aws_action(
+                        "aws.list_files", {"parameters": _aws_params}, variables
+                    )
+
+                # No recognised stub — code is all comments, treat as no-op
+                return True
+
+            # Intentional exec: eval.exec is an explicit test-authoring tool for trusted
+            # test YAML files written by the QA team. It is not exposed to external input.
+            exec(code, ctx)  # noqa: S102
+            # Persist any new/changed keys back to eval state (exclude builtins)
+            for k, v in ctx.items():
+                if not k.startswith("_") and k not in ("state", "variables", "math", "re", "json", "datetime", "collections"):
+                    self._eval_state[k] = v
+                    variables[k] = v
+            # Mirror attributes set on the gv shim (e.g. gv.message = "...") into
+            # variables["gv"] as a plain dict so ${gv.message} resolves correctly.
+            _gv_obj = ctx.get("gv")
+            if _gv_obj is not None:
+                _gv_builtins = {"log", "tests"}
+                _gv_dict = variables.get("gv")
+                if not isinstance(_gv_dict, dict):
+                    _gv_dict = {}
+                    variables["gv"] = _gv_dict
+                for _attr, _val in vars(_gv_obj).items():
+                    if not _attr.startswith("_") and _attr not in _gv_builtins:
+                        _gv_dict[_attr] = _val
+                        self._eval_state[f"gv.{_attr}"] = _val
+            return True
+
+        # Default: eval.run — evaluate an expression
+        expression = params.get("expression", "") or params.get("code", "")
+        if not expression:
+            raise ValueError("eval.run requires 'expression'")
+        # Intentional eval: eval.run is an explicit test-authoring tool for trusted
+        # test YAML files written by the QA team. It is not exposed to external input.
+        result = eval(expression, ctx)  # noqa: S307
+        print(f"      eval: {expression!r} → {result!r}")
+        if store_as:
+            variables[store_as] = result
+            self._eval_state[store_as] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, result, "runtime_data")
+        return True
+
     def _handle_command_action(
         self, action: str, step_params: dict, variables: dict
     ) -> bool:
@@ -2946,20 +3666,66 @@ class TestRunner:
             aws_service = AWSService(logger=print)
             variables["_aws_service"] = aws_service
 
-        # Extract parameters using helper
+        # Extract parameters using helper — resolve ${vars} against current variables
         params = self._get_params(step_params)
         action_lower = action.lower()
 
+        # Log credential source (mask secrets)
+        key_id = (
+            params.get("access_key_id")
+            or variables.get("aws_access_key_id")
+            or AWSService._global_config.get("access_key_id")
+        )
+        if key_id:
+            masked = key_id[:4] + "****" + key_id[-4:] if len(key_id) > 8 else "****"
+            print(f"      AWS credentials: key_id={masked} (explicit)")
+        else:
+            print(f"      AWS credentials: using AWS CLI / environment defaults")
+
         try:
-            if "list firmware" in action_lower or "list files" in action_lower:
+            if any(k in action_lower for k in ("list firmware", "list files", "list_files", "list_firmware")):
                 # List and download firmware files
                 bucket_name = params.get("bucket_name", "")
                 if not bucket_name:
                     raise ValueError("AWS list firmware requires 'bucket_name'")
 
+                # Inject aws_access_key_id / aws_secret_access_key from run variables
+                # if the step didn't specify them explicitly
+                eff_key    = params.get("access_key_id")    or variables.get("aws_access_key_id")
+                eff_secret = params.get("secret_access_key") or variables.get("aws_secret_access_key")
+
+                # Default download_dir: <cwd>/Firmware/<folder_prefix>
+                # Mirrors the S3 folder structure under a local Firmware/ root.
+                # The directory is created automatically if it doesn't exist.
+                folder_prefix = params.get("folder_prefix") or ""
+                # If variable substitution left a string-encoded list (e.g.
+                # "['upgrade','dummy']"), parse it back to an actual list so
+                # aws_service can scan each folder separately.
+                if isinstance(folder_prefix, str) and folder_prefix.startswith('['):
+                    try:
+                        import yaml as _yaml_fp
+                        _fp_parsed = _yaml_fp.safe_load(folder_prefix)
+                        if isinstance(_fp_parsed, list):
+                            folder_prefix = _fp_parsed
+                    except Exception:
+                        pass
+                _raw_download_dir = params.get("download_dir")
+                if _raw_download_dir:
+                    effective_download_dir = _raw_download_dir
+                else:
+                    from pathlib import Path as _Path
+                    # When folder_prefix is a list use the first entry for the default dir
+                    _fp_str = folder_prefix[0] if isinstance(folder_prefix, list) else folder_prefix
+                    _rel = (_fp_str or "").lstrip("/").rstrip("/")
+                    effective_download_dir = str(_Path.cwd() / "Firmware" / _rel) if _rel else str(_Path.cwd() / "Firmware")
+
+                from pathlib import Path as _Path
+                _Path(effective_download_dir).mkdir(parents=True, exist_ok=True)
+                print(f"      📁 Download dir: {effective_download_dir}")
+
                 urls = aws_service.list_firmware_files(
                     bucket_name=bucket_name,
-                    folder_prefix=params.get("folder_prefix"),
+                    folder_prefix=folder_prefix,
                     filename_pattern=params.get("filename_pattern"),
                     version_pattern=params.get("version_pattern"),
                     file_extension=params.get("file_extension"),
@@ -2968,10 +3734,10 @@ class TestRunner:
                     cloudfront_filename_only=params.get(
                         "cloudfront_filename_only", False
                     ),
-                    download_dir=params.get("download_dir"),
+                    download_dir=effective_download_dir,
                     protocol=params.get("protocol", "https"),
-                    access_key_id=params.get("access_key_id"),
-                    secret_access_key=params.get("secret_access_key"),
+                    access_key_id=eff_key,
+                    secret_access_key=eff_secret,
                     region=params.get("region"),
                     discover_prefix=params.get("discover_prefix", False),
                     repo_root=params.get("repo_root") or os.getcwd(),
@@ -2981,8 +3747,29 @@ class TestRunner:
                 store_as = params.get("store_as", "")
                 if store_as:
                     variables[store_as] = urls
-                    print(f"      Stored {len(urls)} URL(s) as: {store_as}")
+                    print(f"      Stored {len(urls)} URL(s) as: {store_as!r}")
 
+                # Build and store local file paths (always, since we always download now)
+                if urls:
+                    import os as _os
+                    local_paths = [
+                        str(_Path(effective_download_dir) / _os.path.basename(u.split("?")[0]))
+                        for u in urls
+                    ]
+                    local_paths_as = params.get("local_paths_as", "")
+                    if local_paths_as:
+                        variables[local_paths_as] = local_paths
+                        print(f"      Stored {len(local_paths)} local path(s) as: {local_paths_as!r}")
+                    # Always expose as a predictable name too
+                    variables["_aws_local_paths"] = local_paths
+                    variables["_aws_local_path"] = local_paths[0]
+                    print(f"      Local path(s): {local_paths}")
+
+                # Always expose result as last_response for eval.exec steps
+                variables["last_response"] = urls
+
+                if not urls:
+                    print(f"      ⚠  0 files matched — check filter params above")
                 return True
 
             elif "get latest firmware" in action_lower:
@@ -3161,6 +3948,7 @@ class TestRunner:
             "test.wait": "wait",
             "log": "log",
             # API actions - map dot notation to space notation
+            "api.request": "api request",
             "api.get": "api get",
             "api.post": "api post",
             "api.put": "api put",
@@ -3208,6 +3996,44 @@ class TestRunner:
                 service, step, variables, soft_assert_manager, step_number
             )
 
+    def _resolve_step_params(self, step, variables: dict) -> dict:
+        """Resolve step variables for display and execution using the same rules."""
+        if hasattr(self.config, "substitute_recursive"):
+            # For GlobalConfigManager, set test variables in runtime scope
+            for key, value in variables.items():
+                self.config.set_variable(key, value, "runtime_data")
+
+            # First, resolve nested variables in the test variables
+            resolved_vars = variables.copy()
+            max_iterations = 10
+            for iteration in range(max_iterations):
+                previous_vars = resolved_vars.copy()
+                for key, value in resolved_vars.items():
+                    if isinstance(value, str):
+                        new_value = self.config.substitute_variables(
+                            value, resolved_vars
+                        )
+                        resolved_vars[key] = new_value
+                if resolved_vars == previous_vars:
+                    break
+
+            for key, value in resolved_vars.items():
+                self.config.set_variable(key, value, "runtime_data")
+
+            return self.config.substitute_recursive(
+                step.__dict__.copy(), additional_vars=variables
+            )
+
+        resolved_vars = variables.copy()
+        for _ in range(3):
+            for key, value in resolved_vars.items():
+                if isinstance(value, str):
+                    resolved_vars[key] = self._replace_variables(
+                        value, resolved_vars
+                    )
+
+        return self._replace_variables(step.__dict__.copy(), resolved_vars)
+
     def _execute_step_internal(
         self,
         service,
@@ -3218,58 +4044,26 @@ class TestRunner:
     ) -> bool:
         """Internal method to execute a single step (called by _execute_step with or without retry)"""
         try:
+            # Control-flow constructs — handled before variable substitution
+            action_tag = getattr(step, "action", "")
+            if action_tag == "for_loop":
+                return self._execute_for_loop(step, variables, soft_assert_manager, step_number)
+            if action_tag == "while_loop":
+                return self._execute_while_loop(step, variables, soft_assert_manager, step_number)
+            if action_tag == "try_except":
+                return self._execute_try_except(step, variables, soft_assert_manager, step_number)
+            if action_tag == "break":
+                raise _BreakSignal()
+            if action_tag == "continue":
+                raise _ContinueSignal()
+
             # Check if this is a conditional step
             if hasattr(step, "condition") and step.condition:
                 return self._execute_conditional_step(
                     service, step, variables, soft_assert_manager, step_number
                 )
 
-            # Use GlobalConfigManager's variable substitution if available
-            if hasattr(self.config, "substitute_recursive"):
-                # For GlobalConfigManager, set test variables in runtime scope
-                for key, value in variables.items():
-                    self.config.set_variable(key, value, "runtime_data")
-
-                # First, resolve nested variables in the test variables
-                # Do multiple passes to handle nested variables (e.g., api_base_url contains ${device_ip})
-                resolved_vars = variables.copy()
-                max_iterations = 10
-                for iteration in range(max_iterations):
-                    previous_vars = resolved_vars.copy()
-                    for key, value in resolved_vars.items():
-                        if isinstance(value, str):
-                            # Substitute variables in the value
-                            new_value = self.config.substitute_variables(
-                                value, resolved_vars
-                            )
-                            resolved_vars[key] = new_value
-                    # If no changes, we're done
-                    if resolved_vars == previous_vars:
-                        break
-
-                # Update the config with the resolved values
-                for key, value in resolved_vars.items():
-                    self.config.set_variable(key, value, "runtime_data")
-
-                # Use GlobalConfigManager's substitution with all variables
-                # Pass variables as additional_vars to ensure they're available
-                step_params = self.config.substitute_recursive(
-                    step.__dict__.copy(), additional_vars=variables
-                )
-            else:
-                # Fallback to old method with multi-pass substitution
-                resolved_vars = variables.copy()
-                # Multiple passes to resolve nested variables
-                for _ in range(3):  # Up to 3 levels of nesting
-                    for key, value in resolved_vars.items():
-                        if isinstance(value, str):
-                            resolved_vars[key] = self._replace_variables(
-                                value, resolved_vars
-                            )
-
-                step_params = self._replace_variables(
-                    step.__dict__.copy(), resolved_vars
-                )
+            step_params = self._resolve_step_params(step, variables)
 
             action = step_params.get("action", "").lower()
             # Normalize action (convert dot notation to legacy format)
@@ -3299,8 +4093,9 @@ class TestRunner:
                 button = params.get("button", "")
                 role = params.get("role", "")
                 name = params.get("name", "")
+                label = params.get("label", "")
                 service.click_element(
-                    selector=selector, text=text, button=button, role=role, name=name
+                    selector=selector, text=text, button=button, role=role, name=name, label=label
                 )
                 return True
 
@@ -3489,14 +4284,36 @@ class TestRunner:
                 service.assert_element_count(selector, count, timeout=timeout)
                 return True
 
+            elif action in ("browser.assert_checked", "test.assert_checked") or (hasattr(service, "assert_checked") and "assert" in action and "checked" in action and "un" not in action):
+                selector = self._get_param(step_params, "selector", "")
+                timeout = self._get_param(step_params, "timeout", 10000)
+                print(f"      Asserting element '{selector}' is checked")
+                service.assert_checked(selector, timeout=timeout)
+                return True
+
+            elif action in ("browser.assert_unchecked", "test.assert_unchecked") or (hasattr(service, "assert_unchecked") and "assert" in action and "unchecked" in action):
+                selector = self._get_param(step_params, "selector", "")
+                timeout = self._get_param(step_params, "timeout", 10000)
+                print(f"      Asserting element '{selector}' is unchecked")
+                service.assert_unchecked(selector, timeout=timeout)
+                return True
+
             elif "wait" in action:
-                wait_time = self._get_param(step_params, "time", 1)
+                params = self._get_params(step_params)
+                wait_time = (
+                    params.get("seconds")
+                    or params.get("duration")
+                    or params.get("time")
+                    or 1
+                )
                 if isinstance(wait_time, str):
                     try:
                         wait_time = float(wait_time)
                     except ValueError:
                         wait_time = 1
-                print(f"      Waiting {wait_time} seconds...")
+                else:
+                    wait_time = float(wait_time)
+                print(f"      ⏳ Sleeping {wait_time}s...")
                 time.sleep(wait_time)
                 return True
 
@@ -3532,9 +4349,29 @@ class TestRunner:
                 headers = step_params.get("headers", {}) or params_dict.get(
                     "headers", {}
                 )
-                json_data = step_params.get("json_data", {}) or params_dict.get(
-                    "json_data", {}
+                json_data = (
+                    step_params.get("json_data")
+                    or params_dict.get("json_data")
+                    or step_params.get("body")
+                    or params_dict.get("body")
                 )
+                # If body/json_data is still empty, collect any unknown top-level
+                # params as body fields (handles mis-indented YAML where body fields
+                # end up as siblings of 'body:' rather than children)
+                if not json_data:
+                    _known = {
+                        "method", "url", "device_id", "headers", "json_data",
+                        "body", "data", "params", "store_as", "store_response",
+                        "fail_on_error", "verbose_logging", "show_full_response",
+                        "full_log", "parameters", "Accept", "Content-Type",
+                        "API POST", "API GET", "API PUT", "API PATCH", "API DELETE",
+                    }
+                    _extra = {k: v for k, v in step_params.items() if k not in _known and v is not None}
+                    if _extra:
+                        print(f"      ⚠  'body' is empty — using top-level params as body: {list(_extra.keys())}")
+                        json_data = _extra
+                    else:
+                        json_data = {}
                 data = step_params.get("data", {}) or params_dict.get("data", {})
                 params = step_params.get("params", {}) or params_dict.get("params", {})
 
@@ -3592,13 +4429,11 @@ class TestRunner:
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
                 response_json = None
-                if is_json:
-                    try:
-                        response_json = response.json()
-                        variables["last_json"] = response_json
-                    except:
-                        variables["last_json"] = None
-                else:
+                try:
+                    response_json = response.json()
+                    variables["last_json"] = response_json
+                    is_json = True
+                except Exception:
                     variables["last_json"] = None
 
                 # Print full response if verbose logging enabled
@@ -3897,13 +4732,11 @@ class TestRunner:
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
                 response_json = None
-                if is_json:
-                    try:
-                        response_json = response.json()
-                        variables["last_json"] = response_json
-                    except:
-                        variables["last_json"] = None
-                else:
+                try:
+                    response_json = response.json()
+                    variables["last_json"] = response_json
+                    is_json = True
+                except Exception:
                     variables["last_json"] = None
 
                 # Print full response if verbose logging enabled
@@ -4033,13 +4866,11 @@ class TestRunner:
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
                 response_json = None
-                if is_json:
-                    try:
-                        response_json = response.json()
-                        variables["last_json"] = response_json
-                    except:
-                        variables["last_json"] = None
-                else:
+                try:
+                    response_json = response.json()
+                    variables["last_json"] = response_json
+                    is_json = True
+                except Exception:
                     variables["last_json"] = None
 
                 # Print full response if verbose logging enabled
@@ -4293,13 +5124,11 @@ class TestRunner:
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
                 response_json = None
-                if is_json:
-                    try:
-                        response_json = response.json()
-                        variables["last_json"] = response_json
-                    except:
-                        variables["last_json"] = None
-                else:
+                try:
+                    response_json = response.json()
+                    variables["last_json"] = response_json
+                    is_json = True
+                except Exception:
                     variables["last_json"] = None
 
                 # Print full response if verbose logging enabled
@@ -4477,13 +5306,11 @@ class TestRunner:
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
                 response_json = None
-                if is_json:
-                    try:
-                        response_json = response.json()
-                        variables["last_json"] = response_json
-                    except:
-                        variables["last_json"] = None
-                else:
+                try:
+                    response_json = response.json()
+                    variables["last_json"] = response_json
+                    is_json = True
+                except Exception:
                     variables["last_json"] = None
 
                 # Print full response if verbose logging enabled
@@ -4685,13 +5512,11 @@ class TestRunner:
                 content_type = response.headers.get("content-type", "")
                 is_json = content_type.startswith("application/json")
                 response_json = None
-                if is_json:
-                    try:
-                        response_json = response.json()
-                        variables["last_json"] = response_json
-                    except:
-                        variables["last_json"] = None
-                else:
+                try:
+                    response_json = response.json()
+                    variables["last_json"] = response_json
+                    is_json = True
+                except Exception:
                     variables["last_json"] = None
 
                 # Print full response if verbose logging enabled

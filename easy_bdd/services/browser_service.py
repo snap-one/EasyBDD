@@ -237,8 +237,12 @@ class BrowserService:
 
         # Get browser preference from config
         if browser is None:
+            # Check for per-run browser override injected by multi-browser execution
             if hasattr(self.config, "get_variable"):
-                browser = self.config.get_variable("browser.default", "chrome")
+                browser = (
+                    self.config.get_variable("_browser_override", None)
+                    or self.config.get_variable("browser.default", "chrome")
+                )
             else:
                 browser = self.config.get("browser.default", "chrome")
 
@@ -283,7 +287,7 @@ class BrowserService:
 
         # Browser launch options
         launch_options = {
-            "headless": self._get_browser_config("headless", False),
+            "headless": self._get_browser_config("headless", True),
             "args": [
                 "--no-sandbox",
                 "--disable-dev-shm-usage",  # Better Docker compatibility
@@ -330,7 +334,7 @@ class BrowserService:
         
         # Add debugging options for MCP mode
         if self.mcp_bridge.mcp_mode:
-            launch_options["devtools"] = not self._get_browser_config("headless", False)
+            launch_options["devtools"] = not self._get_browser_config("headless", True)
 
         browser_type = getattr(
             self.playwright_playwright, self._get_playwright_browser_name(browser)
@@ -361,13 +365,13 @@ class BrowserService:
         }
 
         # Configure video recording
-        video_enabled_raw = self._get_browser_config("video_recording.enabled", True)
+        video_enabled_raw = self._get_browser_config("video_recording.enabled", False)
         # Handle string "true"/"false" and boolean
         if isinstance(video_enabled_raw, str):
             video_enabled = video_enabled_raw.lower() == "true"
         else:
             video_enabled = (
-                bool(video_enabled_raw) if video_enabled_raw is not None else True
+                bool(video_enabled_raw) if video_enabled_raw is not None else False
             )
 
         video_mode = self._get_browser_config("video_recording.mode", "on-failure")
@@ -440,7 +444,7 @@ class BrowserService:
             options = ChromeOptions()
 
             # Headless mode
-            if self.config.get("browser.headless", False):
+            if self.config.get("browser.headless", True):
                 options.add_argument("--headless")
 
             # Window size
@@ -468,7 +472,7 @@ class BrowserService:
             options = FirefoxOptions()
 
             # Headless mode
-            if self.config.get("browser.headless", False):
+            if self.config.get("browser.headless", True):
                 options.add_argument("--headless")
 
             # HTTPS certificate handling
@@ -517,6 +521,8 @@ class BrowserService:
             selector.startswith("./"),
             selector.startswith("(//"),
             selector.startswith("(.//"),
+            selector.startswith("/html"),  # absolute XPath
+            selector.startswith("/body"),  # absolute XPath
             "//" in selector,
             "normalize-space(" in selector,
             "following::" in selector,
@@ -579,7 +585,7 @@ class BrowserService:
     ) -> None:
         """Enhanced click with multiple selector strategies"""
         if self.playwright_page:
-            self._playwright_click(selector, text, button, role, name, label, **kwargs)
+            self._playwright_click(selector, text, button, role, name, label=label, **kwargs)
         elif self.selenium_driver:
             self._selenium_click(selector, text, button)
         else:
@@ -641,6 +647,14 @@ class BrowserService:
                         timeout=5000, **click_options
                     )
                     print(f"      ✓ Clicked first element with role: {role}")
+                return
+
+            # Handle get_by_label — explicit label= param or 'label:Text' selector prefix
+            _label = label or (selector[len("label:"):].strip() if selector and selector.startswith("label:") else None)
+            if _label:
+                print(f"      Finding element by label: {_label}")
+                self.playwright_page.get_by_label(_label).click(timeout=5000)
+                print(f"      ✓ Clicked element labeled '{_label}'")
                 return
 
             if selector:
@@ -1548,6 +1562,60 @@ class BrowserService:
                 print(f"      ✓ Asserted element '{selector}' count equals {count}")
             except Exception as e:
                 raise AssertionError(f"Element count assertion failed for '{selector}': {e}")
+        else:
+            raise RuntimeError("No browser session active")
+
+    def assert_checked(self, selector: str, timeout: int = 10000) -> None:
+        """Assert that a checkbox or radio button is checked"""
+        if self.playwright_page:
+            try:
+                from playwright.sync_api import expect
+                if selector.startswith("label:"):
+                    locator = self.playwright_page.get_by_label(selector[len("label:"):].strip())
+                else:
+                    locator = self.playwright_page.locator(selector)
+                expect(locator).to_be_checked(timeout=timeout)
+                print(f"      ✓ Asserted element '{selector}' is checked")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' is not checked: {e}")
+        elif self.selenium_driver:
+            try:
+                from selenium.webdriver.common.by import By
+                element = self.selenium_driver.find_element(By.CSS_SELECTOR, selector)
+                if not element.is_selected():
+                    raise AssertionError(f"Element '{selector}' is not checked")
+                print(f"      ✓ Asserted element '{selector}' is checked")
+            except AssertionError:
+                raise
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' is not checked: {e}")
+        else:
+            raise RuntimeError("No browser session active")
+
+    def assert_unchecked(self, selector: str, timeout: int = 10000) -> None:
+        """Assert that a checkbox or radio button is unchecked"""
+        if self.playwright_page:
+            try:
+                from playwright.sync_api import expect
+                if selector.startswith("label:"):
+                    locator = self.playwright_page.get_by_label(selector[len("label:"):].strip())
+                else:
+                    locator = self.playwright_page.locator(selector)
+                expect(locator).not_to_be_checked(timeout=timeout)
+                print(f"      ✓ Asserted element '{selector}' is unchecked")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' is not unchecked: {e}")
+        elif self.selenium_driver:
+            try:
+                from selenium.webdriver.common.by import By
+                element = self.selenium_driver.find_element(By.CSS_SELECTOR, selector)
+                if element.is_selected():
+                    raise AssertionError(f"Element '{selector}' is checked (expected unchecked)")
+                print(f"      ✓ Asserted element '{selector}' is unchecked")
+            except AssertionError:
+                raise
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' is not unchecked: {e}")
         else:
             raise RuntimeError("No browser session active")
 

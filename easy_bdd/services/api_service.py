@@ -342,6 +342,23 @@ class APIService:
                 self.max_retries = api_config.get("max_retries", 3)
                 self.retry_delay = api_config.get("retry_delay", 1.0)
 
+    def _format_response_body(self, response: requests.Response) -> str:
+        """Format response body for logging, attempt to parse JSON first"""
+        if not response.text:
+            return "(empty)"
+        
+        try:
+            import json
+            data = response.json()
+            # Pretty-print JSON with indentation
+            return json.dumps(data, indent=2)
+        except (ValueError, json.JSONDecodeError):
+            # Not JSON, return raw text with length limit
+            text = response.text
+            if len(text) > 500:
+                return f"{text[:500]}... (truncated, {len(text)} total chars)"
+            return text
+
     def request(
         self,
         method: str,
@@ -395,6 +412,9 @@ class APIService:
             )
 
             print(f"    📡 {method.upper()} {url} -> {response.status_code}")
+            # Print response body for debugging
+            response_body = self._format_response_body(response)
+            print(f"       Response: {response_body}")
 
             # Handle authentication errors by retrying once with forced refresh
             if response.status_code == 401:
@@ -423,6 +443,9 @@ class APIService:
 
                 retry_msg = f"    🔄 Retry: {method.upper()} {url}"
                 print(f"{retry_msg} -> {response.status_code}")
+                # Print retry response body
+                response_body = self._format_response_body(response)
+                print(f"       Response: {response_body}")
 
             return response
 

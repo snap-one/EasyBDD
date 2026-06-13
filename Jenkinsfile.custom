@@ -1,39 +1,92 @@
+def WORKSPACE = '/var/lib/jenkins/workspace/EASY_BDD'
+
 pipeline {
     agent any
-    triggers { cron('H/5 * * * *') }
-    options {
-        buildDiscarder(logRotator(daysToKeepStr: '7', numToKeepStr: '2016'))
-        timestamps()
-        timeout(time: 4, unit: 'MINUTES')
+
+    parameters {
+        choice(
+            name: 'PROJECT',
+            choices: [
+                '59 - JDM Automation',
+                '74 - Audio',
+                '76 - Routers',
+                '77 - Power',
+                '78 - Surveillance',
+                '79 - Switches',
+                '80 - Access Points',
+                '81 - Media Distribution',
+            ],
+            description: 'TestRail project to scan for an active run'
+        )
+        string(
+            name: 'RUN_PREFIX',
+            defaultValue: 'EASY_BDD:',
+            description: 'TestRail run name prefix to match (e.g. EASY_BDD:, Debug:, Mark:)'
+        )
+        string(
+            name: 'BRANCH',
+            defaultValue: 'main',
+            description: 'Git branch to run tests from'
+        )
     }
+
+    options {
+        buildDiscarder(logRotator(daysToKeepStr: '7', numToKeepStr: '500'))
+        timestamps()
+        timeout(time: 60, unit: 'MINUTES')
+    }
+
     stages {
         stage('Run TestRail Project') {
             steps {
                 script {
-                    ws('/home/jenkins/Easy_BDD') {
-                        sh '''#!/bin/bash
-                            git fetch origin
-                            git checkout main
-                            git pull origin main
-                        '''
-                        sh '''#!/bin/bash
-                            set -e
-                            set -a && . /var/lib/jenkins/workspace/EASY_BDD/.env && set +a
-                            . /var/lib/jenkins/workspace/EASY_BDD/env/bin/activate
-                            python -m easy_bdd testrail-run 77
-                        '''
-                    }
+                    def projectId   = params.PROJECT.split(' - ')[0].trim()
+                    def projectName = params.PROJECT.split(' - ')[1].trim()
+                    def runPrefix   = params.RUN_PREFIX.trim()
+                    def branch      = params.BRANCH.trim() ?: 'main'
+
+                    sh """#!/bin/bash
+                        cd ${WORKSPACE}
+                        git fetch origin
+                        git checkout ${branch}
+                        git pull origin ${branch}
+                        rm -f reports/run_${projectId}.properties
+                        set -a && . .env && set +a
+                        . env/bin/activate
+                        python -m easy_bdd testrail-run ${projectId} --prefix '${runPrefix}' || true
+                    """
                 }
             }
         }
     }
+
     post {
         always {
+            script {
+                def projectId   = params.PROJECT.split(' - ')[0].trim()
+                def projectName = params.PROJECT.split(' - ')[1].trim()
+                def runPrefix   = params.RUN_PREFIX.trim()
+                def branch      = params.BRANCH.trim() ?: 'main'
+
+                def propsFile = "${WORKSPACE}/reports/run_${projectId}.properties"
+                if (fileExists(propsFile)) {
+                    def props   = readProperties file: propsFile
+                    def runName = props['RUN_NAME'] ?: ''
+                    def runUrl  = props['RUN_URL']  ?: ''
+                    if (runName) {
+                        currentBuild.displayName = "#${BUILD_NUMBER} — ${projectName}: ${runName} [${branch}]"
+                        currentBuild.description = "<a href=\"${runUrl}\">${runName}</a><br>Branch: ${branch} | Prefix: ${runPrefix}"
+                        return
+                    }
+                }
+                currentBuild.displayName = "#${BUILD_NUMBER} — No runs found [${branch}]"
+                currentBuild.description = "Project: ${projectName} | Prefix: ${runPrefix} | Branch: ${branch}"
+            }
             publishHTML(target: [
                 allowMissing: true,
                 alwaysLinkToLastBuild: true,
                 keepAll: true,
-                reportDir: '/home/jenkins/Easy_BDD/reports',
+                reportDir: "${WORKSPACE}/reports",
                 reportFiles: '**/*_report_*.html',
                 reportName: 'Easy BDD Report'
             ])

@@ -24,6 +24,14 @@ wheels/
 .installed.cfg
 *.egg
 
+# Secrets / environment
+.env
+.env.local
+.env.*.local
+
+# User-specific MCP config (contains absolute local paths)
+mcp_config.json
+
 # Test reports and artifacts
 reports/test_report_*.html
 reports/screenshots/*.png
@@ -82,7 +90,7 @@ frontend/demo_api.py
 frontend/static/app*.js
 frontend/static/index.html
 
-# Test reports (keep structure, ignore old reports)
+# Test reports (keep structure, ignore generated reports)
 reports/*.json
 reports/*.html
 reports/*.webm
@@ -99,3 +107,6 @@ test_builder_settings.json
 # User-specific data (collections and environments)
 collections/
 environments/
+tests/
+reports/
+scheduled_tests.json

@@ -1,0 +1,42 @@
+def WORKSPACE = '/var/lib/jenkins/workspace/EASY_BDD'
+
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'BRANCH',
+            defaultValue: 'main',
+            description: 'Branch to checkout and run tests from'
+        )
+    }
+
+    options {
+        buildDiscarder(logRotator(daysToKeepStr: '7', numToKeepStr: '2016'))
+        timestamps()
+        timeout(time: 10, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                ws(WORKSPACE) {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "*/${params.BRANCH}"]],
+                        userRemoteConfigs: scm.userRemoteConfigs
+                    ])
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                currentBuild.displayName = "#${BUILD_NUMBER} [${params.BRANCH}]"
+            }
+        }
+    }
+}

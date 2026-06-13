@@ -428,7 +428,7 @@ data:
     expected_error: "Invalid password"
 ```
 
-## 📂 External Data Sources (Future)
+## 📂 External Data Sources
 
 ### CSV File Integration
 ```yaml
@@ -455,6 +455,144 @@ data_source: "./data/api_endpoints.json"
 #   }
 # ]
 ```
+
+---
+
+## 🔁 Loop Actions
+
+Use loops inside a test to repeat a block of steps with different values, without needing a separate data row per iteration.
+
+### for_loop — iterate over a fixed list
+
+```yaml
+- for_loop:
+    for_each: "[1, 124, 373, 475]"   # Python list literal — any Python expression works
+    loop_var: fault_delay             # name of the variable bound to each item
+    loop_steps:
+      - wait:
+          time: ${fault_delay}
+      - fault.insert:
+          type: power_cycle
+      - ovrc.get about:
+          store_as: device_info
+      - test.assert:
+          expression: "device_info.status == 'online'"
+          message: "Device should recover after ${fault_delay}s fault"
+```
+
+Each iteration runs **all** `loop_steps` to completion before the next iteration starts.
+
+#### Other useful for_each expressions
+
+```yaml
+for_each: "range(5)"                     # 0, 1, 2, 3, 4
+for_each: "range(0, 500, 50)"            # 0, 50, 100, ... 450 (every 50)
+for_each: "firmware_files"               # iterate over a previously stored list
+for_each: "intervals.split(',')"         # split "1,124,373,475" into a list
+```
+
+#### for_loop parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `for_each` | Python expression yielding an iterable | required |
+| `loop_var` | Variable name bound to each item | `item` |
+| `loop_steps` | Steps to run each iteration | required |
+| `loop_limit` | Safety cap — stops after N iterations | `1000` |
+| `break_if` | Expression — exits the loop if True | — |
+| `continue_if` | Expression — skips to next iteration if True | — |
+
+### while_loop — repeat until a condition is false
+
+```yaml
+- while_loop:
+    while_condition: "retry_count < 10"
+    loop_limit: 10
+    loop_steps:
+      - wait:
+          time: 5
+      - ovrc.get about:
+          store_as: device_info
+      - break:                          # exit early when condition is met
+          condition: "device_info.status == 'online'"
+```
+
+### Data array vs for_loop — which to use?
+
+| Approach | Use when |
+|----------|----------|
+| **Data array** (`data:` or `JSON:` prefix) | Each row is an independent end-to-end test run (connect → test → disconnect per device/value) |
+| **for_loop** | Steps repeat within a single test session (connect once, fault at multiple intervals, disconnect once) |
+
+**Data array example** — independent runs per fault delay:
+```yaml
+data:
+  - fault_delay: 10
+  - fault_delay: 20
+  - fault_delay: 30
+
+steps:
+  - ovrc.connect:
+      device_id: ${mac}
+  - wait:
+      time: ${fault_delay}
+  - fault.insert:
+      type: power_cycle
+  - ovrc.disconnect: {}
+```
+→ Connects and disconnects 3 separate times (once per row).
+
+**for_loop example** — single session, multiple faults:
+```yaml
+steps:
+  - ovrc.connect:
+      device_id: ${mac}
+  - for_loop:
+      for_each: "[10, 20, 30]"
+      loop_var: fault_delay
+      loop_steps:
+        - wait:
+            time: ${fault_delay}
+        - fault.insert:
+            type: power_cycle
+  - ovrc.disconnect: {}
+```
+→ Connects once, inserts fault 3 times, disconnects once.
+
+---
+
+## 🧪 TestRail Feature: Parameterized Format
+
+When writing tests directly in TestRail's Preconditions field, use the `JSON:` prefix to supply multiple data rows. Parameters can be written flush-left — the runner indents them automatically.
+
+```
+JSON:
+[
+  {"mac": "D4:6A:91:29:0F:5A", "product": "WB-900CH1U", "folder_prefix": "ns/"},
+  {"mac": "A1:B2:C3:D4:E5:F6", "product": "WB-800",     "folder_prefix": "wb800/"},
+  {"mac": "11:22:33:44:55:66", "product": "WB-300",     "folder_prefix": "wb300/"}
+]
+
+- aws.list_files:
+bucket_name: jpdsauto-wattbox
+folder_prefix: ${folder_prefix}
+file_extension: .bin
+store_as: firmware_files
+
+- ovrc.connect:
+auth_type: bearer
+server_url: wss://firmware.testing.ovrc.com:10444
+device_id: ${mac}
+
+- ovrc.get about:
+store_as: device_info
+
+- ovrc.disconnect: {}
+```
+
+The test executes once per JSON object, substituting `${mac}`, `${folder_prefix}`, etc. for each device.
+
+See the [TestRail Integration Guide](./testrail-integration.md) for the full set of supported formats.
 
 ---
 
