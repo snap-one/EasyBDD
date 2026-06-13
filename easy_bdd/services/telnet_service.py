@@ -162,6 +162,10 @@ class _TelnetConn:
         idle_timeout: float = 1.0,
     ) -> str:
         prompt_bytes = prompt.encode(encoding)
+        if prompt_bytes in self._buf:
+            result = self._buf.decode(encoding, errors="replace")
+            self._buf = b""
+            return result
         deadline = time.time() + timeout
         last_recv: float = 0.0
         received_any = False
