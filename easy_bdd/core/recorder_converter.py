@@ -69,18 +69,38 @@ class RecorderConverter:
             line,
         ):
             return {
-                "action": "Get by role",
+                "action": "Click element",
                 "role": match.group(1),
                 "name": match.group(3),
-                "description": f"Click {match.group(1)} with name {match.group(3)}",
+            }
+
+        # get_by_role(role, name=name).fill(value)
+        if match := re.match(
+            r'get_by_role\(["\']([^"\']*)["\'](.*?)name\s*=\s*["\']([^"\']*)["\'](.*?)\.fill\(["\']([^"\']*)["\']\)',
+            line,
+        ):
+            return {
+                "action": "Fill form field",
+                "role": match.group(1),
+                "name": match.group(3),
+                "value": match.group(5),
+            }
+
+        # get_by_role(role).click() — no name
+        if match := re.match(
+            r'get_by_role\(["\']([^"\']*)["\'](?!\s*,\s*name)\s*\)\.click\(\)',
+            line,
+        ):
+            return {
+                "action": "Click element",
+                "role": match.group(1),
             }
 
         # get_by_text(text).click()
         if match := re.match(r'get_by_text\(["\']([^"\']*)["\'](.*?)\.click\(\)', line):
             return {
-                "action": "Get by text",
+                "action": "Click element",
                 "text": match.group(1),
-                "description": f"Click text: {match.group(1)}",
             }
 
         # get_by_label(label).fill(value)
@@ -89,11 +109,16 @@ class RecorderConverter:
             line,
         ):
             return {
-                "action": "Get by label",
+                "action": "Fill form field",
                 "label": match.group(1),
-                "action_type": "fill",
                 "value": match.group(3),
-                "description": f"Fill field labeled {match.group(1)} with {match.group(3)}",
+            }
+
+        # get_by_label(label).click()
+        if match := re.match(r'get_by_label\(["\']([^"\']*)["\'](.*?)\.click\(\)', line):
+            return {
+                "action": "Click element",
+                "label": match.group(1),
             }
 
         # get_by_placeholder(placeholder).fill(value)
@@ -102,11 +127,9 @@ class RecorderConverter:
             line,
         ):
             return {
-                "action": "Get by placeholder",
-                "placeholder": match.group(1),
-                "action_type": "fill",
+                "action": "Fill form field",
+                "label": match.group(1),
                 "value": match.group(3),
-                "description": f"Fill field with placeholder {match.group(1)}",
             }
 
         # click(selector)

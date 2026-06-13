@@ -856,8 +856,7 @@ def record_and_upload(args) -> int:
         if section_id is None:
             return 1
 
-    steps_yaml = yaml.dump(steps, default_flow_style=False, allow_unicode=True)
-    preconditions = f"# Auto-recorded via easy_bdd record\n\n```yaml\n{steps_yaml}```"
+    preconditions = yaml.dump(steps, default_flow_style=False, allow_unicode=True)
 
     try:
         case = tr.add_case(
