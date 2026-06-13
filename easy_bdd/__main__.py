@@ -768,11 +768,16 @@ def record_and_upload(args) -> int:
     steps = test_data.get("steps", [])
     print(f"\n[Preview] '{test_data['name']}' — {len(steps)} step(s):\n")
     for i, step in enumerate(steps, 1):
-        action = step.get("action", "?")
-        parts = []
-        for k in ("url", "role", "name", "label", "text", "selector", "field", "value", "key"):
-            if step.get(k):
-                parts.append(f"{k}={step[k]!r}")
+        if isinstance(step, dict) and len(step) == 1:
+            # Nested browser.xxx format: {browser.click: {role: button, name: Save}}
+            action, params = next(iter(step.items()))
+            if isinstance(params, dict):
+                parts = [f"{k}={v!r}" for k, v in params.items()]
+            else:
+                parts = []
+        else:
+            action = step.get("action", "?")
+            parts = [f"{k}={step[k]!r}" for k in ("url", "role", "name", "label", "text", "selector", "value") if step.get(k)]
         print(f"  {i:2}. {action}  {', '.join(parts)}")
 
     if not steps:
