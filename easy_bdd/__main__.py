@@ -721,18 +721,8 @@ def record_and_upload(args) -> int:
     # On headless servers (no $DISPLAY), wrap with xvfb-run to provide a virtual display
     no_display = not os.environ.get("DISPLAY") and sys.platform != "darwin" and sys.platform != "win32"
     if no_display:
-        xvfb = subprocess.run(["which", "xvfb-run"], capture_output=True).returncode == 0
-        if xvfb:
-            cmd = ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x1024x24"] + cmd
-            print("\n[Record] No $DISPLAY detected — using xvfb-run for virtual display.")
-        else:
-            print(
-                "\nError: No display server found ($DISPLAY is not set) and xvfb-run is not installed.\n"
-                "Install it with:  sudo apt-get install -y xvfb\n"
-                "Or set DISPLAY if you have an X server available.",
-                file=sys.stderr,
-            )
-            return 1
+        cmd = ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x1024x24"] + cmd
+        print("\n[Record] No $DISPLAY detected — using xvfb-run for virtual display.")
 
     print("\n[Record] Launching Playwright codegen...")
     print("  Record your browser steps, then close the browser window to continue.\n")
@@ -742,12 +732,19 @@ def record_and_upload(args) -> int:
     except subprocess.CalledProcessError as e:
         print(f"Recording exited with error: {e}", file=sys.stderr)
         return 1
-    except FileNotFoundError:
-        print(
-            "playwright command not found.\n"
-            "Install with: pip install playwright && playwright install",
-            file=sys.stderr,
-        )
+    except FileNotFoundError as e:
+        if "xvfb-run" in str(e) or (no_display and "playwright" not in str(e)):
+            print(
+                "xvfb-run not found. Install it with:\n"
+                "  sudo apt-get install -y xvfb",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "playwright command not found.\n"
+                "Install with: pip install playwright && playwright install",
+                file=sys.stderr,
+            )
         return 1
 
     # 2. Read and convert
