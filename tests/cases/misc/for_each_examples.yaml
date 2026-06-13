@@ -1,0 +1,121 @@
+name: for_each loop examples
+description: Working examples of the for_each action covering common use cases
+tags: [examples, loops]
+
+steps:
+
+  # ── Example 1a: iterate over a literal list of wait times ──────────────────
+  - description: "Wait progressively longer intervals"
+    for_each: "[1, 5, 10, 30]"
+    loop_var: wait_seconds
+    steps:
+      - action: wait
+        seconds: "{{ wait_seconds }}"
+      - action: test.print
+        value: "Waited {{ wait_seconds }}s"
+
+  # ── Example 1b: same API call for each device MAC ──────────────────────────
+  - description: "Check status for each device"
+    for_each: "['AA:BB:CC:00:01', 'AA:BB:CC:00:02', 'AA:BB:CC:00:03']"
+    loop_var: mac
+    steps:
+      - action: api.request
+        method: GET
+        url: "https://api.example.com/devices/{{ mac }}/status"
+        store_as: device_status
+      - action: test.assert
+        expression: "device_status is not None"
+        message: "Device {{ mac }} returned no status"
+
+  # ── Example 1c: iterate over firmware version strings ──────────────────────
+  - description: "Print each target firmware version"
+    for_each: "['2.4.0.0', '2.5.0.0', '2.6.0.0']"
+    loop_var: fw_version
+    steps:
+      - action: test.print
+        value: "Firmware version: {{ fw_version }}"
+      - action: test.assert
+        expression: "fw_version is not None"
+        message: "Version should be a string"
+
+  # ── Example 2: iterate over a variable set by a prior step ─────────────────
+  - action: aws.list_files
+    bucket_name: jpdsauto-wattbox
+    filename_pattern: wattboxvps
+    discover_prefix: true
+    store_as: firmware_urls
+
+  - description: "Print each discovered firmware URL"
+    for_each: firmware_urls
+    loop_var: fw_url
+    steps:
+      - action: test.print
+        value: "Found: {{ fw_url }}"
+
+  # ── Example 3: break_if — stop early when condition is met ─────────────────
+  - description: "Poll until device responds (stop as soon as it does)"
+    for_each: "[5, 10, 20, 40]"
+    loop_var: wait_seconds
+    break_if: "last_response is not None and 'online' in str(last_response)"
+    steps:
+      - action: wait
+        seconds: "{{ wait_seconds }}"
+      - action: api.request
+        method: GET
+        url: https://api.example.com/device/status
+        store_as: last_response
+      - action: test.print
+        value: "Poll after {{ wait_seconds }}s: {{ last_response }}"
+
+  # ── Example 4: continue_if — skip iterations matching a condition ───────────
+  - description: "Toggle outlets 1–8, skip outlet 3 (reserved)"
+    for_each: "[1, 2, 3, 4, 5, 6, 7, 8]"
+    loop_var: outlet_num
+    continue_if: "outlet_num == 3"
+    steps:
+      - action: test.print
+        value: "Toggling outlet {{ outlet_num }}"
+      - action: ovrc send
+        method: wbSetOutlet
+        params:
+          outlet: "{{ outlet_num }}"
+          state: true
+        store_as: outlet_result
+      - action: test.assert
+        expression: "outlet_result is not None"
+        message: "wbSetOutlet failed for outlet {{ outlet_num }}"
+
+  # ── Example 5: range() — numeric range without writing out every value ──────
+  - description: "Retry up to 5 times, stop when health endpoint responds"
+    for_each: "range(1, 6)"
+    loop_var: attempt
+    break_if: "last_response is not None"
+    steps:
+      - action: test.print
+        value: "Attempt {{ attempt }} / 5"
+      - action: wait
+        seconds: 3
+      - action: api.request
+        method: GET
+        url: https://api.example.com/health
+        store_as: last_response
+
+  # ── Example 6: list of dicts — structured per-iteration data ───────────────
+  - description: "Verify each outlet has the expected label"
+    for_each: "[{'num': 1, 'label': 'Server'}, {'num': 2, 'label': 'Switch'}, {'num': 3, 'label': 'AP'}]"
+    loop_var: outlet
+    steps:
+      - action: test.print
+        value: "Outlet {{ outlet['num'] }} → {{ outlet['label'] }}"
+      - action: test.assert
+        expression: "outlet['label'] is not None"
+        message: "Outlet {{ outlet['num'] }} label should not be None"
+
+  # ── Example 7: limit — cap iterations regardless of list length ─────────────
+  - description: "Only process the first 3 items even if the list is longer"
+    for_each: "range(1, 100)"
+    loop_var: n
+    limit: 3
+    steps:
+      - action: test.print
+        value: "Processing item {{ n }}"
