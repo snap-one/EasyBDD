@@ -861,11 +861,29 @@ def record_and_upload(args) -> int:
         if section_id is None:
             return 1
 
+    # Build preconditions as a steps: wrapper — the runner parses this as path 2
+    # (dict with 'steps' key). Each step param is written flush-left under the
+    # step key so _fix_step_list_indent can recover indentation if TestRail
+    # mangles whitespace on retrieval.
+    preconds_lines = ["steps:"]
+    for step in steps:
+        if isinstance(step, dict) and len(step) == 1:
+            action_key, params = next(iter(step.items()))
+            if params:
+                preconds_lines.append(f"- {action_key}:")
+                for k, v in params.items():
+                    preconds_lines.append(f"{k}: {v}")
+            else:
+                preconds_lines.append(f"- {action_key}:")
+        else:
+            preconds_lines.append(f"- {step}")
+    preconditions = "\n".join(preconds_lines)
+
     try:
         case = tr.add_case(
             section_id,
             title=test_data["name"],
-            custom_preconds=f"file: {output_path}",
+            custom_preconds=preconditions,
             type_id=1,
             custom_automation_status=5,
         )
