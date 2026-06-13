@@ -1321,6 +1321,17 @@ def testrail_run(args) -> int:
         print(f"\nSkipped: {result.get('reason', 'no run found')}")
         return 0
 
+    # Write a per-project Jenkins-readable properties file so parallel stages
+    # don't overwrite each other and the pipeline can update the build name.
+    run_name = result.get("run_name", "")
+    run_url  = result.get("run_url", "")
+    if run_name:
+        props_path = Path(f"reports/run_{args.project_id}.properties")
+        props_path.parent.mkdir(parents=True, exist_ok=True)
+        props_path.write_text(
+            f"RUN_NAME={run_name}\nRUN_URL={run_url}\n", encoding="utf-8"
+        )
+
     failed = result.get("failed", 0)
     return 1 if failed > 0 else 0
 

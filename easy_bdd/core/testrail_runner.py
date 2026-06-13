@@ -863,6 +863,8 @@ class TestRailRunner:
 
         return {
             "run_id": run_id,
+            "run_name": run["name"],
+            "run_url": f"https://jpdsauto.testrail.io/index.php?/runs/view/{run_id}",
             "passed": total_passed,
             "failed": total_failed,
             "skipped": total_skipped,

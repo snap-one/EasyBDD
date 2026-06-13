@@ -1,61 +1,67 @@
+// ── Configure project IDs here ──────────────────────────────────────────────
+def TESTRAIL_PROJECTS = [50, 81, 78, 77, 79, 80, 76, 74, 59]   // add or remove project IDs as needed
+// ────────────────────────────────────────────────────────────────────────────
+
+def WORKSPACE = '/var/lib/jenkins/workspace/EASY_BDD'
+
 pipeline {
     agent any
 
-    options {
-        // Keep last 10 builds; abort if a run takes longer than 10 minutes
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        timeout(time: 10, unit: 'MINUTES')
-        // Don't run concurrent builds (prevents two pulls fighting each other)
-        disableConcurrentBuilds()
-        timestamps()
-    }
-
     triggers {
-        // Fires when GitHub sends a push webhook to Jenkins.
-        // In the job config: enable "GitHub hook trigger for GITScm polling".
-        githubPush()
+        cron('H/5 * * * *')
     }
 
-    environment {
-        PROJECT_DIR = '/var/lib/jenkins/workspace/EASY_BDD'
-        VENV        = '/var/lib/jenkins/workspace/EASY_BDD/env'
-        PYTHON      = '/var/lib/jenkins/workspace/EASY_BDD/env/bin/python'
-        PIP         = '/var/lib/jenkins/workspace/EASY_BDD/env/bin/pip'
+    options {
+        buildDiscarder(logRotator(daysToKeepStr: '7', numToKeepStr: '2016'))
+        timestamps()
+        timeout(time: 10, unit: 'MINUTES')
+        disableConcurrentBuilds()
     }
 
     stages {
-
-        stage('Pull latest code') {
+        stage('Run TestRail Projects') {
             steps {
-                dir("${PROJECT_DIR}") {
-                    sh '''
-                        git fetch origin
-                        git reset --hard origin/main
-                    '''
+                script {
+                    // Build one parallel branch per project ID
+                    def branches = TESTRAIL_PROJECTS.collectEntries { projectId ->
+                        ["Project ${projectId}": {
+                            ws(WORKSPACE) {
+                                sh """#!/bin/bash
+                                    set -a && . ${WORKSPACE}/.env && set +a
+                                    . ${WORKSPACE}/env/bin/activate
+                                    python -m easy_bdd testrail-run ${projectId} || true
+                                """
+                            }
+                        }]
+                    }
+                    parallel branches
                 }
             }
         }
-
-        stage('Install / update dependencies') {
-            steps {
-                dir("${PROJECT_DIR}") {
-                    sh '''
-                        ${PIP} install --quiet --upgrade pip
-                        ${PIP} install --quiet -r requirements.txt
-                        ${PIP} install --quiet -e .
-                    '''
-                }
-            }
-        }
-
     }
 
     post {
-        success {
-            echo "Deployment complete — codebase is up to date."
-        }
-        failure {
-            echo "Update FAILED. Check the logs above. The previous codebase is still in place."
+        always {
+            script {
+                // Collect run names from every project that found an active run
+                def found = []
+                TESTRAIL_PROJECTS.each { projectId ->
+                    def propsFile = "${WORKSPACE}/reports/run_${projectId}.properties"
+                    if (fileExists(propsFile)) {
+                        def props = readProperties file: propsFile
+                        def runName = props['RUN_NAME'] ?: ''
+                        def runUrl  = props['RUN_URL']  ?: ''
+                        if (runName) {
+                            found << [name: runName, url: runUrl]
+                        }
+                    }
+                }
+
+                if (found) {
+                    currentBuild.displayName = "#${BUILD_NUMBER} — " + found.collect { it.name }.join(' | ')
+                    currentBuild.description = found.collect { "<a href=\"${it.url}\">${it.name}</a>" }.join('<br>')
+                }
+            }
         }
     }
 }
