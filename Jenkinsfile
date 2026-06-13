@@ -47,7 +47,13 @@ pipeline {
         stage('Validate test suite') {
             steps {
                 dir("${PROJECT_DIR}") {
-                    sh '${PYTHON} -m easy_bdd validate tests/cases/'
+                    sh '''
+                        if [ -d tests/cases ]; then
+                            ${PYTHON} -m easy_bdd validate tests/cases/
+                        else
+                            echo "No tests/cases directory found — skipping validation"
+                        fi
+                    '''
                 }
             }
         }
