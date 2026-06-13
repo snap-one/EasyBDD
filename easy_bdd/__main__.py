@@ -714,7 +714,7 @@ def record_and_upload(args) -> int:
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w") as tmp:
         output_file = tmp.name
 
-    cmd = ["playwright", "codegen", "--output", output_file, "--target", "python-pytest"]
+    cmd = ["playwright", "codegen", "--output", output_file, "--target", "python"]
     if args.url:
         cmd.append(args.url)
 
@@ -866,6 +866,7 @@ def record_and_upload(args) -> int:
             custom_preconds=preconditions,
             custom_steps=f"tag: browser\nfile: {output_path}",
             type_id=1,
+            custom_automation_status=1,
         )
         print(f"[TestRail] Case created: C{case['id']} — {case['title']}")
     except Exception as e:
