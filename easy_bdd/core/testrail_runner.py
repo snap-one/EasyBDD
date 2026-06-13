@@ -1182,13 +1182,20 @@ class TestRailRunner:
         teardowns = [t for t in classified if t["role"] == "teardown"]
         execution_order = setups + pending_tests + teardowns
 
+        build_url = os.getenv("BUILD_URL", "")
+        build_number = os.getenv("BUILD_NUMBER", "")
+        jenkins_footer = (
+            f"\n\nJenkins Build #{build_number}: {build_url}console"
+            if build_url else ""
+        )
+
         def _on_cancel(signum, frame):
             if self._inflight_test_id is not None:
                 try:
                     self._tr.add_result(
                         self._inflight_test_id,
                         status_id=TestRailService.STATUS_FAILED,
-                        comment="Test cancelled — Jenkins job was aborted",
+                        comment=f"Test cancelled — Jenkins job was aborted{jenkins_footer}",
                     )
                 except Exception:
                     pass
@@ -1251,7 +1258,7 @@ class TestRailRunner:
                         self._tr.add_result(
                             test_id,
                             status_id=TestRailService.STATUS_FAILED,
-                            comment=comment,
+                            comment=comment + jenkins_footer,
                             elapsed=elapsed,
                         )
                         self._inflight_test_id = None
@@ -1271,7 +1278,7 @@ class TestRailRunner:
                     else TestRailService.STATUS_FAILED
                 )
 
-                self._tr.add_result(test_id, status_id=status_id, comment=comment, elapsed=elapsed)
+                self._tr.add_result(test_id, status_id=status_id, comment=comment + jenkins_footer, elapsed=elapsed)
                 self._inflight_test_id = None
 
                 if test_passed:

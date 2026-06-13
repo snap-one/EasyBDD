@@ -59,7 +59,7 @@ class TestRailService:
     STATUS_UNTESTED = 3
     STATUS_RETEST = 4
     STATUS_FAILED = 5
-    STATUS_RUNNING = 6  # Custom "Running" status — may not exist on all instances
+    STATUS_RUNNING = 7  # Custom "Running" status (instance-specific; 6 = Not Applicable here)
 
     def __init__(
         self,
