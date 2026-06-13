@@ -1303,6 +1303,7 @@ class TestRailRunner:
         when the Var: case status is already Passed from a previous run.
         """
         passed = failed = skipped = 0
+        run_test_details: List[Dict] = []  # accumulates across all cases for one run-level report
 
         # Re-extract Var: variables every execution so they are always current,
         # regardless of the Var: case's current TestRail status.  Mirrors how
@@ -1391,15 +1392,9 @@ class TestRailRunner:
 
                 start_time = time.time()
 
-                # Build a human-readable filename slug: RunTitle_BuildNum_CaseTitle
-                import os as _os, re as _re
-                _build_num = _os.getenv("BUILD_NUMBER", "")
-                _name_parts = [p for p in [run_title, f"build{_build_num}" if _build_num else "", title] if p]
-                _report_name = _re.sub(r"[^\w\-]", "_", "_".join(_name_parts))
-
-                report_paths: List[Path] = []
+                case_test_details: List[Dict] = []
                 if role == "inline":
-                    test_passed, comment_lines, report_paths = self._run_feature(case, injected_vars, verbose, report_name=_report_name)
+                    test_passed, comment_lines, case_test_details = self._run_feature(case, injected_vars, verbose)
                 else:
                     yaml_files = self._resolve(body, title, injected_vars)
                     if not yaml_files:
@@ -1431,9 +1426,12 @@ class TestRailRunner:
                         if verbose:
                             print(f"    FAIL — {comment.splitlines()[0]}")
                         continue
-                    test_passed, comment_lines, report_paths = self._run_yaml_files(
-                        yaml_files, injected_vars, verbose, report_name=_report_name
+                    test_passed, comment_lines, case_test_details = self._run_yaml_files(
+                        yaml_files, injected_vars, verbose
                     )
+
+                # Accumulate test details for the run-level report
+                run_test_details.extend(case_test_details)
 
                 elapsed = _format_elapsed(time.time() - start_time)
                 comment = "\n".join(comment_lines) or ("Passed" if test_passed else "Failed")
@@ -1443,20 +1441,8 @@ class TestRailRunner:
                     else TestRailService.STATUS_FAILED
                 )
 
-                result_resp = self._tr.add_result(test_id, status_id=status_id, comment=comment + jenkins_footer, elapsed=elapsed)
+                self._tr.add_result(test_id, status_id=status_id, comment=comment + jenkins_footer, elapsed=elapsed)
                 self._inflight_test_id = None
-
-                # Attach HTML report to the TestRail result
-                result_id = result_resp.get("id") if isinstance(result_resp, dict) else None
-                if result_id and report_paths:
-                    for rp in report_paths:
-                        try:
-                            self._tr.add_attachment_to_result(result_id, str(rp))
-                            if verbose:
-                                print(f"    📎 Attached report to result: {rp.name}")
-                        except Exception as _att_err:
-                            if verbose:
-                                print(f"    ⚠  Could not attach report: {_att_err}")
 
                 if test_passed:
                     passed += 1
@@ -1471,6 +1457,36 @@ class TestRailRunner:
             signal.signal(signal.SIGTERM, _prev_sigterm)
             signal.signal(signal.SIGINT, _prev_sigint)
             self._inflight_test_id = None
+
+        # Generate one HTML report for the entire run and attach it to the TestRail run
+        if run_test_details:
+            try:
+                import os as _os, re as _re
+                from ..core.html_reporter import HTMLReporter
+                _build_num = _os.getenv("BUILD_NUMBER", "")
+                _name_parts = [p for p in [run_title, f"build{_build_num}" if _build_num else ""] if p]
+                _report_name = _re.sub(r"[^\w\-]", "_", "_".join(_name_parts)) if _name_parts else "run"
+                _reporter = HTMLReporter(Path("reports"))
+                _run_report_path = _reporter.generate_report(
+                    test_details=run_test_details,
+                    total_tests=passed + failed + skipped,
+                    passed=passed,
+                    failed=failed,
+                    execution_time=0.0,
+                    test_file_name="run",
+                    report_name=_report_name,
+                )
+                print(f"\n📊 Run report: {_run_report_path}")
+                try:
+                    self._tr.add_attachment_to_run(run_id, str(_run_report_path))
+                    if verbose:
+                        print(f"   📎 Attached to TestRail run {run_id}")
+                except Exception as _att_err:
+                    if verbose:
+                        print(f"   ⚠  Could not attach run report: {_att_err}")
+            except Exception as _rep_err:
+                if verbose:
+                    print(f"   ⚠  Could not generate run report: {_rep_err}")
 
         # Mark definition cases (Shared: / Var:) as passed so they don't
         # remain "untested" in the run. They are not executable directly.
@@ -1507,11 +1523,11 @@ class TestRailRunner:
         injected_vars: Dict[str, Any],
         verbose: bool,
         report_name: str = None,
-    ) -> Tuple[bool, List[str]]:
-        """Execute a list of YAML files; return (all_passed, comment_lines, report_paths)."""
+    ) -> Tuple[bool, List[str], List[Dict]]:
+        """Execute a list of YAML files; return (all_passed, comment_lines, test_details)."""
         all_passed = True
         comment_lines: List[str] = []
-        report_paths: List[Path] = []
+        all_test_details: List[Dict] = []
 
         for yaml_path in yaml_files:
             result = self._run_single(yaml_path, injected_vars, verbose, report_name=report_name)
@@ -1520,8 +1536,7 @@ class TestRailRunner:
                 comment_lines.append(f"ERROR: could not execute {yaml_path.name}")
                 continue
 
-            if result.report_path:
-                report_paths.append(result.report_path)
+            all_test_details.extend(result.test_details or [])
 
             for detail in result.test_details or []:
                 name = detail.get("name", yaml_path.stem)
@@ -1540,7 +1555,7 @@ class TestRailRunner:
             if not result.success:
                 all_passed = False
 
-        return all_passed, comment_lines, report_paths
+        return all_passed, comment_lines, all_test_details
 
     def _run_single(
         self,
@@ -1562,7 +1577,7 @@ class TestRailRunner:
                     )
 
             runner = TestRunner(self._config, log_dir=self._artifact_dir)
-            return runner.run(yaml_path, report_name=report_name)
+            return runner.run(yaml_path, report_name=report_name, generate_report=False)
         except Exception as exc:
             if verbose:
                 print(f"    ERROR running {yaml_path.name}: {exc}")
@@ -1657,7 +1672,7 @@ class TestRailRunner:
         injected_vars: Dict[str, Any],
         verbose: bool,
         report_name: str = None,
-    ) -> Tuple[bool, List[str], List[Path]]:
+    ) -> Tuple[bool, List[str], List[Dict]]:
         """Execute a Feature: case by materialising it as a temp YAML file."""
         import yaml as _yaml
 

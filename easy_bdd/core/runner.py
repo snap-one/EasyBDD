@@ -145,7 +145,7 @@ class TestRunner:
 
     def run(
         self, test_path: Path, tags: List[str] = None, parallel_workers: int = 1, record_video: bool = False,
-        report_name: str = None,
+        report_name: str = None, generate_report: bool = True,
     ) -> TestResult:
         """Run tests from the specified path"""
         self._record_video = record_video
@@ -309,24 +309,24 @@ class TestRunner:
         print(f"Execution time: {self._fmt_duration(execution_time)}")
         print(f"{'='*60}")
 
-        # Generate HTML report
-        # Extract test file name for report naming
-        test_file_name = "test"
-        if tests and hasattr(tests[0], "file_path"):
-            test_file_name = Path(tests[0].file_path).stem
+        report_path = None
+        if generate_report:
+            test_file_name = "test"
+            if tests and hasattr(tests[0], "file_path"):
+                test_file_name = Path(tests[0].file_path).stem
 
-        reporter = HTMLReporter(Path("reports"))
-        report_path = reporter.generate_report(
-            test_details=test_details,
-            total_tests=len(tests),
-            passed=passed,
-            failed=failed,
-            execution_time=execution_time,
-            test_file_name=test_file_name,
-            report_name=report_name,
-        )
-        print(f"\n📊 HTML Report generated: {report_path}")
-        print(f"   Open with: open {report_path}")
+            reporter = HTMLReporter(Path("reports"))
+            report_path = reporter.generate_report(
+                test_details=test_details,
+                total_tests=len(tests),
+                passed=passed,
+                failed=failed,
+                execution_time=execution_time,
+                test_file_name=test_file_name,
+                report_name=report_name,
+            )
+            print(f"\n📊 HTML Report generated: {report_path}")
+            print(f"   Open with: open {report_path}")
 
         return TestResult(
             success=success,
