@@ -617,7 +617,7 @@ Performs a swipe gesture.
   description: Swipe left to next page
 ```
 
-## ☁️ AWS Actions (Future)
+## ☁️ AWS Actions
 
 ### AWS S3 Upload
 Uploads a file to AWS S3.
@@ -737,6 +737,193 @@ steps:
 
   - action: Take screenshot
     name: "validation-error"
+```
+
+---
+
+## SSH Actions
+
+Stateful SSH sessions using Paramiko. Unlike `command.ssh` (which spawns a one-shot subprocess), `ssh.*` keeps the connection alive across steps, making it suitable for interactive workflows like enabling privileged mode or running a sequence of commands on network gear.
+
+### ssh.connect
+
+Opens an SSH connection and stores it in the session pool, keyed by `host`.
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `host` | yes | — | Hostname or IP address |
+| `username` | yes | — | SSH username |
+| `password` | no | — | Password authentication |
+| `key_filename` | no | — | Path to private key file |
+| `passphrase` | no | — | Passphrase for encrypted private key |
+| `port` | no | `22` | SSH port |
+| `timeout` | no | `30` | Connection timeout in seconds |
+| `look_for_keys` | no | `True` | Let Paramiko search for keys in `~/.ssh/` |
+| `allow_agent` | no | `True` | Allow Paramiko to use the SSH agent |
+
+### ssh.command
+
+Runs a command on an already-connected host. Two modes are available:
+
+- **exec_command** (default) — clean, non-interactive; ideal for single commands.
+- **interactive shell** — enabled by `use_shell: true` or by providing a `prompt:`; keeps the shell open between calls and is required for things like Cisco `enable` mode.
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `host` | yes | — | Must match a host passed to `ssh.connect` |
+| `command` | yes | — | Command string to execute |
+| `store_as` | no | — | Variable name to store stdout output; also sets `last_response` |
+| `use_shell` | no | `false` | Use an interactive shell instead of exec_command |
+| `prompt` | no | — | Substring to wait for before returning (implies `use_shell: true`) |
+| `timeout` | no | `30` | Command timeout in seconds |
+
+### ssh.disconnect
+
+Closes the SSH connection for the given host.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `host` | yes | Host to disconnect |
+
+### Example — password authentication
+
+```yaml
+- ssh.connect:
+    host: 192.168.1.1
+    username: admin
+    password: admin123
+
+- ssh.command:
+    host: 192.168.1.1
+    command: show version
+    store_as: version_output
+
+- ssh.command:
+    host: 192.168.1.1
+    command: show ip interface brief
+    store_as: interface_output
+
+- ssh.disconnect:
+    host: 192.168.1.1
+```
+
+### Example — key file authentication
+
+```yaml
+- ssh.connect:
+    host: 192.168.1.1
+    username: admin
+    key_filename: /home/jenkins/.ssh/id_rsa
+
+- ssh.command:
+    host: 192.168.1.1
+    command: cat /proc/version
+    store_as: kernel_info
+
+- ssh.disconnect:
+    host: 192.168.1.1
+```
+
+### Example — interactive shell (privileged mode on a network device)
+
+```yaml
+- ssh.connect:
+    host: 192.168.10.5
+    username: cisco
+    password: cisco123
+
+- ssh.command:
+    host: 192.168.10.5
+    command: enable
+    prompt: "Password:"
+    use_shell: true
+
+- ssh.command:
+    host: 192.168.10.5
+    command: cisco_enable_password
+    prompt: "#"
+    use_shell: true
+
+- ssh.command:
+    host: 192.168.10.5
+    command: show running-config
+    use_shell: true
+    store_as: running_config
+
+- ssh.disconnect:
+    host: 192.168.10.5
+```
+
+> **`ssh.*` vs `command.ssh`:** Use `ssh.*` when you need multiple commands in a single session, interactive prompts, or privileged mode. Use `command.ssh` for one-shot remote commands where connection overhead does not matter.
+
+---
+
+## LGIP Actions
+
+LG IP IR control over TCP. Used to send IR keycodes to AV displays and receivers that support the LG IP protocol. Connections are pooled by `ip:port`.
+
+### lgip.connect
+
+Opens a TCP connection to an LG IP IR device.
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `ip` | yes | — | Device IP address |
+| `port` | no | `9761` | TCP port |
+
+### lgip.send_keycode
+
+Sends an IR keycode packet and returns the device response.
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `ip` | yes | — | Must match a connected device |
+| `keycode` | yes | — | Numeric keycode string (see table below) |
+| `delay_after` | no | `0` | Seconds to sleep after the keypress |
+| `store_as` | no | — | Variable name to store the device response |
+
+### lgip.disconnect
+
+Closes the TCP connection to the device.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `ip` | yes | Device to disconnect |
+
+### Common keycodes
+
+| Keycode | Function |
+|---------|----------|
+| `"20"` | Power On |
+| `"21"` | Power Off |
+| `"02"` | Volume Up |
+| `"03"` | Volume Down |
+| `"09"` | Mute |
+| `"27"` | HDMI 1 |
+| `"28"` | HDMI 2 |
+| `"29"` | HDMI 3 |
+| `"60"` | HDMI 4 |
+
+### Example
+
+```yaml
+- lgip.connect:
+    ip: 192.168.1.50
+    port: 9761
+
+- lgip.send_keycode:
+    ip: 192.168.1.50
+    keycode: "20"
+    delay_after: 2.0
+    store_as: power_on_result
+
+- lgip.send_keycode:
+    ip: 192.168.1.50
+    keycode: "27"
+    delay_after: 1.0
+
+- lgip.disconnect:
+    ip: 192.168.1.50
 ```
 
 ---

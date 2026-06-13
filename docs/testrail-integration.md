@@ -133,6 +133,15 @@ environment: staging
 
 Variables from Var: cases are available in all Feature: and Test: cases as `${variable_name}`.
 
+Special control variables recognized by the runner:
+
+| Variable | Effect |
+|----------|--------|
+| `no_datalake: True` | Skips posting results to the data lake for this run |
+| `no_teams: True` | Suppresses the Teams notification after this run completes |
+| `async_execution: true` | Runs all data-driven iterations in parallel |
+| `max_workers: N` | Maximum parallel workers when `async_execution` is enabled |
+
 ---
 
 ## Feature: Cases — Writing Steps in TestRail
@@ -738,3 +747,125 @@ TESTRAIL_URL=https://yourcompany.testrail.io
 TESTRAIL_EMAIL=user@example.com
 TESTRAIL_API_KEY=your_api_key_here
 ```
+
+---
+
+## Creating Test Runs from the CLI
+
+The `testrail-create-run` command creates one or more TestRail test runs from the command line. Use it from CI/CD pipelines, GitHub Actions, or Jenkinsfiles to create runs automatically on push or firmware detection.
+
+```bash
+python -m easy_bdd testrail-create-run <project_id> <suite_id> [options]
+```
+
+### Arguments
+
+| Argument / Flag | Description |
+|----------------|-------------|
+| `project_id` | TestRail project ID |
+| `suite_id` | TestRail suite ID |
+| `--name` | Run name (required for single run mode) |
+| `--sections` | One or more section labels to include (substring match; descendants auto-included) |
+| `--given-section` | Section label to search for `Given:` cases — enables per-SKU mode |
+| `--prefix` | Prefix prepended to every run name (default: `"EASY_BDD:"`) |
+| `--description` | Run description text |
+| `--milestone-id` | Optional TestRail milestone ID |
+| `--dry-run` | Print what would be created without actually creating anything |
+
+### Single run mode
+
+Creates one run containing all cases from the specified sections.
+
+```bash
+python -m easy_bdd testrail-create-run 59 106662 \
+  --name "EASY_BDD: Regression Smoke Test" \
+  --sections "Functions" "Firmware Resiliency" "VPS API" \
+  --description "Triggered by commit abc1234"
+```
+
+### Per-SKU mode (`--given-section`)
+
+Searches the given section for cases whose titles start with `Given:`. Creates one run per `Given:` case found. The `Given:` prefix is stripped to produce the SKU name; the run is titled `EASY_BDD: {sku} Smoke Test`.
+
+This is useful when multiple device SKUs share the same test sections but each needs its own TestRail run.
+
+```bash
+python -m easy_bdd testrail-create-run 77 52630 \
+  --given-section "VPS" \
+  --sections "Functions" "Firmware Resiliency" "VPS Web UI" "VPS API"
+```
+
+If the "VPS" section contains cases titled `Given: WB-300`, `Given: WB-800`, and `Given: WB-900CH1U`, this creates three runs:
+
+```
+EASY_BDD: WB-300 Smoke Test
+EASY_BDD: WB-800 Smoke Test
+EASY_BDD: WB-900CH1U Smoke Test
+```
+
+### Dry run (preview without creating)
+
+```bash
+python -m easy_bdd testrail-create-run 77 52630 \
+  --given-section "VPS" \
+  --sections "Functions" "Firmware Resiliency" \
+  --dry-run
+```
+
+Always use `--dry-run` first when adding a new suite or section configuration to verify the run layout before committing.
+
+---
+
+## HTML Reports Attached to TestRail Results
+
+After each test completes, the HTML report is automatically uploaded to the TestRail result as an attachment via the `add_attachment_to_result` API. The report is then accessible directly from the TestRail result view — no need to dig through Jenkins artifacts.
+
+Report filenames follow the pattern:
+
+```
+{RunTitle}_build{BUILD_NUMBER}_{CaseTitle}_report_{timestamp}.html
+```
+
+Example:
+```
+EASY_BDD__WattBox_VPS_Smoke_Test_build47_VPS_FW_Upgrade_report_20260613_143022.html
+```
+
+Notes:
+- Special characters in the name are replaced with underscores.
+- Name is capped at 80 characters.
+- When running standalone (no TestRail), the name falls back to the YAML file stem.
+- If the attachment upload fails (for example, due to API permissions), a warning is printed but the test result is not affected.
+
+---
+
+## Teams Notifications
+
+After each TestRail run completes, Easy BDD posts an Adaptive Card to Microsoft Teams summarizing the results.
+
+### What the card shows
+
+- Status emoji (pass / fail)
+- Passed, Failed, and Skipped counts
+- Total duration
+- Two action buttons: **View TestRail Run** and **View Jenkins Log** (populated from the `BUILD_URL` environment variable)
+
+### Setup
+
+Add the webhook URL to your `.env` file:
+
+```bash
+TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/...
+```
+
+The notification fires only when `(passed + failed) > 0`. Runs where all tests were skipped or blocked do not trigger a notification.
+
+### Suppressing notifications for a specific run
+
+Add a `Var:` case to the run with:
+
+```
+no_teams: True
+```
+
+This is useful for development runs, dry runs, or any run where you do not want channel noise.

@@ -618,6 +618,39 @@ discover_prefix: true
 
 ---
 
+### Teams notification fires even when no tests ran
+
+**Symptom:** A Teams card is posted for a run where everything was skipped or blocked, causing noise.
+
+**Root cause:** Earlier versions checked only whether the run completed, not whether any tests actually executed.
+
+**Fix:** The notification is now suppressed when `(passed + failed) == 0`. If you are still not seeing notifications for runs where tests did execute, confirm that:
+
+1. `TEAMS_WEBHOOK_URL` is set in the environment or `.env` file.
+2. At least one test has a Passed or Failed result (not just Skipped/Blocked).
+3. `no_teams: True` is not set in any Var: case in the run.
+
+---
+
+### `testrail-create-run` creates duplicate runs
+
+**Symptom:** Running `testrail-create-run` twice for the same suite creates two identical open runs.
+
+**Root cause:** The command does not check for existing open runs before creating a new one.
+
+**Fix:** Use `--dry-run` to preview the runs that would be created before committing:
+
+```bash
+python -m easy_bdd testrail-create-run 77 52630 \
+  --given-section "VPS" \
+  --sections "Functions" "Firmware Resiliency" \
+  --dry-run
+```
+
+If duplicate runs are already present, close or delete the extras manually in TestRail.
+
+---
+
 ### `ovrc disconnect` fails with "requires server_url" or routes to connect handler
 
 **Symptom:** An `ovrc disconnect` step errors out as if no server URL was
