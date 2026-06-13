@@ -482,3 +482,155 @@ When reporting issues, include:
 ---
 
 *If you can't resolve an issue, create a detailed bug report with the information above.*
+
+---
+
+## TestRail & Runner Gotchas
+
+Issues discovered during live test-authoring and debugging sessions. Each item
+lists the symptom, root cause, and the fix or workaround.
+
+---
+
+### `expression: True` in `test.assert` raises TypeError
+
+**Error:**
+```
+TypeError: compile() arg 1 must be a string, bytes or AST object
+```
+
+**Root cause:** YAML bare `True` / `False` becomes a Python `bool`. The runner
+passes the value to `compile()`, which requires a string.
+
+**Solution:** Always quote expression values in YAML:
+```yaml
+# Wrong
+- action: test.assert
+  expression: True
+
+# Correct
+- action: test.assert
+  expression: "True"
+
+- action: test.assert
+  expression: "status_code == 200"
+```
+
+---
+
+### Method calls blocked in `test.assert` expressions
+
+**Error:**
+```
+AssertionError: expression evaluation blocked: method calls not permitted
+```
+
+**Root cause:** The expression evaluator restricts `.method()` calls for security.
+
+**Solution:** Use subscript (bracket) notation instead of method calls:
+```yaml
+# Wrong
+expression: "payload.get('status')"
+
+# Correct
+expression: "payload['status'] == 'ok'"
+```
+
+---
+
+### `store_as` param not working for `api.request`
+
+**Symptom:** Variable appears undefined in later steps after using `store_as:` on
+an `api.request` action.
+
+**Root cause:** The runner was reading `params.get("store_response")` only. The
+documented canonical name is `store_as`.
+
+**Solution:** Fixed in the runner — both `store_as` and `store_response` now
+work. Use `store_as:` going forward:
+```yaml
+- action: api.request
+  method: GET
+  url: ${api_base}/status
+  store_as: api_response
+```
+
+---
+
+### `aws.list_files` returns False / fails when no files match
+
+**Symptom:** Step marked as failed even though "no files found yet" is expected.
+
+**Root cause:** The handler returned `len(urls) > 0`, which evaluates to `False`
+on an empty result — causing the step to register as a failure.
+
+**Solution:** Fixed — the handler now always returns `True` and stores an empty
+list `[]`. Assert on the list length in a separate `test.assert` step if needed:
+```yaml
+- action: aws.list_files
+  bucket: my-bucket
+  prefix: exports/
+  store_as: found_files
+
+- action: test.assert
+  expression: "len(found_files) > 0"
+  message: "Expected at least one exported file"
+```
+
+---
+
+### `no_datalake: True` variable does not stop datalake posts
+
+**Symptom:** Datalake results are posted even though `no_datalake: True` is set
+in the test variables block.
+
+**Root cause:** The runner only checked the CLI `--no-datalake` flag. Test-level
+variables were never read for this setting.
+
+**Solution:** Fixed in `runner.py` and `testrail_runner.py` — both now check the
+`no_datalake` key in test variables and per-data-row variables. Set it at either
+level:
+```yaml
+variables:
+  no_datalake: True
+```
+
+---
+
+### `folder_prefix` set to a Python list causes S3 API error
+
+**Symptom:** S3 call fails with an error about an invalid prefix type.
+
+**Root cause:** The `folder_prefix` parameter was set to a YAML list, but the S3
+`list_objects` API requires a string prefix.
+
+**Solution:** Use `discover_prefix: true` to let the framework resolve the prefix
+dynamically, instead of passing a hard-coded list:
+```yaml
+# Wrong
+folder_prefix:
+  - exports/
+  - archive/
+
+# Correct
+discover_prefix: true
+```
+
+---
+
+### `ovrc disconnect` fails with "requires server_url" or routes to connect handler
+
+**Symptom:** An `ovrc disconnect` step errors out as if no server URL was
+provided, or behaves like a connect step.
+
+**Root cause:** The routing condition used `"connect" in action_lower`, which is
+`True` for the string `"ovrc disconnect"` because `disconnect` contains the
+substring `connect`. Disconnect steps were silently dispatched to the connect
+handler.
+
+**Solution:** Fixed — the connect branch now explicitly excludes disconnect:
+```python
+if "connect" in action_lower and "disconnect" not in action_lower:
+```
+
+No YAML changes are needed; existing test cases work correctly after the fix.
