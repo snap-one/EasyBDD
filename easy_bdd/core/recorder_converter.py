@@ -40,8 +40,17 @@ class RecorderConverter:
 
     def _parse_playwright_line(self, line: str) -> Optional[Dict[str, Any]]:
         """Parse individual Playwright code line to Easy BDD step"""
-        # Remove 'await' and 'page.' prefix
-        line = re.sub(r"^\s*await\s+page\.", "", line)
+        # Skip boilerplate lines from sync/async script wrappers
+        skip_prefixes = (
+            "import ", "from ", "def ", "async def ", "with ", "browser =",
+            "context =", "page =", "run(", "playwright =", "#", "expect(",
+        )
+        stripped = line.strip()
+        if any(stripped.startswith(p) for p in skip_prefixes):
+            return None
+
+        # Remove optional 'await' and 'page.' prefix (handles both sync and async codegen output)
+        line = re.sub(r"^\s*(?:await\s+)?page\.", "", stripped)
         line = line.rstrip(";")
 
         # Parse different Playwright methods
