@@ -61,14 +61,14 @@ pipeline {
                         def runName = props['RUN_NAME'] ?: ''
                         def runUrl  = props['RUN_URL']  ?: ''
                         if (runName) {
-                            found << [name: runName, url: runUrl]
+                            found << [project: projectName, name: runName, url: runUrl]
                         }
                     }
                 }
 
                 if (found) {
-                    currentBuild.displayName = "#${BUILD_NUMBER} — " + found.collect { it.name }.join(' | ')
-                    currentBuild.description = found.collect { "<a href=\"${it.url}\">${it.name}</a>" }.join('<br>')
+                    currentBuild.displayName = "#${BUILD_NUMBER} — " + found.collect { "${it.project}: ${it.name}" }.join(' | ')
+                    currentBuild.description = found.collect { "${it.project}: <a href=\"${it.url}\">${it.name}</a>" }.join('<br>')
                 }
             }
         }
