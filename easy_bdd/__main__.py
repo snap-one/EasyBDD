@@ -866,7 +866,7 @@ def record_and_upload(args) -> int:
             custom_preconds=preconditions,
             custom_steps=f"tag: browser\nfile: {output_path}",
             type_id=1,
-            custom_automation_status=1,
+            custom_automation_status=5,
         )
         print(f"[TestRail] Case created: C{case['id']} — {case['title']}")
     except Exception as e:
