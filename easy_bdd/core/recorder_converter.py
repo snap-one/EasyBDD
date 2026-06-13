@@ -29,7 +29,7 @@ class RecorderConverter:
 
             step = self._parse_playwright_line(line)
             if step:
-                steps.append(self.upgrade_step_to_role_selector(step))
+                steps.append(self._finalise_step(step))
 
         return {
             "name": "Playwright Native API Test",
@@ -37,6 +37,45 @@ class RecorderConverter:
             "tags": ["browser", "playwright", "native-api"],
             "steps": steps,
         }
+
+    def _finalise_step(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """Upgrade selectors to role-based then convert to browser.xxx format."""
+        step = self.upgrade_step_to_role_selector(step)
+        return self._to_browser_step(step)
+
+    def _to_browser_step(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert a flat {action: '...', param: ...} dict to the easy_bdd
+        nested browser.xxx format:
+          {browser.open: {url: ...}}
+          {browser.click: {role: button, name: Save}}
+          {browser.fill: {label: Email, value: user@test.com}}
+        """
+        action = step.get("action", "")
+        params = {k: v for k, v in step.items() if k not in ("action", "description")}
+
+        ACTION_MAP = {
+            "Open browser":    "browser.open",
+            "Click element":   "browser.click",
+            "Double click":    "browser.click",
+            "Fill form field": "browser.fill",
+            "Hover":           "browser.hover",
+            "Press key":       "browser.press_key",
+            "Wait for element":"browser.wait_for_element",
+            "Take screenshot": "browser.screenshot",
+            "Verify text":     "browser.verify_text",
+            "Select option":   "browser.select_option",
+            "Scroll":          "browser.scroll",
+            "Switch frame":    "browser.switch_frame",
+            "Clear field":     "browser.clear",
+            "Drag and drop":   "browser.drag_and_drop",
+        }
+
+        browser_action = ACTION_MAP.get(action)
+        if browser_action:
+            return {browser_action: params} if params else {browser_action: None}
+        # Unknown action — pass through unchanged
+        return step
 
     def _parse_playwright_line(self, line: str) -> Optional[Dict[str, Any]]:
         """Parse individual Playwright code line to Easy BDD step"""
@@ -320,7 +359,7 @@ class RecorderConverter:
         for raw in data.get("steps", []):
             step = self._convert_chrome_devtools_step(raw, variables)
             if step:
-                steps.append(self.upgrade_step_to_role_selector(step))
+                steps.append(self._finalise_step(step))
 
         return {
             "name": test_name,
@@ -580,12 +619,12 @@ class RecorderConverter:
             if isinstance(action, dict):
                 step = self._convert_playwright_action(action, variables)
                 if step:
-                    steps.append(self.upgrade_step_to_role_selector(step))
+                    steps.append(self._finalise_step(step))
             elif isinstance(action, str):
                 # Handle string-based actions
                 step = self._parse_playwright_code_line(action, variables)
                 if step:
-                    steps.append(self.upgrade_step_to_role_selector(step))
+                    steps.append(self._finalise_step(step))
 
         return {
             "name": test_name,
@@ -688,7 +727,7 @@ class RecorderConverter:
         for cmd in commands:
             step = self._convert_selenium_command(cmd)
             if step:
-                steps.append(self.upgrade_step_to_role_selector(step))
+                steps.append(self._finalise_step(step))
 
         return {
             "name": test_name,
@@ -819,7 +858,7 @@ class RecorderConverter:
         for cmd in commands:
             step = self._convert_cypress_command(cmd)
             if step:
-                steps.append(self.upgrade_step_to_role_selector(step))
+                steps.append(self._finalise_step(step))
 
         return {
             "name": test_name,
@@ -856,7 +895,7 @@ class RecorderConverter:
         for step_data in steps_data:
             step = self._convert_puppeteer_step(step_data)
             if step:
-                steps.append(self.upgrade_step_to_role_selector(step))
+                steps.append(self._finalise_step(step))
 
         return {
             "name": test_name,
@@ -895,7 +934,7 @@ class RecorderConverter:
         for cmd in commands:
             step = self._convert_katalon_command(cmd)
             if step:
-                steps.append(self.upgrade_step_to_role_selector(step))
+                steps.append(self._finalise_step(step))
 
         return {
             "name": test_name,
