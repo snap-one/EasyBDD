@@ -17,6 +17,9 @@ pipeline {
 
     stages {
         stage('Run TestRail Project') {
+            when {
+                expression { params.PROJECT_ID?.trim() }
+            }
             steps {
                 sh """#!/bin/bash
                     cd ${WORKSPACE}
@@ -32,6 +35,11 @@ pipeline {
     post {
         always {
             script {
+                if (!params.PROJECT_ID?.trim()) {
+                    currentBuild.displayName = "#${BUILD_NUMBER} — No PROJECT_ID supplied"
+                    currentBuild.description = ''
+                    return
+                }
                 def propsFile = "${WORKSPACE}/reports/run_${params.PROJECT_ID}.properties"
                 if (fileExists(propsFile)) {
                     def props = readProperties file: propsFile
