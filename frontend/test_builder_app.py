@@ -4451,14 +4451,31 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                 (function() {
                     'use strict';
 
-                    // Check if script has already been injected - MUST be first!
+                    // Remove existing event listeners if script was already injected
                     if (window.__easybdd_recorder_injected__) {
-                        console.log('[EasyBDD Recorder] Script already injected, skipping...');
-                        return;
+                        console.log('[EasyBDD Recorder] Script already injected, removing old listeners...');
+                        
+                        // Remove all existing event listeners by cloning and replacing the document
+                        // This is the most reliable way to remove all listeners
+                        if (window.__easybdd_recorder__ && window.__easybdd_recorder__.listenersRemoved) {
+                            // Already cleaned up, just return
+                            return;
+                        }
+                        
+                        // Mark that we're cleaning up
+                        if (!window.__easybdd_recorder__) {
+                            window.__easybdd_recorder__ = {};
+                        }
+                        window.__easybdd_recorder__.listenersRemoved = true;
                     }
 
                     // Mark as injected immediately
                     window.__easybdd_recorder_injected__ = true;
+                    
+                    // Reset cleanup flag for new injection
+                    if (window.__easybdd_recorder__) {
+                        window.__easybdd_recorder__.listenersRemoved = false;
+                    }
 
                     console.log('[EasyBDD Recorder] Highlight/locator script starting...');
 
@@ -4527,26 +4544,68 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                         window.__easybdd_recorder__.locatorTooltip = document.createElement('div');
                         window.__easybdd_recorder__.locatorTooltip.className = '__recorder_locator__';
                         const rect = element.getBoundingClientRect();
-                        // Position tooltip above the element with more space to avoid blocking
-                        // Try to position it 100px above, or to the right if not enough space above
+                        
+                        // Tooltip dimensions (will be calculated after creation, but estimate)
+                        const tooltipMaxWidth = 400;
+                        const tooltipPadding = 24; // 12px padding on each side
+                        const tooltipMargin = 20; // Space from element
+                        
+                        // Viewport dimensions
+                        const viewportWidth = window.innerWidth;
                         const viewportHeight = window.innerHeight;
+                        const scrollX = window.scrollX;
+                        const scrollY = window.scrollY;
+
+                        // Calculate preferred position (above element, centered)
+                        let tooltipTop = rect.top + scrollY - 110;
+                        let tooltipLeft = rect.left + scrollX + (rect.width / 2) - (tooltipMaxWidth / 2);
+                        
+                        // Ensure tooltip stays within viewport bounds
+                        // Check right boundary
+                        if (tooltipLeft + tooltipMaxWidth > scrollX + viewportWidth - tooltipMargin) {
+                            tooltipLeft = scrollX + viewportWidth - tooltipMaxWidth - tooltipMargin;
+                        }
+                        
+                        // Check left boundary
+                        if (tooltipLeft < scrollX + tooltipMargin) {
+                            tooltipLeft = scrollX + tooltipMargin;
+                        }
+                        
+                        // Check if there's enough space above, otherwise position below or to the right
                         const spaceAbove = rect.top;
                         const spaceBelow = viewportHeight - rect.bottom;
-                        const spaceRight = window.innerWidth - rect.right;
-
-                        let tooltipTop, tooltipLeft;
-                        if (spaceAbove > 120) {
-                            // Position above with good clearance
-                            tooltipTop = rect.top + window.scrollY - 110;
-                            tooltipLeft = rect.left + window.scrollX + (rect.width / 2) - 200; // Center it relative to element
-                        } else if (spaceRight > 450) {
-                            // Position to the right
-                            tooltipTop = rect.top + window.scrollY;
-                            tooltipLeft = rect.right + window.scrollX + 20;
-                        } else {
-                            // Position below if no space above or right
-                            tooltipTop = rect.bottom + window.scrollY + 10;
-                            tooltipLeft = rect.left + window.scrollX + (rect.width / 2) - 200;
+                        const spaceRight = viewportWidth - rect.right;
+                        
+                        if (spaceAbove < 120 && spaceBelow > 120) {
+                            // Not enough space above, position below
+                            tooltipTop = rect.bottom + scrollY + 10;
+                            tooltipLeft = rect.left + scrollX + (rect.width / 2) - (tooltipMaxWidth / 2);
+                            // Re-check boundaries for below position
+                            if (tooltipLeft + tooltipMaxWidth > scrollX + viewportWidth - tooltipMargin) {
+                                tooltipLeft = scrollX + viewportWidth - tooltipMaxWidth - tooltipMargin;
+                            }
+                            if (tooltipLeft < scrollX + tooltipMargin) {
+                                tooltipLeft = scrollX + tooltipMargin;
+                            }
+                        } else if (spaceAbove < 120 && spaceBelow < 120 && spaceRight > tooltipMaxWidth + tooltipMargin) {
+                            // Not enough space above or below, position to the right
+                            tooltipTop = rect.top + scrollY;
+                            tooltipLeft = rect.right + scrollX + 20;
+                            // Ensure it doesn't go off the right edge
+                            if (tooltipLeft + tooltipMaxWidth > scrollX + viewportWidth - tooltipMargin) {
+                                tooltipLeft = scrollX + viewportWidth - tooltipMaxWidth - tooltipMargin;
+                            }
+                        }
+                        
+                        // Ensure tooltip doesn't go below viewport
+                        const estimatedTooltipHeight = 120; // Estimate based on content
+                        if (tooltipTop + estimatedTooltipHeight > scrollY + viewportHeight - tooltipMargin) {
+                            tooltipTop = scrollY + viewportHeight - estimatedTooltipHeight - tooltipMargin;
+                        }
+                        
+                        // Ensure tooltip doesn't go above viewport
+                        if (tooltipTop < scrollY + tooltipMargin) {
+                            tooltipTop = scrollY + tooltipMargin;
                         }
 
                         window.__easybdd_recorder__.locatorTooltip.style.cssText = `
@@ -4563,19 +4622,55 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                             pointer-events: none;
                             opacity: 0.95;
                             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                            max-width: 400px;
+                            max-width: ${tooltipMaxWidth}px;
+                            width: max-content;
+                            min-width: 200px;
                             line-height: 1.6;
                             border: 1px solid #3b82f6;
+                            word-wrap: break-word;
+                            overflow-wrap: break-word;
+                            box-sizing: border-box;
                         `;
 
                         window.__easybdd_recorder__.locatorTooltip.innerHTML = `
-                            <div style="color: #3b82f6; font-weight: bold; margin-bottom: 4px;">Selector:</div>
-                            <div style="color: #60a5fa; word-break: break-all;">${info.selector}</div>
-                            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #334155; color: #94a3b8; font-size: 11px;">
+                            <div style="color: #3b82f6; font-weight: bold; margin-bottom: 4px; word-wrap: break-word; overflow-wrap: break-word;">Selector:</div>
+                            <div style="color: #60a5fa; word-break: break-all; word-wrap: break-word; overflow-wrap: break-word; white-space: normal; max-width: 100%;">${info.selector}</div>
+                            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #334155; color: #94a3b8; font-size: 11px; word-wrap: break-word; overflow-wrap: break-word; white-space: normal;">
                                 ${info.details}
                             </div>
                         `;
                         document.body.appendChild(window.__easybdd_recorder__.locatorTooltip);
+                        
+                        // After appending, adjust position if tooltip extends beyond viewport
+                        const tooltipRect = window.__easybdd_recorder__.locatorTooltip.getBoundingClientRect();
+                        let adjustedLeft = tooltipLeft;
+                        let adjustedTop = tooltipTop;
+                        
+                        // Check if tooltip extends beyond right edge
+                        if (tooltipRect.right > viewportWidth - tooltipMargin) {
+                            adjustedLeft = viewportWidth - tooltipRect.width - tooltipMargin - scrollX;
+                        }
+                        
+                        // Check if tooltip extends beyond left edge
+                        if (tooltipRect.left < tooltipMargin) {
+                            adjustedLeft = tooltipMargin + scrollX;
+                        }
+                        
+                        // Check if tooltip extends beyond bottom edge
+                        if (tooltipRect.bottom > viewportHeight - tooltipMargin) {
+                            adjustedTop = viewportHeight - tooltipRect.height - tooltipMargin - scrollY;
+                        }
+                        
+                        // Check if tooltip extends beyond top edge
+                        if (tooltipRect.top < tooltipMargin) {
+                            adjustedTop = tooltipMargin + scrollY;
+                        }
+                        
+                        // Apply adjustments if needed
+                        if (adjustedLeft !== tooltipLeft || adjustedTop !== tooltipTop) {
+                            window.__easybdd_recorder__.locatorTooltip.style.left = adjustedLeft + 'px';
+                            window.__easybdd_recorder__.locatorTooltip.style.top = adjustedTop + 'px';
+                        }
                     }
                     function removeLocatorTooltip() {
                         if (window.__easybdd_recorder__.locatorTooltip) window.__easybdd_recorder__.locatorTooltip.remove();
@@ -4825,7 +4920,17 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                     })();
 
                     // Mouse over highlighting
-                    document.addEventListener('mouseover', (e) => {
+                    // Remove any existing mouseover/mouseout listeners first
+                    if (window.__easybdd_recorder__) {
+                        if (window.__easybdd_recorder__.mouseoverHandler) {
+                            document.removeEventListener('mouseover', window.__easybdd_recorder__.mouseoverHandler, true);
+                        }
+                        if (window.__easybdd_recorder__.mouseoutHandler) {
+                            document.removeEventListener('mouseout', window.__easybdd_recorder__.mouseoutHandler, true);
+                        }
+                    }
+                    
+                    const mouseoverHandler = (e) => {
                         if (e.target.classList.contains('__recorder_highlight__') ||
                             e.target.classList.contains('__recorder_locator__') ||
                             e.target.classList.contains('__recorder_badge__') ||
@@ -4834,9 +4939,9 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                         }
                         showHighlight(e.target);
                         showLocatorTooltip(e.target);
-                    }, true);
-
-                    document.addEventListener('mouseout', (e) => {
+                    };
+                    
+                    const mouseoutHandler = (e) => {
                         if (e.target.classList.contains('__recorder_highlight__') ||
                             e.target.classList.contains('__recorder_locator__') ||
                             e.target.classList.contains('__recorder_badge__')) {
@@ -4847,7 +4952,15 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                             removeHighlight();
                             removeLocatorTooltip();
                         }
-                    }, true);
+                    };
+                    
+                    // Store handler references for cleanup
+                    if (!window.__easybdd_recorder__) window.__easybdd_recorder__ = {};
+                    window.__easybdd_recorder__.mouseoverHandler = mouseoverHandler;
+                    window.__easybdd_recorder__.mouseoutHandler = mouseoutHandler;
+                    
+                    document.addEventListener('mouseover', mouseoverHandler, true);
+                    document.addEventListener('mouseout', mouseoutHandler, true);
 
                     // Context menu for right-click assertions (using namespace)
                     function createContextMenu() {
@@ -5132,8 +5245,22 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                 }
 
                 // Show context menu on right-click
-                document.addEventListener('contextmenu', (e) => {
+                // Remove any existing contextmenu listener first
+                if (window.__easybdd_recorder__ && window.__easybdd_recorder__.contextmenuHandler) {
+                    document.removeEventListener('contextmenu', window.__easybdd_recorder__.contextmenuHandler, true);
+                }
+                if (window.__easybdd_recorder__ && window.__easybdd_recorder__.contextmenuClickHandler) {
+                    document.removeEventListener('click', window.__easybdd_recorder__.contextmenuClickHandler);
+                }
+                
+                const contextmenuHandler = (e) => {
+                    // Only show context menu if recording is active
+                    if (!window.__easybdd_recorder__ || !window.__easybdd_recorder__.recordingBadge) {
+                        return; // Not recording, allow default context menu
+                    }
+                    
                     e.preventDefault();
+                    e.stopPropagation();
                     window.__easybdd_recorder__.contextTarget = e.target;
 
                     hideContextMenu();
@@ -5141,17 +5268,34 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                     window.__easybdd_recorder__.contextMenu.style.left = e.pageX + 'px';
                     window.__easybdd_recorder__.contextMenu.style.top = e.pageY + 'px';
                     document.body.appendChild(window.__easybdd_recorder__.contextMenu);
-                }, true);
-
-                // Hide context menu on click outside
-                document.addEventListener('click', (e) => {
+                    
+                    // Ensure menu is visible and on top
+                    window.__easybdd_recorder__.contextMenu.style.display = 'block';
+                    window.__easybdd_recorder__.contextMenu.style.zIndex = '1000000';
+                };
+                
+                const contextmenuClickHandler = (e) => {
                     if (window.__easybdd_recorder__.contextMenu && !window.__easybdd_recorder__.contextMenu.contains(e.target)) {
                         hideContextMenu();
                     }
-                });
+                };
+                
+                // Store handler references for cleanup
+                if (!window.__easybdd_recorder__) window.__easybdd_recorder__ = {};
+                window.__easybdd_recorder__.contextmenuHandler = contextmenuHandler;
+                window.__easybdd_recorder__.contextmenuClickHandler = contextmenuClickHandler;
+                
+                document.addEventListener('contextmenu', contextmenuHandler, true);
+                // Hide context menu on click outside (use capture=false for this one)
+                document.addEventListener('click', contextmenuClickHandler);
 
                 // Track clicks (but not on context menu or recorder UI)
-                document.addEventListener('click', async (e) => {
+                // Remove any existing click listener first to prevent duplicates
+                if (window.__easybdd_recorder__ && window.__easybdd_recorder__.clickHandler) {
+                    document.removeEventListener('click', window.__easybdd_recorder__.clickHandler, true);
+                }
+                
+                const clickHandler = async (e) => {
                     // Skip if we're in element selection mode (for asserts)
                     if (document.getElementById('__recorder_element_selection_instruction__')) {
                         return; // Let the element selection handler take care of it
@@ -5185,13 +5329,25 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                     } catch (error) {
                         console.error('[EasyBDD Recorder] Error recording click:', error);
                     }
-                }, true);
+                };
+                
+                // Store handler reference for cleanup
+                if (!window.__easybdd_recorder__) window.__easybdd_recorder__ = {};
+                window.__easybdd_recorder__.clickHandler = clickHandler;
+                
+                document.addEventListener('click', clickHandler, true);
 
                 // Track input/typing with improved debouncing to avoid splitting words
+                // Remove any existing input listener first to prevent duplicates
+                if (window.__easybdd_recorder__ && window.__easybdd_recorder__.inputHandler) {
+                    document.removeEventListener('input', window.__easybdd_recorder__.inputHandler, true);
+                }
+                
                 let typingTimeout = null;
                 let lastRecordedValue = null;
                 let lastRecordedSelector = null;
-                document.addEventListener('input', async (e) => {
+                
+                const inputHandler = async (e) => {
                     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
                         const selector = getSelector(e.target);
                         const currentValue = e.target.value || e.target.textContent || '';
@@ -5250,14 +5406,25 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                             }
                         }, 1500); // Increased from 300ms to 1500ms to wait for complete input
                     }
-                }, true);
+                };
+                
+                // Store handler reference for cleanup
+                if (!window.__easybdd_recorder__) window.__easybdd_recorder__ = {};
+                window.__easybdd_recorder__.inputHandler = inputHandler;
+                
+                document.addEventListener('input', inputHandler, true);
 
                 // Track form submissions - Note: Form submission is typically handled by clicking submit buttons
                 // We don't need to record form.submit events separately as clicking the submit button is already recorded
                 // If you need to explicitly submit a form, use browser.click on the submit button
 
                 // Track select changes
-                document.addEventListener('change', async (e) => {
+                // Remove any existing change listener first to prevent duplicates
+                if (window.__easybdd_recorder__ && window.__easybdd_recorder__.changeHandler) {
+                    document.removeEventListener('change', window.__easybdd_recorder__.changeHandler, true);
+                }
+                
+                const changeHandler = async (e) => {
                     if (e.target.tagName === 'SELECT') {
                         const selector = getSelector(e.target);
                         const value = e.target.value;
@@ -5267,12 +5434,8 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                                 value: value
                             });
                         }
-                    }
-                }, true);
-
-                // Track checkbox/radio changes
-                document.addEventListener('change', async (e) => {
-                    if (e.target.type === 'checkbox' || e.target.type === 'radio') {
+                    } else if (e.target.type === 'checkbox' || e.target.type === 'radio') {
+                        // Track checkbox/radio changes
                         const selector = getSelector(e.target);
                         const checked = e.target.checked;
                         if (window.recordAction && selector) {
@@ -5282,7 +5445,13 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                             });
                         }
                     }
-                }, true);
+                };
+                
+                // Store handler reference for cleanup
+                if (!window.__easybdd_recorder__) window.__easybdd_recorder__ = {};
+                window.__easybdd_recorder__.changeHandler = changeHandler;
+                
+                document.addEventListener('change', changeHandler, true);
                 })();
             """
 
@@ -5306,10 +5475,34 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                     try:
                         await frame.wait_for_load_state("networkidle", timeout=5000)
                         # Clear the injection flag and namespace to allow re-injection
+                        # Also remove all event listeners before re-injecting
                         await page.evaluate(
                             """
                             window.__easybdd_recorder_injected__ = false;
                             if (window.__easybdd_recorder__) {
+                                // Remove all event listeners to prevent duplicates
+                                if (window.__easybdd_recorder__.clickHandler) {
+                                    document.removeEventListener('click', window.__easybdd_recorder__.clickHandler, true);
+                                }
+                                if (window.__easybdd_recorder__.inputHandler) {
+                                    document.removeEventListener('input', window.__easybdd_recorder__.inputHandler, true);
+                                }
+                                if (window.__easybdd_recorder__.changeHandler) {
+                                    document.removeEventListener('change', window.__easybdd_recorder__.changeHandler, true);
+                                }
+                                if (window.__easybdd_recorder__.mouseoverHandler) {
+                                    document.removeEventListener('mouseover', window.__easybdd_recorder__.mouseoverHandler, true);
+                                }
+                                if (window.__easybdd_recorder__.mouseoutHandler) {
+                                    document.removeEventListener('mouseout', window.__easybdd_recorder__.mouseoutHandler, true);
+                                }
+                                if (window.__easybdd_recorder__.contextmenuHandler) {
+                                    document.removeEventListener('contextmenu', window.__easybdd_recorder__.contextmenuHandler, true);
+                                }
+                                if (window.__easybdd_recorder__.contextmenuClickHandler) {
+                                    document.removeEventListener('click', window.__easybdd_recorder__.contextmenuClickHandler);
+                                }
+                                
                                 // Clean up old elements
                                 if (window.__easybdd_recorder__.highlightEl) {
                                     window.__easybdd_recorder__.highlightEl.remove();

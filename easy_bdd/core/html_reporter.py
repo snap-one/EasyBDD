@@ -754,27 +754,140 @@ class HTMLReporter:
                 </div>
 """
 
-            # Parse and display steps
+            # Get step logs from test_detail (more accurate than parsing logs)
+            step_logs = test.get("step_logs", [])
+            
+            # Also parse steps from execution log as fallback
             steps = self._parse_steps_from_log(execution_log)
-            if steps:
+            
+            # Use step_logs if available (more accurate), otherwise use parsed steps
+            if step_logs:
+                total_steps = len(step_logs)
+                completed_steps = sum(1 for s in step_logs if s.get("status") == "passed")
+                failed_steps = sum(1 for s in step_logs if s.get("status") == "failed")
+                progress_percentage = (completed_steps / total_steps * 100) if total_steps > 0 else 0
+                
+                html_content += f"""
+                <div class="steps-section" style="margin-top: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div class="steps-title" style="font-size: 16px; font-weight: bold; color: #1e293b;">📝 Test Execution Progress</div>
+                        <div style="font-size: 14px; color: #64748b;">
+                            <span style="color: #10b981;">✓ {completed_steps}</span> / 
+                            <span style="color: #ef4444;">✗ {failed_steps}</span> / 
+                            <span style="color: #64748b;">○ {total_steps}</span> steps
+                        </div>
+                    </div>
+                    
+                    <!-- Progress Bar -->
+                    <div style="margin-bottom: 16px;">
+                        <div style="background: #e5e7eb; border-radius: 8px; height: 24px; overflow: hidden; position: relative;">
+                            <div style="background: linear-gradient(90deg, #10b981 0%, #059669 100%); height: 100%; width: {progress_percentage}%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: bold;">
+                                {int(progress_percentage)}%
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="steps-list" style="display: flex; flex-direction: column; gap: 8px;">
+"""
+                for step_log in step_logs:
+                    step_num = step_log.get("step", step_log.get("number", 0))
+                    step_action = html.escape(str(step_log.get("action", "Unknown step")))
+                    step_status = step_log.get("status", "pending")
+                    
+                    # Determine status and styling
+                    if step_status == "passed":
+                        icon = "✓"
+                        status_color = "#10b981"
+                        bg_color = "#f0fdf4"
+                        border_color = "#10b981"
+                    elif step_status == "failed":
+                        icon = "✗"
+                        status_color = "#ef4444"
+                        bg_color = "#fef2f2"
+                        border_color = "#ef4444"
+                    else:
+                        icon = "○"
+                        status_color = "#94a3b8"
+                        bg_color = "#f8fafc"
+                        border_color = "#cbd5e1"
+                    
+                    html_content += f"""
+                        <div class="step-item {step_status}" style="display: flex; align-items: start; padding: 12px; background: {bg_color}; border-left: 4px solid {border_color}; border-radius: 6px; gap: 12px;">
+                            <div class="step-icon" style="font-size: 18px; color: {status_color}; font-weight: bold; min-width: 24px;">{icon}</div>
+                            <div class="step-content" style="flex: 1;">
+                                <div class="step-action" style="font-weight: 600; color: #1e293b; margin-bottom: 4px;">
+                                    Step {step_num}: {step_action}
+                                </div>
+                                <div style="font-size: 12px; color: {status_color}; text-transform: uppercase; font-weight: 500;">
+                                    {step_status}
+                                </div>
+                            </div>
+                        </div>
+"""
                 html_content += """
-                <div class="steps-section">
-                    <div class="steps-title">📝 Test Steps</div>
-                    <div class="steps-list">
+                    </div>
+                </div>
+"""
+            elif steps:
+                # Fallback to parsed steps if step_logs not available
+                total_steps = len(steps)
+                completed_steps = sum(1 for s in steps if s.get("status") == "completed")
+                failed_steps = sum(1 for s in steps if s.get("status") == "failed")
+                progress_percentage = (completed_steps / total_steps * 100) if total_steps > 0 else 0
+                
+                html_content += f"""
+                <div class="steps-section" style="margin-top: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div class="steps-title" style="font-size: 16px; font-weight: bold; color: #1e293b;">📝 Test Execution Progress</div>
+                        <div style="font-size: 14px; color: #64748b;">
+                            <span style="color: #10b981;">✓ {completed_steps}</span> / 
+                            <span style="color: #ef4444;">✗ {failed_steps}</span> / 
+                            <span style="color: #64748b;">○ {total_steps}</span> steps
+                        </div>
+                    </div>
+                    
+                    <!-- Progress Bar -->
+                    <div style="margin-bottom: 16px;">
+                        <div style="background: #e5e7eb; border-radius: 8px; height: 24px; overflow: hidden; position: relative;">
+                            <div style="background: linear-gradient(90deg, #10b981 0%, #059669 100%); height: 100%; width: {progress_percentage}%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: bold;">
+                                {int(progress_percentage)}%
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="steps-list" style="display: flex; flex-direction: column; gap: 8px;">
 """
                 for step in steps:
                     step_status = step.get("status", "pending")
                     step_num = step.get("number", 0)
                     step_action = html.escape(step.get("action", "Unknown step"))
 
-                    icon_map = {"pending": "○", "completed": "✓", "failed": "✗"}
-                    icon = icon_map.get(step_status, "○")
+                    if step_status == "completed":
+                        icon = "✓"
+                        status_color = "#10b981"
+                        bg_color = "#f0fdf4"
+                        border_color = "#10b981"
+                    elif step_status == "failed":
+                        icon = "✗"
+                        status_color = "#ef4444"
+                        bg_color = "#fef2f2"
+                        border_color = "#ef4444"
+                    else:
+                        icon = "○"
+                        status_color = "#94a3b8"
+                        bg_color = "#f8fafc"
+                        border_color = "#cbd5e1"
 
                     html_content += f"""
-                        <div class="step-item {step_status}">
-                            <div class="step-icon">{icon}</div>
-                            <div class="step-content">
-                                <div class="step-action">Step {step_num}: {step_action}</div>
+                        <div class="step-item {step_status}" style="display: flex; align-items: start; padding: 12px; background: {bg_color}; border-left: 4px solid {border_color}; border-radius: 6px; gap: 12px;">
+                            <div class="step-icon" style="font-size: 18px; color: {status_color}; font-weight: bold; min-width: 24px;">{icon}</div>
+                            <div class="step-content" style="flex: 1;">
+                                <div class="step-action" style="font-weight: 600; color: #1e293b; margin-bottom: 4px;">
+                                    Step {step_num}: {step_action}
+                                </div>
+                                <div style="font-size: 12px; color: {status_color}; text-transform: uppercase; font-weight: 500;">
+                                    {step_status}
+                                </div>
                             </div>
                         </div>
 """
@@ -803,9 +916,33 @@ class HTMLReporter:
             if failure_screenshot and Path(f"reports/{failure_screenshot}").exists():
                 html_content += f"""
                 <div style="margin-top: 16px;">
-                    <strong style="color: #1e293b;">📸 Failure Screenshot:</strong>
-                    <div style="margin-top: 10px; border: 2px solid #ef4444; border-radius: 8px; overflow: hidden;">
-                        <img src="{html.escape(failure_screenshot)}" alt="Failure Screenshot" style="max-width: 100%; display: block;">
+                    <strong style="color: #1e293b;">📸 Failure Screenshot (Last Action Before Failure):</strong>
+                    <div style="margin-top: 10px; border: 2px solid #ef4444; border-radius: 8px; overflow: hidden; background: #fef2f2;">
+                        <img src="{html.escape(failure_screenshot)}" alt="Failure Screenshot" style="max-width: 100%; display: block; cursor: pointer;" onclick="window.open(this.src, '_blank')" title="Click to open full size">
+                    </div>
+                    <p style="margin-top: 8px; font-size: 12px; color: #666;">This screenshot shows the state after the last successful step, before the failure occurred.</p>
+                </div>
+"""
+            
+            # Add step screenshots if available (for debugging)
+            step_screenshots = test.get("step_screenshots", [])
+            if step_screenshots and len(step_screenshots) > 0:
+                html_content += """
+                <div style="margin-top: 16px;">
+                    <strong style="color: #1e293b;">📸 Step Screenshots:</strong>
+                    <div style="margin-top: 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px;">
+"""
+                for step_screenshot in step_screenshots[-5:]:  # Show last 5 step screenshots
+                    step_num = step_screenshot.get("step", "?")
+                    screenshot_path = step_screenshot.get("screenshot", "")
+                    if screenshot_path and Path(f"reports/{screenshot_path}").exists():
+                        html_content += f"""
+                        <div style="border: 1px solid #ddd; border-radius: 6px; overflow: hidden; background: white;">
+                            <div style="padding: 6px; background: #f8f9fa; font-size: 11px; font-weight: bold; color: #495057;">Step {step_num}</div>
+                            <img src="{html.escape(screenshot_path)}" alt="Step {step_num} Screenshot" style="width: 100%; display: block; cursor: pointer;" onclick="window.open(this.src, '_blank')" title="Click to open full size">
+                        </div>
+"""
+                html_content += """
                     </div>
                 </div>
 """
