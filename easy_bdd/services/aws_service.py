@@ -198,6 +198,60 @@ class AWSService:
             self._regex_cache[pattern] = re.compile(pattern)
         return self._regex_cache[pattern]
 
+    def discover_prefix(
+        self,
+        bucket_name: str,
+        filename_pattern: str,
+        access_key_id: str = None,
+        secret_access_key: str = None,
+        region: str = None,
+    ) -> str:
+        """
+        Discover the S3 prefix (folder path) that contains files matching
+        filename_pattern by walking the bucket's top-level directory tree.
+
+        Args:
+            bucket_name: S3 bucket name
+            filename_pattern: Pattern to match in filenames
+            access_key_id: AWS Access Key ID
+            secret_access_key: AWS Secret Access Key
+            region: AWS region
+
+        Returns:
+            The deepest common prefix that contains matching files, or "" if
+            files are found but share no common prefix, or None if no match.
+        """
+        self._get_s3_clients(bucket_name, access_key_id, secret_access_key, region)
+
+        paginator = self._s3_client.get_paginator("list_objects_v2")
+
+        def _search(prefix=""):
+            """Recursively walk prefixes, return first matching one."""
+            resp = self._s3_client.list_objects_v2(
+                Bucket=bucket_name, Prefix=prefix, Delimiter="/"
+            )
+            # Check files at this level
+            for obj in resp.get("Contents", []):
+                key = obj["Key"]
+                filename = key.split("/")[-1]
+                if filename_pattern.lower() in filename.lower():
+                    # Return the folder portion (everything up to the last slash)
+                    return prefix if prefix else ""
+            # Recurse into sub-prefixes
+            for cp in resp.get("CommonPrefixes", []):
+                sub = cp["Prefix"]
+                result = _search(sub)
+                if result is not None:
+                    return result
+            return None
+
+        found = _search()
+        if found is not None:
+            self._log(f"Discovered prefix '{found}' for pattern '{filename_pattern}'")
+        else:
+            self._log(f"No prefix found for pattern '{filename_pattern}'", "warning")
+        return found
+
     def list_firmware_files(
         self,
         bucket_name: str,
@@ -214,6 +268,7 @@ class AWSService:
         secret_access_key: str = None,
         region: str = None,
         store_as: str = None,
+        discover_prefix: bool = False,
     ) -> List[str]:
         """
         List firmware files from S3 bucket with filtering and optional download.
@@ -238,6 +293,14 @@ class AWSService:
             List of URLs for the matching files
         """
         self._get_s3_clients(bucket_name, access_key_id, secret_access_key, region)
+
+        if discover_prefix and not folder_prefix and filename_pattern:
+            folder_prefix = self.discover_prefix(
+                bucket_name, filename_pattern,
+                access_key_id=access_key_id,
+                secret_access_key=secret_access_key,
+                region=region,
+            )
 
         object_urls = []
         cloudfront_urls = []
@@ -384,6 +447,7 @@ class AWSService:
         store_filename_as: str = None,
         store_version_as: str = None,
         store_url_as: str = None,
+        discover_prefix: bool = False,
     ) -> Dict[str, Any]:
         """
         Get the latest (or second-to-last) firmware file from S3.
@@ -407,6 +471,14 @@ class AWSService:
             Dict with 'filename', 'version', and 'url' keys
         """
         self._get_s3_clients(bucket_name, access_key_id, secret_access_key, region)
+
+        if discover_prefix and not folder_prefix and filename_pattern:
+            folder_prefix = self.discover_prefix(
+                bucket_name, filename_pattern,
+                access_key_id=access_key_id,
+                secret_access_key=secret_access_key,
+                region=region,
+            )
 
         try:
             # Get objects
