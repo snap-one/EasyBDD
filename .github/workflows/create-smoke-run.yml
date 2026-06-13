@@ -1,0 +1,41 @@
+name: Create Regression Smoke Run
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  create-run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install easy_bdd
+        run: pip install -e . --quiet
+
+      - name: Create TestRail Regression Smoke Run
+        env:
+          TESTRAIL_URL: ${{ secrets.TESTRAIL_URL }}
+          TESTRAIL_USERNAME: ${{ secrets.TESTRAIL_USERNAME }}
+          TESTRAIL_API_KEY: ${{ secrets.TESTRAIL_API_KEY }}
+        run: |
+          python -m easy_bdd testrail-create-run 59 106662 \
+            --name "EASY_BDD: Regression Smoke Test" \
+            --description "$(cat <<EOF
+          Auto-created by GitHub Actions
+
+          Commit : ${{ github.sha }}
+          Branch : ${{ github.ref_name }}
+          Author : ${{ github.actor }}
+          Message: ${{ github.event.head_commit.message }}
+          Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          )"
