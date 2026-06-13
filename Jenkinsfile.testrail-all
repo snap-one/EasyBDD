@@ -35,6 +35,7 @@ pipeline {
                     def branches = TESTRAIL_PROJECTS.collectEntries { projectId, projectName ->
                         ["${projectName} (${projectId})": {
                             ws(WORKSPACE) {
+                                echo ">>> Running: ${projectName} (${projectId})"
                                 sh """#!/bin/bash
                                     set -a && . ${WORKSPACE}/.env && set +a
                                     . ${WORKSPACE}/env/bin/activate
