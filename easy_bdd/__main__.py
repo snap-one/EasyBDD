@@ -458,9 +458,64 @@ Examples:
     )
     convert_parser.add_argument(
         "--format-type",
-        choices=["playwright", "selenium", "cypress", "puppeteer", "katalon", "auto"],
+        choices=["playwright", "selenium", "cypress", "puppeteer", "katalon", "chrome-devtools", "auto"],
         default="auto",
         help="Input format type (default: auto-detect)",
+    )
+
+    # Selector audit command
+    audit_parser = subparsers.add_parser(
+        "selector-audit",
+        help="Scan test YAML files for CSS/XPath selectors that could be role-based",
+    )
+    audit_parser.add_argument(
+        "path",
+        nargs="?",
+        default="tests/cases",
+        help="Directory to scan (default: tests/cases)",
+    )
+    audit_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="Auto-upgrade selectors in-place (writes files)",
+    )
+
+    # Record and upload command
+    record_parser = subparsers.add_parser(
+        "record",
+        help="Launch Playwright codegen, convert recording, and optionally upload to TestRail",
+    )
+    record_parser.add_argument(
+        "url",
+        nargs="?",
+        default="",
+        help="Starting URL for the browser recording",
+    )
+    record_parser.add_argument(
+        "--name",
+        help="Test name (default: derived from recorded actions)",
+    )
+    record_parser.add_argument(
+        "--output",
+        help="Output YAML path (default: tests/cases/<name>.yaml)",
+    )
+    record_parser.add_argument(
+        "--testrail-section",
+        metavar="SECTION_ID",
+        type=int,
+        help="TestRail section ID to upload the case to",
+    )
+    record_parser.add_argument(
+        "--testrail-suite",
+        metavar="SUITE_ID",
+        type=int,
+        help="TestRail suite ID — uploads to the first section in the suite (or creates one)",
+    )
+    record_parser.add_argument(
+        "--testrail-project",
+        metavar="PROJECT_ID",
+        type=int,
+        help="TestRail project ID (required with --testrail-suite)",
     )
 
     args = parser.parse_args()
@@ -492,6 +547,10 @@ Examples:
             return testrail_convert(args)
         elif args.command == "mcp-serve":
             return mcp_serve(args)
+        elif args.command == "selector-audit":
+            return selector_audit(args)
+        elif args.command == "record":
+            return record_and_upload(args)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -528,6 +587,279 @@ def convert_recording(args):
     except Exception as e:
         print(f"Error converting file: {e}", file=sys.stderr)
         return 1
+
+
+def selector_audit(args) -> int:
+    """Scan test YAML files for CSS/XPath selectors that could be role-based."""
+    import yaml
+    from .core.recorder_converter import RecorderConverter
+
+    search_dir = Path(args.path)
+    if not search_dir.exists():
+        print(f"Directory not found: {search_dir}", file=sys.stderr)
+        return 1
+
+    yaml_files = sorted(search_dir.rglob("*.yaml")) + sorted(search_dir.rglob("*.yml"))
+
+    SELECTOR_FIELDS = {"selector", "field"}
+    XPATH_PATTERNS = [r"^//", r"^xpath=", r"\[contains\(", r"following::", r"preceding::"]
+    CSS_PATTERNS = [r"^#\w", r"^\.\w", r"^\w[\w-]*\[", r"^\w[\w-]*#\w", r"^input\b", r"^button\b", r"^a\b", r"^select\b", r"^textarea\b"]
+
+    findings = []
+
+    for yaml_file in yaml_files:
+        try:
+            with open(yaml_file) as f:
+                content = yaml.safe_load(f)
+        except Exception:
+            continue
+
+        if not isinstance(content, dict):
+            continue
+
+        all_steps = (
+            content.get("steps", [])
+            + content.get("setup", [])
+            + content.get("cleanup", [])
+        )
+
+        for i, step in enumerate(all_steps):
+            if not isinstance(step, dict):
+                continue
+            for field in SELECTOR_FIELDS:
+                val = step.get(field)
+                if not val or not isinstance(val, str):
+                    continue
+                if step.get("role") or step.get("label") or step.get("text"):
+                    continue
+                is_xpath = any(re.search(p, val) for p in XPATH_PATTERNS)
+                is_css = any(re.search(p, val) for p in CSS_PATTERNS)
+                if is_xpath or is_css:
+                    findings.append({
+                        "file": yaml_file,
+                        "step_index": i,
+                        "field": field,
+                        "selector": val,
+                        "kind": "xpath" if is_xpath else "css",
+                        "step": step,
+                    })
+
+    if not findings:
+        print("No fragile CSS/XPath selectors found.")
+        return 0
+
+    converter = RecorderConverter()
+
+    if args.fix:
+        # Group by file and rewrite
+        from collections import defaultdict
+        import yaml as yaml_mod
+
+        by_file = defaultdict(list)
+        for f in findings:
+            by_file[f["file"]].append(f)
+
+        fixed_total = 0
+        for yaml_file, file_findings in by_file.items():
+            with open(yaml_file) as f:
+                content = yaml_mod.safe_load(f)
+
+            sections = ["steps", "setup", "cleanup"]
+            fixed_in_file = 0
+            for section in sections:
+                steps = content.get(section, [])
+                for i, step in enumerate(steps):
+                    upgraded = converter.upgrade_step_to_role_selector(step)
+                    if upgraded is not step and upgraded != step:
+                        steps[i] = upgraded
+                        fixed_in_file += 1
+
+            if fixed_in_file:
+                with open(yaml_file, "w") as f:
+                    yaml_mod.dump(content, f, default_flow_style=False, sort_keys=False)
+                print(f"  Fixed {fixed_in_file} selector(s) in {yaml_file}")
+                fixed_total += fixed_in_file
+
+        print(f"\nUpgraded {fixed_total} selector(s) across {len(by_file)} file(s).")
+        return 0
+
+    # Report only
+    print(f"\nFound {len(findings)} CSS/XPath selector(s) that could be role-based:\n")
+    current_file = None
+    for f in findings:
+        if f["file"] != current_file:
+            print(f"  {f['file']}")
+            current_file = f["file"]
+        upgraded = converter.upgrade_step_to_role_selector(f["step"])
+        suggestion = ""
+        if upgraded.get("role"):
+            suggestion = f"  → role: {upgraded['role']} name: {upgraded.get('name', '?')}"
+        elif upgraded.get("label"):
+            suggestion = f"  → label: {upgraded['label']}"
+        print(f"    Step {f['step_index'] + 1} [{f['kind']}] {f['field']}: {f['selector']}{suggestion}")
+
+    print(f"\nRun with --fix to auto-upgrade selectors in-place.")
+    return 0
+
+
+def record_and_upload(args) -> int:
+    """Launch Playwright codegen, convert recording to YAML, and optionally upload to TestRail."""
+    import subprocess
+    import tempfile
+    import yaml
+
+    from .core.recorder_converter import RecorderConverter
+
+    # 1. Launch playwright codegen into a temp file
+    with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w") as tmp:
+        output_file = tmp.name
+
+    cmd = ["playwright", "codegen", "--output", output_file, "--target", "python-pytest"]
+    if args.url:
+        cmd.append(args.url)
+
+    print("\n[Record] Launching Playwright codegen...")
+    print("  Record your browser steps, then close the browser window to continue.\n")
+
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Recording exited with error: {e}", file=sys.stderr)
+        return 1
+    except FileNotFoundError:
+        print(
+            "playwright command not found.\n"
+            "Install with: pip install playwright && playwright install",
+            file=sys.stderr,
+        )
+        return 1
+
+    # 2. Read and convert
+    try:
+        with open(output_file) as f:
+            code = f.read()
+    except Exception as e:
+        print(f"Could not read recording: {e}", file=sys.stderr)
+        return 1
+
+    if not code.strip():
+        print("No steps were recorded.")
+        return 1
+
+    converter = RecorderConverter()
+    test_data = converter.convert_playwright_native_code(code)
+    if args.name:
+        test_data["name"] = args.name
+
+    # 3. Preview
+    steps = test_data.get("steps", [])
+    print(f"\n[Preview] '{test_data['name']}' — {len(steps)} step(s):\n")
+    for i, step in enumerate(steps, 1):
+        action = step.get("action", "?")
+        parts = []
+        for k in ("url", "role", "name", "label", "text", "selector", "field", "value", "key"):
+            if step.get(k):
+                parts.append(f"{k}={step[k]!r}")
+        print(f"  {i:2}. {action}  {', '.join(parts)}")
+
+    if not steps:
+        print("No recognizable steps found in the recording.")
+        return 1
+
+    # 4. Save locally (always)
+    output_path = Path(
+        args.output
+        or f"tests/cases/{re.sub(r'[^a-z0-9]+', '_', test_data['name'].lower()).strip('_')}.yaml"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        yaml.dump(test_data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    print(f"\n[Saved] {output_path}")
+
+    section_id = getattr(args, "testrail_section", None)
+    suite_id = getattr(args, "testrail_suite", None)
+    project_id = args.testrail_project
+
+    if not section_id and not suite_id and not project_id:
+        print("\nTip: use --testrail-project <id>, --testrail-suite <id>, or --testrail-section <id> to upload as a TestRail case.")
+        return 0
+
+    # 5. Upload to TestRail
+    from .services.testrail_service import TestRailService, TestRailError
+
+    try:
+        tr = TestRailService()
+    except TestRailError as e:
+        print(f"TestRail configuration error: {e}", file=sys.stderr)
+        print("Set TESTRAIL_URL, TESTRAIL_USERNAME, and TESTRAIL_API_KEY in .env", file=sys.stderr)
+        return 1
+
+    WEB_UI_SECTION = "Web UI Tests"
+
+    def _get_or_create_section(proj_id, s_id):
+        """Find the 'Web UI Tests' section in a suite, or create it."""
+        try:
+            sections = tr.get_sections(proj_id, suite_id=s_id)
+        except Exception as e:
+            print(f"Could not fetch sections for suite S{s_id}: {e}", file=sys.stderr)
+            return None
+        match = next((s for s in sections if s["name"] == WEB_UI_SECTION), None)
+        if match:
+            print(f"[TestRail] Using existing section '{WEB_UI_SECTION}' (ID {match['id']}) in suite S{s_id}")
+            return match["id"]
+        try:
+            section = tr.add_section(proj_id, suite_id=s_id, name=WEB_UI_SECTION)
+            print(f"[TestRail] Created section '{WEB_UI_SECTION}' (ID {section['id']}) in suite S{s_id}")
+            return section["id"]
+        except Exception as e:
+            print(f"Could not create section in suite S{s_id}: {e}", file=sys.stderr)
+            return None
+
+    if section_id:
+        # Explicit section — use it directly
+        pass
+    elif suite_id:
+        # Suite given — find or create "Web UI Tests" subsection
+        if not project_id:
+            print("--testrail-project PROJECT_ID is required when using --testrail-suite", file=sys.stderr)
+            return 1
+        section_id = _get_or_create_section(project_id, suite_id)
+        if section_id is None:
+            return 1
+    else:
+        # Project only — create a new suite named after the test, then "Web UI Tests" inside it
+        if not project_id:
+            print("--testrail-project PROJECT_ID is required", file=sys.stderr)
+            return 1
+        suite_name = test_data["name"]
+        try:
+            new_suite = tr.add_suite(project_id, name=suite_name)
+            suite_id = new_suite["id"]
+            print(f"[TestRail] Created suite '{suite_name}' (S{suite_id}) in project {project_id}")
+        except Exception as e:
+            print(f"Could not create suite in project {project_id}: {e}", file=sys.stderr)
+            return 1
+        section_id = _get_or_create_section(project_id, suite_id)
+        if section_id is None:
+            return 1
+
+    steps_yaml = yaml.dump(steps, default_flow_style=False, allow_unicode=True)
+    preconditions = f"# Auto-recorded via easy_bdd record\n\n```yaml\n{steps_yaml}```"
+
+    try:
+        case = tr.add_case(
+            section_id,
+            title=test_data["name"],
+            custom_preconds=preconditions,
+            custom_steps=f"tag: browser\nfile: {output_path}",
+            type_id=1,
+        )
+        print(f"[TestRail] Case created: C{case['id']} — {case['title']}")
+    except Exception as e:
+        print(f"TestRail upload failed: {e}", file=sys.stderr)
+        return 1
+
+    return 0
 
 
 def export_test_results(result, output_path):

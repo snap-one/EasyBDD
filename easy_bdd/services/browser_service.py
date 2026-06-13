@@ -172,6 +172,84 @@ class BrowserService:
         
         return value
 
+    def _try_heal_selector(
+        self,
+        selector: str,
+        action: str,
+        value: str = None,
+        **kwargs,
+    ) -> bool:
+        """
+        When a CSS/XPath selector fails, attempt semantic fallbacks in priority order:
+          1. aria-label / placeholder → get_by_label
+          2. button/link text → get_by_role
+          3. visible text → get_by_text
+        Logs which fallback succeeded so users know what to update.
+        Returns True if a fallback worked, False otherwise.
+        action is "click" or "fill".
+        """
+        import re as _re
+
+        if not self.playwright_page or not selector:
+            return False
+
+        healed_via = None
+
+        # Extract candidates from the selector string
+        aria = _re.search(r'\[aria-label=["\']([^"\']+)["\']\]', selector)
+        placeholder = _re.search(r'\[placeholder=["\']([^"\']+)["\']\]', selector)
+        has_text = _re.search(r':has-text\(["\']([^"\']+)["\']\)', selector)
+        btn_value = _re.search(r'\[value=["\']([^"\']+)["\']\]', selector)
+        is_button = bool(_re.search(r'^button\b|\[type=["\']?submit["\']?\]|\[type=["\']?button["\']?\]', selector, _re.I))
+        is_link = bool(_re.match(r'^a\b', selector, _re.I))
+
+        fallbacks = []
+
+        if aria:
+            fallbacks.append(("label", aria.group(1)))
+        if placeholder:
+            fallbacks.append(("label", placeholder.group(1)))
+        if has_text and is_button:
+            fallbacks.append(("role_button", has_text.group(1)))
+        if has_text and is_link:
+            fallbacks.append(("role_link", has_text.group(1)))
+        if btn_value and is_button:
+            fallbacks.append(("role_button", btn_value.group(1)))
+        if has_text:
+            fallbacks.append(("text", has_text.group(1)))
+
+        for kind, text in fallbacks:
+            try:
+                if action == "click":
+                    if kind == "label":
+                        self.playwright_page.get_by_label(text).click(timeout=3000, **kwargs)
+                    elif kind == "role_button":
+                        self.playwright_page.get_by_role("button", name=text).click(timeout=3000, **kwargs)
+                    elif kind == "role_link":
+                        self.playwright_page.get_by_role("link", name=text).click(timeout=3000, **kwargs)
+                    else:
+                        self.playwright_page.get_by_text(text, exact=False).click(timeout=3000, **kwargs)
+                else:  # fill
+                    fill_val = value or ""
+                    if kind == "label":
+                        self.playwright_page.get_by_label(text).fill(fill_val, timeout=3000)
+                    elif kind in ("role_button", "role_link"):
+                        continue  # buttons/links aren't fillable
+                    else:
+                        self.playwright_page.get_by_text(text, exact=False).fill(fill_val, timeout=3000)
+
+                healed_via = f"{kind}={text!r}"
+                break
+            except Exception:
+                continue
+
+        if healed_via:
+            print(f"      [HEALED] Selector {selector!r} failed; used {healed_via} instead.")
+            print(f"      [HEALED] Consider updating the selector to avoid future healing.")
+            return True
+
+        return False
+
     def set_mcp_mode(self, enabled: bool = True):
         """Enable or disable MCP mode for recording"""
         if enabled:
@@ -719,8 +797,12 @@ class BrowserService:
                     )
                     return
                 else:
-                    # Try direct CSS selector
-                    self.playwright_page.click(selector, timeout=5000, **click_options)
+                    # Try direct CSS selector; fall back to semantic healing on failure
+                    try:
+                        self.playwright_page.click(selector, timeout=5000, **click_options)
+                    except Exception as css_err:
+                        if not self._try_heal_selector(selector, "click", **click_options):
+                            raise
                     return
 
             elif text:
@@ -898,6 +980,8 @@ class BrowserService:
             return
         except Exception as e:
             print(f"      Direct selector failed: {e}")
+            if self._try_heal_selector(field, "fill", value=value):
+                return
 
         # Extract field name for smart detection
         field_name = field
