@@ -2022,7 +2022,7 @@ class TestRunner:
                 )
 
             # Handle WebSocket connection
-            if "connect" in action_lower:
+            if "connect" in action_lower and "disconnect" not in action_lower:
                 # Extract connection parameters
                 server_url = params.get("url", "") or params.get("server_url", "")
                 device_id = params.get("device_id", "")
