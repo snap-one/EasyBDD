@@ -259,6 +259,12 @@ Examples:
         dest="no_datalake",
         help="Skip posting results to the datalake for this run",
     )
+    tr_parser.add_argument(
+        "--find-only",
+        action="store_true",
+        dest="find_only",
+        help="Check if an active run exists and write properties file, without executing tests",
+    )
 
     # TestRail convert command
     trc_parser = subparsers.add_parser(
@@ -1310,6 +1316,20 @@ def testrail_run(args) -> int:
     )
 
     print(f"\nScanning TestRail project {args.project_id} for an active run...")
+
+    if getattr(args, "find_only", False):
+        found = runner.find_run(args.project_id)
+        if found is None:
+            print(f"No active run found for project {args.project_id}")
+            return 0
+        print(f"Found run: {found['run_name']}")
+        props_path = Path(f"reports/run_{args.project_id}.properties")
+        props_path.parent.mkdir(parents=True, exist_ok=True)
+        props_path.write_text(
+            f"RUN_NAME={found['run_name']}\nRUN_URL={found['run_url']}\n", encoding="utf-8"
+        )
+        return 0
+
     result = runner.run(
         project_id=args.project_id,
         run_id=args.run_id,
@@ -1321,8 +1341,6 @@ def testrail_run(args) -> int:
         print(f"\nSkipped: {result.get('reason', 'no run found')}")
         return 0
 
-    # Write a per-project Jenkins-readable properties file so parallel stages
-    # don't overwrite each other and the pipeline can update the build name.
     run_name = result.get("run_name", "")
     run_url  = result.get("run_url", "")
     if run_name:

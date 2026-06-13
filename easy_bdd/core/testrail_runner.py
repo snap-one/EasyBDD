@@ -752,6 +752,21 @@ class TestRailRunner:
         """
         return self._lifecycle(project_id, run_id, verbose, no_datalake=no_datalake)
 
+    def find_run(self, project_id: int) -> Optional[Dict[str, Any]]:
+        """Find an active EASY_BDD: run without executing tests.
+
+        Returns dict with run_id, run_name, run_url if found, else None.
+        """
+        run = self._find_run(project_id)
+        if run is None:
+            return None
+        testrail_base = os.getenv("TESTRAIL_URL", "").rstrip("/")
+        return {
+            "run_id": run["id"],
+            "run_name": run["name"],
+            "run_url": f"{testrail_base}/index.php?/runs/view/{run['id']}",
+        }
+
     # ------------------------------------------------------------------ #
     # Lifecycle phases                                                     #
     # ------------------------------------------------------------------ #
