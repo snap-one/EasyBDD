@@ -144,7 +144,8 @@ class TestRunner:
         # action_registry.load_action_modules(config)
 
     def run(
-        self, test_path: Path, tags: List[str] = None, parallel_workers: int = 1, record_video: bool = False
+        self, test_path: Path, tags: List[str] = None, parallel_workers: int = 1, record_video: bool = False,
+        report_name: str = None,
     ) -> TestResult:
         """Run tests from the specified path"""
         self._record_video = record_video
@@ -322,6 +323,7 @@ class TestRunner:
             failed=failed,
             execution_time=execution_time,
             test_file_name=test_file_name,
+            report_name=report_name,
         )
         print(f"\n📊 HTML Report generated: {report_path}")
         print(f"   Open with: open {report_path}")
@@ -1398,6 +1400,14 @@ class TestRunner:
             # Telnet actions
             if action_lower.startswith("telnet"):
                 return self._handle_telnet_action(action, step_params, variables)
+
+            # SSH actions (stateful Paramiko sessions — distinct from command.ssh)
+            if action_lower.startswith("ssh."):
+                return self._handle_ssh_action(action, step_params, variables)
+
+            # LGIP IR control actions
+            if action_lower.startswith("lgip"):
+                return self._handle_lgip_action(action, step_params, variables)
 
             # WebSocket actions
             if action_lower.startswith("websocket") or action_lower.startswith("ws."):
@@ -3087,6 +3097,50 @@ class TestRunner:
             if hasattr(self.config, "set_variable"):
                 self.config.set_variable(store_as, result, "runtime_data")
         print(f"      telnet: {action.split('.')[-1]} OK")
+        return True
+
+    def _handle_ssh_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle SSH actions (ssh.connect, ssh.command, ssh.disconnect)."""
+        from ..services.ssh_service import SSHService
+        params = self._get_params(step_params)
+        service = SSHService(self._connection_pool)
+        result = service.execute(action, params, variables)
+        if result is False:
+            return False
+        if isinstance(result, str) and result:
+            variables["last_response"] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable("last_response", result, "runtime_data")
+        store_as = params.get("store_as", "")
+        if store_as and result is not None:
+            variables[store_as] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, result, "runtime_data")
+        print(f"      ssh: {action.split('.')[-1]} OK")
+        return True
+
+    def _handle_lgip_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle LGIP IR control actions (lgip.connect, lgip.send_keycode, lgip.disconnect)."""
+        from ..services.lgip_service import LGIPService
+        params = self._get_params(step_params)
+        service = LGIPService(self._connection_pool)
+        result = service.execute(action, params, variables)
+        if result is False:
+            return False
+        if isinstance(result, str) and result:
+            variables["last_response"] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable("last_response", result, "runtime_data")
+        store_as = params.get("store_as", "")
+        if store_as and result is not None:
+            variables[store_as] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, result, "runtime_data")
+        print(f"      lgip: {action.split('.')[-1]} OK")
         return True
 
     def _handle_websocket_action(

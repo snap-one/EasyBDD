@@ -224,6 +224,7 @@ class HTMLReporter:
         failed: int,
         execution_time: float,
         test_file_name: str = "test",
+        report_name: str = None,
     ) -> Path:
         """Generate HTML report from test results"""
 
@@ -1102,9 +1103,15 @@ class HTMLReporter:
 </html>
 """
 
-        # Write HTML file with test file name prefix
+        # Build filename slug: use report_name if provided, else test_file_name
+        import re as _re
+        raw_name = report_name or test_file_name or "test"
+        slug = _re.sub(r"[^\w\-]", "_", raw_name)   # replace non-word chars with _
+        slug = _re.sub(r"_+", "_", slug).strip("_")  # collapse runs of underscores
+        slug = slug[:80]                              # cap length
+
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        report_path = self.output_dir / f"{test_file_name}_report_{timestamp_str}.html"
+        report_path = self.output_dir / f"{slug}_report_{timestamp_str}.html"
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(html_content)
 
@@ -1112,6 +1119,7 @@ class HTMLReporter:
         json_data = {
             "timestamp": timestamp,
             "test_file": test_file_name,
+            "report_name": raw_name,
             "total_tests": total_tests,
             "passed": passed,
             "failed": failed,
@@ -1119,7 +1127,7 @@ class HTMLReporter:
             "execution_time": execution_time,
             "tests": test_details,
         }
-        json_path = self.output_dir / f"{test_file_name}_results_{timestamp_str}.json"
+        json_path = self.output_dir / f"{slug}_results_{timestamp_str}.json"
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(json_data, f, indent=2)
 

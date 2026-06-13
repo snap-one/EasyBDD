@@ -831,7 +831,7 @@ class TestRailRunner:
 
         while True:
             passed, failed, skipped = self._execute_cases(
-                classified, static_extra, run_id, verbose
+                classified, static_extra, run_id, verbose, run_title=run["name"]
             )
             total_passed += passed
             total_failed += failed
@@ -1293,6 +1293,7 @@ class TestRailRunner:
         static_extra: Dict[str, Any],
         run_id: int,
         verbose: bool,
+        run_title: str = "",
     ) -> Tuple[int, int, int]:
         """Run Setup → Test → Teardown cases in order, posting results to TR in real-time.
 
@@ -1390,9 +1391,15 @@ class TestRailRunner:
 
                 start_time = time.time()
 
+                # Build a human-readable filename slug: RunTitle_BuildNum_CaseTitle
+                import os as _os, re as _re
+                _build_num = _os.getenv("BUILD_NUMBER", "")
+                _name_parts = [p for p in [run_title, f"build{_build_num}" if _build_num else "", title] if p]
+                _report_name = _re.sub(r"[^\w\-]", "_", "_".join(_name_parts))
+
                 report_paths: List[Path] = []
                 if role == "inline":
-                    test_passed, comment_lines, report_paths = self._run_feature(case, injected_vars, verbose)
+                    test_passed, comment_lines, report_paths = self._run_feature(case, injected_vars, verbose, report_name=_report_name)
                 else:
                     yaml_files = self._resolve(body, title, injected_vars)
                     if not yaml_files:
@@ -1425,7 +1432,7 @@ class TestRailRunner:
                             print(f"    FAIL — {comment.splitlines()[0]}")
                         continue
                     test_passed, comment_lines, report_paths = self._run_yaml_files(
-                        yaml_files, injected_vars, verbose
+                        yaml_files, injected_vars, verbose, report_name=_report_name
                     )
 
                 elapsed = _format_elapsed(time.time() - start_time)
@@ -1499,6 +1506,7 @@ class TestRailRunner:
         yaml_files: List[Path],
         injected_vars: Dict[str, Any],
         verbose: bool,
+        report_name: str = None,
     ) -> Tuple[bool, List[str]]:
         """Execute a list of YAML files; return (all_passed, comment_lines, report_paths)."""
         all_passed = True
@@ -1506,7 +1514,7 @@ class TestRailRunner:
         report_paths: List[Path] = []
 
         for yaml_path in yaml_files:
-            result = self._run_single(yaml_path, injected_vars, verbose)
+            result = self._run_single(yaml_path, injected_vars, verbose, report_name=report_name)
             if result is None:
                 all_passed = False
                 comment_lines.append(f"ERROR: could not execute {yaml_path.name}")
@@ -1539,6 +1547,7 @@ class TestRailRunner:
         yaml_path: Path,
         injected_vars: Dict[str, Any],
         verbose: bool,
+        report_name: str = None,
     ) -> Optional[TestResult]:
         try:
             # Inject TestRail variables into the collection scope.
@@ -1553,7 +1562,7 @@ class TestRailRunner:
                     )
 
             runner = TestRunner(self._config, log_dir=self._artifact_dir)
-            return runner.run(yaml_path)
+            return runner.run(yaml_path, report_name=report_name)
         except Exception as exc:
             if verbose:
                 print(f"    ERROR running {yaml_path.name}: {exc}")
@@ -1647,6 +1656,7 @@ class TestRailRunner:
         case: Dict[str, Any],
         injected_vars: Dict[str, Any],
         verbose: bool,
+        report_name: str = None,
     ) -> Tuple[bool, List[str], List[Path]]:
         """Execute a Feature: case by materialising it as a temp YAML file."""
         import yaml as _yaml
@@ -1722,7 +1732,7 @@ class TestRailRunner:
             with open(tmp_path, "w", encoding="utf-8") as f:
                 _yaml.dump(test_dict, f, allow_unicode=True, default_flow_style=False,
                            sort_keys=False)
-            return self._run_yaml_files([tmp_path], injected_vars, verbose)
+            return self._run_yaml_files([tmp_path], injected_vars, verbose, report_name=report_name)
         finally:
             try:
                 tmp_path.unlink(missing_ok=True)
