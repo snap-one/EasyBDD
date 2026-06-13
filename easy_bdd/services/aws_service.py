@@ -198,56 +198,100 @@ class AWSService:
             self._regex_cache[pattern] = re.compile(pattern)
         return self._regex_cache[pattern]
 
+    def _discover_prefix_from_repo(
+        self,
+        filename_pattern: str,
+        repo_root: str = None,
+    ) -> str:
+        """
+        Derive an S3 folder prefix by walking the local repo directory tree and
+        finding the first folder whose name contains filename_pattern.  The
+        returned value is the path relative to repo_root (using forward slashes),
+        which mirrors the expected S3 key structure.
+
+        Args:
+            filename_pattern: Pattern to match against directory names
+            repo_root: Root of the local repo checkout (defaults to cwd)
+
+        Returns:
+            Relative folder path (e.g. "Firmware/wattbox/vps") or None if not found.
+        """
+        root = Path(repo_root or os.getcwd())
+        pattern_lower = filename_pattern.lower()
+
+        for dirpath, dirnames, _ in os.walk(root):
+            # Skip hidden dirs and virtual-env/cache dirs
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith(".") and d not in ("env", "venv", "__pycache__", "node_modules")
+            ]
+            folder = Path(dirpath)
+            if pattern_lower in folder.name.lower():
+                rel = folder.relative_to(root)
+                prefix = str(rel).replace(os.sep, "/")
+                self._log(f"Repo-based prefix discovery: found '{prefix}' for pattern '{filename_pattern}'")
+                return prefix
+
+        return None
+
     def discover_prefix(
         self,
         bucket_name: str,
         filename_pattern: str,
+        repo_root: str = None,
         access_key_id: str = None,
         secret_access_key: str = None,
         region: str = None,
     ) -> str:
         """
-        Discover the S3 prefix (folder path) that contains files matching
-        filename_pattern by walking the bucket's top-level directory tree.
+        Discover the S3 folder prefix for files matching filename_pattern.
+
+        Strategy (in order):
+        1. Walk the local repo directory tree — if a folder name contains
+           filename_pattern, use its relative path as the prefix.  This is fast
+           and keeps S3 prefixes aligned with the repo layout.
+        2. Fall back to scanning the S3 bucket using list_objects_v2 with
+           Delimiter='/' so only one level is fetched at a time.
 
         Args:
-            bucket_name: S3 bucket name
-            filename_pattern: Pattern to match in filenames
+            bucket_name: S3 bucket name (used only for S3 fallback)
+            filename_pattern: Pattern to match in folder/file names
+            repo_root: Local repo root (defaults to cwd)
             access_key_id: AWS Access Key ID
             secret_access_key: AWS Secret Access Key
             region: AWS region
 
         Returns:
-            The deepest common prefix that contains matching files, or "" if
-            files are found but share no common prefix, or None if no match.
+            Prefix string (may be "") or None if nothing matched.
         """
+        # 1. Try repo directory structure first
+        repo_prefix = self._discover_prefix_from_repo(filename_pattern, repo_root)
+        if repo_prefix is not None:
+            self._log(f"Using repo-derived prefix: '{repo_prefix}'")
+            return repo_prefix
+
+        self._log(f"No repo folder matched '{filename_pattern}', falling back to S3 scan")
+
+        # 2. Fall back to S3 bucket walk
         self._get_s3_clients(bucket_name, access_key_id, secret_access_key, region)
 
-        paginator = self._s3_client.get_paginator("list_objects_v2")
-
         def _search(prefix=""):
-            """Recursively walk prefixes, return first matching one."""
             resp = self._s3_client.list_objects_v2(
                 Bucket=bucket_name, Prefix=prefix, Delimiter="/"
             )
-            # Check files at this level
             for obj in resp.get("Contents", []):
-                key = obj["Key"]
-                filename = key.split("/")[-1]
+                filename = obj["Key"].split("/")[-1]
                 if filename_pattern.lower() in filename.lower():
-                    # Return the folder portion (everything up to the last slash)
                     return prefix if prefix else ""
-            # Recurse into sub-prefixes
             for cp in resp.get("CommonPrefixes", []):
-                sub = cp["Prefix"]
-                result = _search(sub)
+                result = _search(cp["Prefix"])
                 if result is not None:
                     return result
             return None
 
         found = _search()
         if found is not None:
-            self._log(f"Discovered prefix '{found}' for pattern '{filename_pattern}'")
+            self._log(f"S3-discovered prefix '{found}' for pattern '{filename_pattern}'")
         else:
             self._log(f"No prefix found for pattern '{filename_pattern}'", "warning")
         return found
@@ -269,6 +313,7 @@ class AWSService:
         region: str = None,
         store_as: str = None,
         discover_prefix: bool = False,
+        repo_root: str = None,
     ) -> List[str]:
         """
         List firmware files from S3 bucket with filtering and optional download.
@@ -297,6 +342,7 @@ class AWSService:
         if discover_prefix and not folder_prefix and filename_pattern:
             folder_prefix = self.discover_prefix(
                 bucket_name, filename_pattern,
+                repo_root=repo_root,
                 access_key_id=access_key_id,
                 secret_access_key=secret_access_key,
                 region=region,
@@ -448,6 +494,7 @@ class AWSService:
         store_version_as: str = None,
         store_url_as: str = None,
         discover_prefix: bool = False,
+        repo_root: str = None,
     ) -> Dict[str, Any]:
         """
         Get the latest (or second-to-last) firmware file from S3.
@@ -475,6 +522,7 @@ class AWSService:
         if discover_prefix and not folder_prefix and filename_pattern:
             folder_prefix = self.discover_prefix(
                 bucket_name, filename_pattern,
+                repo_root=repo_root,
                 access_key_id=access_key_id,
                 secret_access_key=secret_access_key,
                 region=region,

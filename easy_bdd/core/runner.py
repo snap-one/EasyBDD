@@ -2974,6 +2974,7 @@ class TestRunner:
                     secret_access_key=params.get("secret_access_key"),
                     region=params.get("region"),
                     discover_prefix=params.get("discover_prefix", False),
+                    repo_root=params.get("repo_root") or os.getcwd(),
                 )
 
                 # Store URLs in variable if requested
@@ -3004,6 +3005,7 @@ class TestRunner:
                     secret_access_key=params.get("secret_access_key"),
                     region=params.get("region"),
                     discover_prefix=params.get("discover_prefix", False),
+                    repo_root=params.get("repo_root") or os.getcwd(),
                 )
 
                 # Store individual values if requested
