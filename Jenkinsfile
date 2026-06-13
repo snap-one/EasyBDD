@@ -1,5 +1,14 @@
-// ── Configure project IDs here ──────────────────────────────────────────────
-def TESTRAIL_PROJECTS = [50, 81, 78, 77, 79, 80, 76, 74, 59]   // add or remove project IDs as needed
+// ── Configure projects here (id: 'Name') ────────────────────────────────────
+def TESTRAIL_PROJECTS = [
+    59: 'JDM Automation',
+    74: 'Audio',
+    76: 'Routers',
+    77: 'Power',
+    78: 'Surveillance',
+    79: 'Switches',
+    80: 'Access Points',
+    81: 'Media Distribution',
+]
 // ────────────────────────────────────────────────────────────────────────────
 
 def WORKSPACE = '/var/lib/jenkins/workspace/EASY_BDD'
@@ -22,9 +31,9 @@ pipeline {
         stage('Run TestRail Projects') {
             steps {
                 script {
-                    // Build one parallel branch per project ID
-                    def branches = TESTRAIL_PROJECTS.collectEntries { projectId ->
-                        ["Project ${projectId}": {
+                    // Build one parallel branch per project, labelled by name
+                    def branches = TESTRAIL_PROJECTS.collectEntries { projectId, projectName ->
+                        ["${projectName} (${projectId})": {
                             ws(WORKSPACE) {
                                 sh """#!/bin/bash
                                     set -a && . ${WORKSPACE}/.env && set +a
@@ -45,7 +54,7 @@ pipeline {
             script {
                 // Collect run names from every project that found an active run
                 def found = []
-                TESTRAIL_PROJECTS.each { projectId ->
+                TESTRAIL_PROJECTS.each { projectId, projectName ->
                     def propsFile = "${WORKSPACE}/reports/run_${projectId}.properties"
                     if (fileExists(propsFile)) {
                         def props = readProperties file: propsFile
