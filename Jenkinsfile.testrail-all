@@ -52,12 +52,13 @@ pipeline {
     post {
         always {
             script {
-                // Collect run names from every project that found an active run
                 def found = []
                 TESTRAIL_PROJECTS.each { projectId, projectName ->
                     def propsFile = "${WORKSPACE}/reports/run_${projectId}.properties"
+                    echo "Checking: ${propsFile} — exists: ${fileExists(propsFile)}"
                     if (fileExists(propsFile)) {
                         def props = readProperties file: propsFile
+                        echo "  RUN_NAME=${props['RUN_NAME']} RUN_URL=${props['RUN_URL']}"
                         def runName = props['RUN_NAME'] ?: ''
                         def runUrl  = props['RUN_URL']  ?: ''
                         if (runName) {
@@ -69,6 +70,8 @@ pipeline {
                 if (found) {
                     currentBuild.displayName = "#${BUILD_NUMBER} — " + found.collect { "${it.project}: ${it.name}" }.join(' | ')
                     currentBuild.description = found.collect { "${it.project}: <a href=\"${it.url}\">${it.name}</a>" }.join('<br>')
+                } else {
+                    echo "No properties files found — build name unchanged"
                 }
             }
         }
