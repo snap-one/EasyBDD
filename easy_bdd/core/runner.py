@@ -2101,6 +2101,24 @@ class TestRunner:
                         f"      🔍 Verbose logging enabled - full request/response details will be shown"
                     )
 
+                # If a method was specified, call it immediately after connecting
+                method_name = params.get("method", "")
+                if method_name and server_url:
+                    loop2 = asyncio.get_event_loop()
+                    print(f"      📡 Calling {method_name} after connect...")
+                    method_params = params.get("params", {}) or {"deviceId": device_id, "version": 0}
+                    response = loop2.run_until_complete(
+                        ovrc_service.send_request(method_name, method_params)
+                    )
+                    result = response.result if response else None
+                    store_as = params.get("store_as", "")
+                    if store_as:
+                        variables[store_as] = result
+                        variables["last_response"] = result
+                        print(f"      💾 Stored {method_name} response as: {store_as}")
+                    elif result is not None:
+                        variables["last_response"] = result
+
                 return True
 
             # All other WebSocket actions - auto-connect if needed
