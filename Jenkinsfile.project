@@ -20,6 +20,7 @@ pipeline {
             steps {
                 sh """#!/bin/bash
                     cd ${WORKSPACE}
+                    rm -f reports/run_${params.PROJECT_ID}.properties
                     set -a && . .env && set +a
                     . env/bin/activate
                     python -m easy_bdd testrail-run ${params.PROJECT_ID} || true
@@ -39,8 +40,11 @@ pipeline {
                     if (runName) {
                         currentBuild.displayName = "#${BUILD_NUMBER} — ${params.PROJECT_NAME}: ${runName}"
                         currentBuild.description = "<a href=\"${runUrl}\">${runName}</a>"
+                        return
                     }
                 }
+                currentBuild.displayName = "#${BUILD_NUMBER} — No runs found"
+                currentBuild.description = ''
             }
         }
     }

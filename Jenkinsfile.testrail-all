@@ -98,7 +98,8 @@ pipeline {
                 if (dispatched) {
                     currentBuild.displayName = "#${BUILD_NUMBER} — Dispatched: " + dispatched.join(' | ')
                 } else {
-                    currentBuild.displayName = "#${BUILD_NUMBER} — No active runs"
+                    currentBuild.displayName = "#${BUILD_NUMBER} — No runs found"
+                    currentBuild.description = ''
                 }
             }
         }
