@@ -762,9 +762,10 @@ class TestRailRunner:
         else:
             run = self._find_run(project_id)
             if run is None:
+                project_name = self._tr.get_project(project_id).get("name", str(project_id))
                 msg = (
                     f'No "{self._run_prefix}" run with pending tests found '
-                    f"in project {project_id}"
+                    f"in project {project_name}"
                 )
                 if verbose:
                     print(f"\n[TestRail] {msg}")
