@@ -865,10 +865,11 @@ class TestRailRunner:
                 verbose=verbose,
             )
 
+        testrail_base = os.getenv("TESTRAIL_URL", "").rstrip("/")
         return {
             "run_id": run_id,
             "run_name": run["name"],
-            "run_url": f"https://jpdsauto.testrail.io/index.php?/runs/view/{run_id}",
+            "run_url": f"{testrail_base}/index.php?/runs/view/{run_id}",
             "passed": total_passed,
             "failed": total_failed,
             "skipped": total_skipped,
@@ -910,7 +911,7 @@ class TestRailRunner:
                         pass
                     break
 
-            run_url = f"https://jpdsauto.testrail.io/index.php?/runs/view/{run_id}"
+            run_url = f"{os.getenv('TESTRAIL_URL', '').rstrip('/')}/index.php?/runs/view/{run_id}"
 
             dl.datalake_post(
                 test_name=run_title,
