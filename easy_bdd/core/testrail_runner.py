@@ -891,12 +891,13 @@ class TestRailRunner:
                 verbose=verbose,
             )
 
-        # Teams notification (skipped if no_teams var or no webhook configured)
+        # Teams notification — only when tests actually ran (not skipped/empty runs)
+        _tests_ran = (total_passed + total_failed) > 0
         _run_vars2 = self._extract_vars(classified)
         _no_teams = _run_vars2.get("no_teams", False)
         if isinstance(_no_teams, str):
             _no_teams = _no_teams.strip().lower() in ("true", "1", "yes")
-        if not _no_teams:
+        if _tests_ran and not _no_teams:
             self._post_run_to_teams(
                 run_title=run["name"],
                 run_id=run_id,
