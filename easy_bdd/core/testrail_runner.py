@@ -1390,8 +1390,9 @@ class TestRailRunner:
 
                 start_time = time.time()
 
+                report_paths: List[Path] = []
                 if role == "inline":
-                    test_passed, comment_lines = self._run_feature(case, injected_vars, verbose)
+                    test_passed, comment_lines, report_paths = self._run_feature(case, injected_vars, verbose)
                 else:
                     yaml_files = self._resolve(body, title, injected_vars)
                     if not yaml_files:
@@ -1423,7 +1424,7 @@ class TestRailRunner:
                         if verbose:
                             print(f"    FAIL — {comment.splitlines()[0]}")
                         continue
-                    test_passed, comment_lines = self._run_yaml_files(
+                    test_passed, comment_lines, report_paths = self._run_yaml_files(
                         yaml_files, injected_vars, verbose
                     )
 
@@ -1435,8 +1436,20 @@ class TestRailRunner:
                     else TestRailService.STATUS_FAILED
                 )
 
-                self._tr.add_result(test_id, status_id=status_id, comment=comment + jenkins_footer, elapsed=elapsed)
+                result_resp = self._tr.add_result(test_id, status_id=status_id, comment=comment + jenkins_footer, elapsed=elapsed)
                 self._inflight_test_id = None
+
+                # Attach HTML report to the TestRail result
+                result_id = result_resp.get("id") if isinstance(result_resp, dict) else None
+                if result_id and report_paths:
+                    for rp in report_paths:
+                        try:
+                            self._tr.add_attachment_to_result(result_id, str(rp))
+                            if verbose:
+                                print(f"    📎 Attached report to result: {rp.name}")
+                        except Exception as _att_err:
+                            if verbose:
+                                print(f"    ⚠  Could not attach report: {_att_err}")
 
                 if test_passed:
                     passed += 1
@@ -1487,9 +1500,10 @@ class TestRailRunner:
         injected_vars: Dict[str, Any],
         verbose: bool,
     ) -> Tuple[bool, List[str]]:
-        """Execute a list of YAML files; return (all_passed, comment_lines)."""
+        """Execute a list of YAML files; return (all_passed, comment_lines, report_paths)."""
         all_passed = True
         comment_lines: List[str] = []
+        report_paths: List[Path] = []
 
         for yaml_path in yaml_files:
             result = self._run_single(yaml_path, injected_vars, verbose)
@@ -1497,6 +1511,9 @@ class TestRailRunner:
                 all_passed = False
                 comment_lines.append(f"ERROR: could not execute {yaml_path.name}")
                 continue
+
+            if result.report_path:
+                report_paths.append(result.report_path)
 
             for detail in result.test_details or []:
                 name = detail.get("name", yaml_path.stem)
@@ -1515,7 +1532,7 @@ class TestRailRunner:
             if not result.success:
                 all_passed = False
 
-        return all_passed, comment_lines
+        return all_passed, comment_lines, report_paths
 
     def _run_single(
         self,
@@ -1630,7 +1647,7 @@ class TestRailRunner:
         case: Dict[str, Any],
         injected_vars: Dict[str, Any],
         verbose: bool,
-    ) -> Tuple[bool, List[str]]:
+    ) -> Tuple[bool, List[str], List[Path]]:
         """Execute a Feature: case by materialising it as a temp YAML file."""
         import yaml as _yaml
 
@@ -1695,7 +1712,7 @@ class TestRailRunner:
                 "      - api.request:\n"
                 "          method: GET\n"
                 "          url: ${base_url}/status\n"
-            ]
+            ], []
 
         test_id = case.get("id", "tmp")
         tmp_path = self._artifact_dir / f"_inline_{test_id}.yaml"
