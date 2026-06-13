@@ -1,16 +1,3 @@
-// ── Configure projects here (id: 'Name') ────────────────────────────────────
-def TESTRAIL_PROJECTS = [
-    59: 'JDM Automation',
-    74: 'Audio',
-    76: 'Routers',
-    77: 'Power',
-    78: 'Surveillance',
-    79: 'Switches',
-    80: 'Access Points',
-    81: 'Media Distribution',
-]
-// ────────────────────────────────────────────────────────────────────────────
-
 def WORKSPACE = '/var/lib/jenkins/workspace/EASY_BDD'
 
 pipeline {
@@ -28,48 +15,9 @@ pipeline {
     }
 
     stages {
-        stage('Run TestRail Projects') {
+        stage('Placeholder') {
             steps {
-                script {
-                    // Build one parallel branch per project, labelled by name
-                    def branches = TESTRAIL_PROJECTS.collectEntries { projectId, projectName ->
-                        ["${projectName} (${projectId})": {
-                            ws(WORKSPACE) {
-                                sh """#!/bin/bash
-                                    set -a && . ${WORKSPACE}/.env && set +a
-                                    . ${WORKSPACE}/env/bin/activate
-                                    python -m easy_bdd testrail-run ${projectId} || true
-                                """
-                            }
-                        }]
-                    }
-                    parallel branches
-                }
-            }
-        }
-    }
-
-    post {
-        always {
-            script {
-                // Collect run names from every project that found an active run
-                def found = []
-                TESTRAIL_PROJECTS.each { projectId, projectName ->
-                    def propsFile = "${WORKSPACE}/reports/run_${projectId}.properties"
-                    if (fileExists(propsFile)) {
-                        def props = readProperties file: propsFile
-                        def runName = props['RUN_NAME'] ?: ''
-                        def runUrl  = props['RUN_URL']  ?: ''
-                        if (runName) {
-                            found << [name: runName, url: runUrl]
-                        }
-                    }
-                }
-
-                if (found) {
-                    currentBuild.displayName = "#${BUILD_NUMBER} — " + found.collect { it.name }.join(' | ')
-                    currentBuild.description = found.collect { "<a href=\"${it.url}\">${it.name}</a>" }.join('<br>')
-                }
+                echo 'No stages configured yet.'
             }
         }
     }
