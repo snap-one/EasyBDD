@@ -1050,6 +1050,14 @@ class TestRunner:
                     "post_on_failure_only", False
                 )
 
+            # Allow test/var case to opt out via no_datalake variable
+            _tvars_check = (test.variables or {})
+            no_datalake = _tvars_check.get("no_datalake", False)
+            if isinstance(no_datalake, str):
+                no_datalake = no_datalake.strip().lower() in ("true", "1", "yes")
+            if no_datalake:
+                datalake_enabled = False
+
             # Post test results to datalake (if enabled)
             if datalake_logger and datalake_enabled:
                 # Skip if only posting failures and test passed

@@ -869,6 +869,17 @@ class TestRailRunner:
                 f"Passed: {total_passed}  Failed: {total_failed}  Skipped: {total_skipped}"
             )
 
+        # Also check no_datalake from var case variables
+        if not no_datalake:
+            _run_vars = self._extract_vars(classified)
+            _nd = _run_vars.get("no_datalake", False)
+            if isinstance(_nd, str):
+                _nd = _nd.strip().lower() in ("true", "1", "yes")
+            if _nd:
+                no_datalake = True
+                if verbose:
+                    print("\n[TestRail] Datalake skipped (no_datalake=True in var case)")
+
         # Single datalake post for the entire run (skipped if --no-datalake)
         if not no_datalake:
             self._post_run_to_datalake(
