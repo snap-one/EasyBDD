@@ -31,19 +31,15 @@ pipeline {
         stage('Run TestRail Projects') {
             steps {
                 script {
-                    // Build one parallel branch per project, labelled by name
-                    def branches = TESTRAIL_PROJECTS.collectEntries { projectId, projectName ->
-                        ["${projectName} (${projectId})": {
-                            echo ">>> Running: ${projectName} (${projectId})"
-                            sh """#!/bin/bash
-                                cd ${WORKSPACE}
-                                set -a && . .env && set +a
-                                . env/bin/activate
-                                python -m easy_bdd testrail-run ${projectId} || true
-                            """
-                        }]
+                    TESTRAIL_PROJECTS.each { projectId, projectName ->
+                        echo ">>> Checking: ${projectName} (${projectId})"
+                        sh """#!/bin/bash
+                            cd ${WORKSPACE}
+                            set -a && . .env && set +a
+                            . env/bin/activate
+                            python -m easy_bdd testrail-run ${projectId} || true
+                        """
                     }
-                    parallel branches
                 }
             }
         }

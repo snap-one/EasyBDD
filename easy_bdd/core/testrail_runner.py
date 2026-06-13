@@ -937,13 +937,24 @@ class TestRailRunner:
     # ------------------------------------------------------------------ #
 
     def _find_run(self, project_id: int) -> Optional[Dict]:
-        """Return the first EASY_BDD: run with pending tests created in the last 30 days."""
+        """Return the first EASY_BDD: run with pending tests created in the last 30 days.
+
+        Skips runs that have tests in Running status — those are already being
+        processed by another build and should not be claimed.
+        """
         created_after = int(time.time()) - 30 * 86400
         runs = self._tr.get_runs(project_id, created_after=created_after)
         for run in runs:
             if not run.get("name", "").startswith(self._run_prefix):
                 continue
             if run.get("untested_count", 0) > 0 or run.get("retest_count", 0) > 0:
+                tests = self._tr.get_tests(run["id"])
+                if any(t.get("status_id") == self._running_status_id for t in tests):
+                    print(
+                        f"\n[TestRail] Run '{run['name']}' has tests in Running status"
+                        f" — skipping (already in progress)"
+                    )
+                    continue
                 return run
         return None
 
