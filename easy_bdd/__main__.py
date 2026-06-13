@@ -718,6 +718,22 @@ def record_and_upload(args) -> int:
     if args.url:
         cmd.append(args.url)
 
+    # On headless servers (no $DISPLAY), wrap with xvfb-run to provide a virtual display
+    no_display = not os.environ.get("DISPLAY") and sys.platform != "darwin" and sys.platform != "win32"
+    if no_display:
+        xvfb = subprocess.run(["which", "xvfb-run"], capture_output=True).returncode == 0
+        if xvfb:
+            cmd = ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x1024x24"] + cmd
+            print("\n[Record] No $DISPLAY detected — using xvfb-run for virtual display.")
+        else:
+            print(
+                "\nError: No display server found ($DISPLAY is not set) and xvfb-run is not installed.\n"
+                "Install it with:  sudo apt-get install -y xvfb\n"
+                "Or set DISPLAY if you have an X server available.",
+                file=sys.stderr,
+            )
+            return 1
+
     print("\n[Record] Launching Playwright codegen...")
     print("  Record your browser steps, then close the browser window to continue.\n")
 
