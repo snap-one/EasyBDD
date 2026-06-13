@@ -856,14 +856,11 @@ def record_and_upload(args) -> int:
         if section_id is None:
             return 1
 
-    preconditions = yaml.dump(steps, default_flow_style=False, allow_unicode=True)
-
     try:
         case = tr.add_case(
             section_id,
             title=test_data["name"],
-            custom_preconds=preconditions,
-            custom_steps=f"tag: browser\nfile: {output_path}",
+            custom_preconds=f"file: {output_path}",
             type_id=1,
             custom_automation_status=5,
         )
