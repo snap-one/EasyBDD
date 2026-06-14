@@ -50,10 +50,15 @@ def _parse_steps(body: str):
     return steps
 
 
-def _has_broken_shared_step(preconds: str) -> bool:
+def _needs_repair(preconds: str) -> bool:
+    """Return True if the case preconditions have any known artifact pattern."""
     for line in preconds.splitlines():
         stripped = line.strip()
+        # Empty shared_step reference (name was dropped)
         if stripped == "- shared_step:":
+            return True
+        # Python dict repr written instead of YAML (data row artifact)
+        if stripped.startswith("- {'") or stripped.startswith('- {"'):
             return True
     return False
 
@@ -93,7 +98,7 @@ def main():
         # Fetch full case to get preconditions
         full_target = tr.get_case(target_case["id"])
         preconds = full_target.get("custom_preconds") or ""
-        if not _has_broken_shared_step(preconds):
+        if not _needs_repair(preconds):
             skipped += 1
             continue
 
