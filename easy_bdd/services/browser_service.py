@@ -1258,7 +1258,10 @@ class BrowserService:
                     )
                     return  # Don't raise, continue test execution
 
-                raise AssertionError(f"Text '{text}' not found on page: {e}")
+                # Truncate Playwright's verbose HTML dump to first meaningful line
+                err_lines = [ln for ln in str(e).splitlines() if ln.strip() and "<" not in ln]
+                err_summary = err_lines[0].strip() if err_lines else str(e)[:120]
+                raise AssertionError(f"Text '{text}' not found on page. {err_summary}")
         elif self.selenium_driver:
             try:
                 from selenium.webdriver.support import expected_conditions as EC

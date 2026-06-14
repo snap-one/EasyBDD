@@ -150,17 +150,26 @@ class APIAuthManager:
                 data = response.json()
                 token_field = config.get("token_field", "access_token")
 
-                if token_field in data:
-                    token = data[token_field]
-                    print(f"    ✅ Got {token_field}: {token[:10]}...")
+                # Support dot-notation for nested fields e.g. "restful_res.token"
+                def _dig(obj, path):
+                    for key in path.split("."):
+                        if isinstance(obj, dict) and key in obj:
+                            obj = obj[key]
+                        else:
+                            return None
+                    return obj
+
+                token = _dig(data, token_field)
+                if token is not None:
+                    print(f"    ✅ Got {token_field}: {str(token)[:10]}...")
 
                     # Calculate expiry
                     expires_field = config.get("token_expires_field", "expires_in")
                     default_expiry = config.get("default_expiry", 3600)
 
-                    if expires_field in data:
-                        expires_in = int(data[expires_field])
-                        expires_at = datetime.now() + timedelta(seconds=expires_in)
+                    expires_val = _dig(data, expires_field)
+                    if expires_val is not None:
+                        expires_at = datetime.now() + timedelta(seconds=int(expires_val))
                     else:
                         expires_at = datetime.now() + timedelta(seconds=default_expiry)
 

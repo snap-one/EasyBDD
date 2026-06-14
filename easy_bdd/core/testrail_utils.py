@@ -27,7 +27,16 @@ def build_testrail_preconditions(steps: list) -> str:
             lines.append(f"- {action_key}:")
             if isinstance(params, dict):
                 for k, v in params.items():
-                    lines.append(f"{k}: {v}")
+                    if isinstance(v, str) and any(c in v for c in ('"', "'", '[', ']', '{', '}', ':')):
+                        # Quote values containing YAML-unsafe characters
+                        safe = v.replace("'", "''")
+                        lines.append(f"{k}: '{safe}'")
+                    elif isinstance(v, dict):
+                        lines.append(f"{k}:")
+                        for dk, dv in v.items():
+                            lines.append(f"  {dk}: {dv}")
+                    else:
+                        lines.append(f"{k}: {v}")
         else:
             step_num += 1
             lines.append(f"# {step_num}. step")
