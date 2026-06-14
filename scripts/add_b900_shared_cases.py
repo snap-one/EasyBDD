@@ -29,7 +29,8 @@ SOURCE_SUITE_ID = 56195
 TARGET_SUITE_ID = 106670
 TARGET_SECTION  = 2884782  # Extended Firmware Resiliency
 
-DRY_RUN = "--live" not in sys.argv
+DRY_RUN  = "--live"    not in sys.argv
+UPDATE   = "--update"  in sys.argv  # re-generate already-existing cases
 
 
 def _strip_prefix(title: str) -> str:
@@ -66,13 +67,13 @@ def main():
     target_cases = tr.get_cases(SOURCE_PROJECT, TARGET_SUITE_ID)
     print(f"  {len(target_cases)} target cases")
 
-    # Build set of normalized titles already in target
-    target_titles = set()
+    # Build lookup: normalized title → existing target case id
+    target_by_norm = {}
     for c in target_cases:
         if c["title"].startswith("Shared:"):
-            target_titles.add(_normalize(_strip_prefix(c["title"])))
+            target_by_norm[_normalize(_strip_prefix(c["title"]))] = c
 
-    # Find B-900 / rev_B-900 source cases not yet in target
+    # Find B-900 / rev_B-900 source cases
     b900_source = [
         c for c in source_cases
         if c["title"].startswith("Shared:")
@@ -80,22 +81,28 @@ def main():
     ]
     print(f"\nFound {len(b900_source)} B-900/rev_B-900 source cases")
 
-    missing = []
+    to_process = []
     for c in b900_source:
         norm = _normalize(_strip_prefix(c["title"]))
-        if norm not in target_titles:
-            missing.append(c)
+        existing = target_by_norm.get(norm)
+        if existing is None:
+            to_process.append((c, None))  # create
+        elif UPDATE:
+            to_process.append((c, existing))  # update
 
-    print(f"Missing from target: {len(missing)}")
-    if not missing:
-        print("Nothing to do.")
+    action_label = "create/update" if UPDATE else "create"
+    print(f"Cases to {action_label}: {len(to_process)}")
+    if not to_process:
+        hint = " (pass --update to regenerate existing cases)" if not UPDATE else ""
+        print(f"Nothing to do.{hint}")
         return
 
     created = 0
+    updated = 0
     skipped = 0
     errors  = 0
 
-    for src in missing:
+    for src, existing_target in to_process:
         title = src["title"]
         clean = _strip_prefix(title)
         # Convert spaces to underscores for Easy BDD title convention
@@ -119,8 +126,18 @@ def main():
         new_preconds = build_testrail_preconditions(steps)
 
         if DRY_RUN:
-            print(f"  [DRY] Would create: {easy_title!r} ({len(steps)} steps)")
-            print(f"        Preview:\n{new_preconds[:200]}...")
+            op = "update" if existing_target else "create"
+            print(f"  [DRY] Would {op}: {easy_title!r} ({len(steps)} steps)")
+            print(f"        Preview:\n{new_preconds[:300]}...")
+        elif existing_target:
+            try:
+                tr.update_case(existing_target["id"], custom_preconds=new_preconds)
+                print(f"  [UPDATED] [{existing_target['id']}] {easy_title!r} ({len(steps)} steps)")
+                updated += 1
+            except Exception as exc:
+                print(f"  [ERROR] update failed for {easy_title!r}: {exc}")
+                errors += 1
+                continue
         else:
             try:
                 result = tr.add_case(
@@ -136,11 +153,11 @@ def main():
                 continue
 
     if DRY_RUN:
-        created = len(missing) - skipped - errors
-        print(f"\nDone — would create: {created}, skipped: {skipped}, errors: {errors}")
-        print("\nThis was a DRY RUN. Pass --live to actually create the cases.")
+        n = len(to_process) - skipped - errors
+        print(f"\nDone — would process: {n}, skipped: {skipped}, errors: {errors}")
+        print("\nThis was a DRY RUN. Pass --live to actually apply the changes.")
     else:
-        print(f"\nDone — created: {created}, skipped: {skipped}, errors: {errors}")
+        print(f"\nDone — created: {created}, updated: {updated}, skipped: {skipped}, errors: {errors}")
 
 
 if __name__ == "__main__":

@@ -34,14 +34,17 @@ Key syntax being migrated
   gv.log[-1]['response']      (YAML param context)  → ${last_response}
   gv.log[-1]['response_dict'] (YAML param context)  → ${last_response_dict}
   gv.log[-1]['response_code'] (YAML param context)  → ${last_response_code}
-  gv.message                  (YAML param context)  → ${message}
-  gv.tests['variables']['k']  (YAML param context)  → ${k}
+  gv.<attr>                   (YAML param context)  → ${attr}
+  gv.tests['variables']['k']  (YAML param context)  → ${k}  (k may contain hyphens)
   gv.log[-1]['response_txt']  (Python code context) → str(last_response)
   gv.log[-1]['response']      (Python code context) → str(last_response)
   gv.log[-1]['response_dict'] (Python code context) → last_response_dict
-  gv.tests['variables']['k']  (Python code context) → k  (plain variable name)
-  gv.message                  (Python code context) → message
+  gv.tests['variables']['k']  (Python code context) → k  (identifier) or variables['k'] (hyphenated)
+  gv.<attr>                   (Python code context) → attr  (plain name)
+  str2dict(...)               (Python code context) → json.loads(...)
+  get_text(...)               (Python code context) → str(...)
   gv.tests['variables']['k']=v (Python assignment)  → eval.exec: "k = v" + store_as: k
+  gv.tests['variables']['a-b']=v (Python assignment) → eval.exec: "variables['a-b'] = v" + store_as: a-b
   gv.message = v              (Python assignment)   → eval.exec: "message = v" + store_as: message
   gv.attr = v                 (Python assignment)   → eval.exec: "attr = v" + store_as: attr
   pure boolean Python expression                    → test.assert: expression
@@ -97,11 +100,12 @@ def _sub_vars(text: str) -> str:
     text = re.sub(r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "${last_response_headers}", text)
 
     # gv.tests['variables']['key'] / gv.tests['variables']['$key'] access
-    text = re.sub(r"gv\.tests\['variables'\]\['\$?(\w+)'\]", r"${\1}", text)
-    text = re.sub(r'gv\.tests\["variables"\]\["\$?(\w+)"\]', r"${\1}", text)
+    # Supports both simple identifiers and hyphenated names like B-900-MOIP-4K-RX_dict
+    text = re.sub(r"gv\.tests\['variables'\]\['\$?([\w][\w\-]*)'\]", r"${\1}", text)
+    text = re.sub(r'gv\.tests\["variables"\]\["\$?([\w][\w\-]*)"\]', r"${\1}", text)
 
-    # gv.message — migrated to a plain ${message} variable
-    text = re.sub(r"\bgv\.message\b", "${message}", text)
+    # gv.<attr> — generalized to ${attr} for any attribute (not log/tests shim objects)
+    text = re.sub(r"\bgv\.(?!log\b|tests\b)(\w+)\b", r"${\1}", text)
 
     # <$varname$> or <${varname}$> or <${varname}> — Gherkin Scenario Outline params
     text = re.sub(r"<\$\{([A-Za-z_][A-Za-z0-9_]*)\}\$?>", r"${\1}", text)
@@ -137,11 +141,19 @@ _CODE_PATTERNS: List[Tuple[str, Any]] = [
     (r"gv\.log\[(-?\d+)\]\['response_dict'\]",
         lambda m: "last_response_dict" if m.group(1) in ("-1",)
                   else f"log_response_dict_{m.group(1).lstrip('-')}"),
-    # gv.tests['variables']['key'] / ['$key'] reads → plain variable name (strips $ prefix)
-    (r"gv\.tests\['variables'\]\['\$?(\w+)'\]", r"\1"),
-    (r'gv\.tests\["variables"\]\["\$?(\w+)"\]', r"\1"),
+    # gv.tests['variables']['key'] / ['$key'] reads
+    # Simple identifiers (all word chars) → bare name; hyphenated names → variables['name']
+    (r"gv\.tests\['variables'\]\['\$?([\w][\w\-]*)'\]",
+        lambda m: m.group(1) if re.match(r'^\w+$', m.group(1)) else f"variables['{m.group(1)}']"),
+    (r'gv\.tests\["variables"\]\["\$?([\w][\w\-]*)"\]',
+        lambda m: m.group(1) if re.match(r'^\w+$', m.group(1)) else f"variables['{m.group(1)}']"),
     # gv.message / gv.<attr> reads (not log/tests — those are handled above) → plain name
     (r"gv\.(?!log\b|tests\b)(\w+)\b", r"\1"),
+    # mybdd helper functions → Easy BDD / stdlib equivalents
+    (r"\bgv\.str2dict\b", "json.loads"),
+    (r"\bstr2dict\b",     "json.loads"),
+    (r"\bgv\.get_text\b", "str"),
+    (r"\bget_text\b",     "str"),
 ]
 
 
@@ -187,14 +199,17 @@ def _smart_eval_step(code: str) -> Dict:
     raw = code.strip()
 
     # Rule 1 — gv.tests['variables']['key'] = expr  (single or double quotes)
+    # Supports both simple identifiers and hyphenated names like B-900-MOIP-4K-RX_dict.
     m = re.match(
-        r"^gv\.tests\[(?:'variables'|\"variables\")\]\[(?:'\$?(\w+)'|\"\$?(\w+)\")\]\s*=\s*(.+)$",
+        r"^gv\.tests\[(?:'variables'|\"variables\")\]\[(?:'\$?([\w][\w\-]*)'|\"\$?([\w][\w\-]*)\")\]\s*=\s*(.+)$",
         raw, re.DOTALL,
     )
     if m:
         var_name = m.group(1) or m.group(2)
         rhs = _translate_code(m.group(3).strip())
-        return {"action": "eval.exec", "code": f"{var_name} = {rhs}", "store_as": var_name}
+        # Use bare name for valid Python identifiers; dict access for hyphenated names
+        lhs = var_name if re.match(r'^\w+$', var_name) else f"variables['{var_name}']"
+        return {"action": "eval.exec", "code": f"{lhs} = {rhs}", "store_as": var_name}
 
     # Rule 2 — gv.<attr> = expr  (e.g. gv.message = ..., gv.result = ...)
     # Excludes gv.log and gv.tests which are shim objects, not settable scalars.
