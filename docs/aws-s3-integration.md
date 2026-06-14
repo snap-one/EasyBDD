@@ -585,27 +585,59 @@ When the folder path is uncertain, use `discover_prefix: true` rather than guess
 
 ## Version Sorting
 
-The AWS service uses **intelligent version-aware sorting**:
+The AWS service uses **intelligent version-aware sorting** with a semver fallback for files that do not contain 10-digit timestamps.
+
+### Sorting rules
+
+1. Files with a 10-digit timestamp in the name are sorted by timestamp descending (newest first).
+2. Files without a timestamp are sorted by semantic version descending — so `4.7.0` comes before `4.6.1`.
+3. Within version-sorted results, non-DM files sort before DM files of the same version.
 
 ```
-Files in S3:
-- firmware_1.2.3.bin
-- firmware_1.2.10.bin
-- firmware_1.2.20.bin
-- firmware_2.0.0.bin
+Files in S3 (no timestamps):
+- upgrade_moip_4.6.1.bin
+- upgrade_moip_4.6.1-DM.bin
+- upgrade_moip_4.7.0.bin
+- upgrade_moip_4.7.0-DM.bin
 
-Sorted correctly:
-- firmware_1.2.3.bin
-- firmware_1.2.10.bin
-- firmware_1.2.20.bin
-- firmware_2.0.0.bin
-
-Not alphabetically:
-- firmware_1.2.10.bin  (wrong)
-- firmware_1.2.20.bin  (wrong)
-- firmware_1.2.3.bin   (wrong)
-- firmware_2.0.0.bin   (correct)
+Sorted result (version descending):
+[0] upgrade_moip_4.7.0.bin      ← latest non-DM
+[1] upgrade_moip_4.7.0-DM.bin   ← latest DM
+[2] upgrade_moip_4.6.1.bin
+[3] upgrade_moip_4.6.1-DM.bin
 ```
+
+This means you can reliably index the result list:
+
+```yaml
+- aws.list_files:
+    bucket_name: ${bucket_name}
+    folder_prefix: moip/
+    file_extension: .bin
+    store_as: firmware_files
+
+# firmware_files[0] = latest non-DM firmware (e.g., upgrade_moip_4.7.0.bin)
+# firmware_files[1] = latest -DM firmware    (e.g., upgrade_moip_4.7.0-DM.bin)
+- eval.run:
+    expression: "firmware_files[0]"
+    store_as: upgrade_file
+- eval.run:
+    expression: "firmware_files[1]"
+    store_as: downgrade_file
+```
+
+Alternatively, use `next(...)` with a condition to be explicit:
+
+```yaml
+- eval.run:
+    expression: "next((f for f in firmware_files if '-DM' not in f), None)"
+    store_as: upgrade_file
+- eval.run:
+    expression: "next((f for f in firmware_files if '-DM' in f), None)"
+    store_as: downgrade_file
+```
+
+### Classic version pattern examples
 
 The sorting automatically detects version patterns like:
 - `1.2.3`

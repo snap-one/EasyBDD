@@ -667,3 +667,80 @@ if "connect" in action_lower and "disconnect" not in action_lower:
 ```
 
 No YAML changes are needed; existing test cases work correctly after the fix.
+
+---
+
+### `all_dummy` / `all_upgraded` assertion fails even though all devices are on the correct firmware
+
+**Symptom:** An `all_dummy` or `all_upgraded` aggregate assertion evaluates to `False` even after confirming that every active endpoint device is on the expected firmware.
+
+**Root cause:** The generator expression iterates ALL variables whose names end with `_fw_version_after_upgrade`, including model-level variables (e.g., `B-900-MOIP-4K-RX_fw_version_after_upgrade`) that were set during an earlier test phase and never updated. These stale values cause the `all(...)` check to fail.
+
+**Fix:** Scope the generator to per-MAC/unit-ID variables only, using the same prefix pattern that other assertions (like `all_ips_valid`) already use. For example, if per-device variables are named `$unit_id_<mac>_fw_version_after_upgrade`, add a `startswith` filter:
+
+```python
+# WRONG — picks up stale model-level variables from earlier phases
+all_dummy = all(
+    "-DM" in str(variables.get(k, ""))
+    for k in variables
+    if str(k).endswith("_fw_version_after_upgrade")
+)
+
+# CORRECT — scoped to per-MAC endpoint variables only
+all_dummy = all(
+    "-DM" in str(variables.get(k, ""))
+    for k in variables
+    if str(k).startswith("$unit_id_") and str(k).endswith("_fw_version_after_upgrade")
+)
+```
+
+**Lesson:** When writing aggregate assertions over dynamically-named variables, always scope to the exact prefix/suffix pattern to avoid picking up stale variables from earlier test phases.
+
+---
+
+### `Setup:` case fails with "Unrecognised body format"
+
+**Symptom:** A `Setup:` (or `Teardown:`) case that contains inline YAML steps fails to run with an error like `Unrecognised body format` or the steps are simply skipped.
+
+**Root cause:** In older versions, Setup: cases only supported `tag:` or `file:` body formats. Inline steps were not recognized.
+
+**Fix:** The runner now supports a `steps:` block directly in the Setup:/Teardown: case body. Write the body starting with `steps:`:
+
+```yaml
+steps:
+  - aws.list_files:
+      bucket_name: ${bucket_name}
+      folder_prefix: moip/
+      file_extension: .bin
+      store_as: firmware_files
+  - eval.run:
+      expression: "next((f for f in firmware_files if '-DM' not in f), None)"
+      store_as: upgrade_file
+```
+
+Alternatively, just write steps directly without the `steps:` key — the runner also recognizes a body that begins with `- ` (a YAML list) as inline steps.
+
+---
+
+### YAML parse error on `data: {deviceId: ${var}, ...}`
+
+**Symptom:** A step with a `data:` parameter containing a variable substitution fails at parse time with a YAML error:
+
+```
+could not find expected ':'
+mapping values are not allowed here
+```
+
+**Root cause:** When `${var}` appears inside a YAML flow mapping (`{...}`), the YAML parser may interpret the `{` in `${` as the start of a nested flow mapping, causing a parse error.
+
+**Fix:** Use Python dict literal style with single-quoted string values instead of YAML flow mapping syntax:
+
+```yaml
+# WRONG — ${wb_mac} confuses the YAML parser inside { }
+data: {deviceId: ${wb_mac}, version: 1, outlets: [13, 14, 15, 16]}
+
+# CORRECT — Python dict literal with single-quoted strings
+data: {'deviceId': '${wb_mac}', 'version': 1, 'outlets': [13, 14, 15, 16]}
+```
+
+Numeric values and lists do not need quotes. Only string values that contain or could be confused with YAML special characters need to be single-quoted.

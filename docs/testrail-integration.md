@@ -99,14 +99,14 @@ Store a JSON object in the **run description** field to configure scheduling, re
 
 Every case title must begin with one of these prefixes:
 
-| Prefix | Role | Runs when |
-|--------|------|-----------|
-| `Var: Name` | Variable definitions | Always (variables injected into all tests) |
-| `Setup: Name` | Pre-test setup | Before any Test:/Feature: case |
-| `Test: Name` | Points to a local YAML file or tag | In order, if status is Untested/Retest |
-| `Feature: Name` | Steps written directly in TestRail | In order, if status is Untested/Retest |
-| `Teardown: Name` | Post-test cleanup | After all Test:/Feature: cases |
-| `Shared: Name` | Shared step definition | Referenced by other cases via `shared_step` |
+| Prefix | Role | Runs when | Body format |
+|--------|------|-----------|-------------|
+| `Var: Name` | Variable definitions | Always (variables injected into all tests) | `key: value` pairs |
+| `Setup: Name` | Pre-test setup | Always when Feature:/Test: cases are pending | `tag:`, `file:`, OR `steps:` (inline) |
+| `Test: Name` | Points to a local YAML file or tag | In order, if status is Untested/Retest | `tag:` or `file:` |
+| `Feature: Name` | Steps written directly in TestRail | In order, if status is Untested/Retest | inline steps |
+| `Teardown: Name` | Post-test cleanup | Always after tests | `tag:`, `file:`, OR `steps:` (inline) |
+| `Shared: Name` | Shared step definition | Referenced by other cases via `shared_step` | inline steps |
 
 Example run layout:
 ```
@@ -218,6 +218,24 @@ TestRail text fields can flatten indentation, merge lines, or replace spaces wit
 - Quote expressions and interpolated values: `"${var}"`, `"'key' in last_json"`.
 - Keep `store_as` and `store_response` as top-level step params, not inside `headers` or `body`.
 - For GET requests, do not send `Content-Type` unless the endpoint explicitly requires it.
+
+### `data:` dict quoting — avoid unquoted `${var}` inside flow mappings
+
+**Problem:** When a variable substitution (`${var}`) appears inside a YAML flow mapping (curly braces `{...}`), YAML may interpret the `{` as starting a nested mapping and fail to parse:
+
+```yaml
+# WRONG — ${wb_mac} contains characters YAML interprets as a nested mapping
+data: {deviceId: ${wb_mac}, version: 1, outlets: [13, 14, 15, 16]}
+```
+
+**Fix:** Use Python dict literal style with single-quoted string values:
+
+```yaml
+# CORRECT
+data: {'deviceId': '${wb_mac}', 'version': 1, 'outlets': [13, 14, 15, 16]}
+```
+
+The runner accepts Python-style single-quoted strings inside `data:` values and substitutes `${var}` references before evaluation. Numeric values (`1`, `0`) and lists (`[13, 14, 15, 16]`) do not need quotes.
 
 ---
 
@@ -650,9 +668,13 @@ Variables from Var: cases are injected into the YAML test automatically.
 
 ## Setup: and Teardown: Cases
 
-- **Setup:** cases run before all Test:/Feature: cases, regardless of their status.
+- **Setup:** cases run before all Test:/Feature: cases, regardless of their status. They always run when at least one Feature: or Test: case is pending (Untested/Retest).
 - **Teardown:** cases run after all Test:/Feature: cases, regardless of pass/fail.
-- Both use the same step formats as Feature: cases.
+- Both support three body formats: `tag:`, `file:`, or inline `steps:`.
+
+### Format 1 — Inline steps (most common)
+
+Write steps directly in the Preconditions field, same as a Feature: case:
 
 ```
 Setup: Connect to OvrC Server
@@ -670,6 +692,43 @@ Teardown: Disconnect from OvrC
 Preconditions:
 - ovrc.disconnect: {}
 ```
+
+### Format 2 — Tag or file reference
+
+```
+Setup: Device Precheck
+
+Steps:
+tag: device_precheck
+```
+
+```
+Setup: Load Firmware List
+
+Steps:
+file: setup/load_firmware.yaml
+```
+
+### Format 3 — Inline steps with `steps:` block
+
+If the body starts with `steps:`, the runner executes it as inline YAML steps. This allows Setup:/Teardown: cases to include any action (`aws.list_files`, `eval.run`, `websocket.send`, etc.) without needing to reference an external file.
+
+```yaml
+steps:
+  - aws.list_files:
+      bucket_name: ${bucket_name}
+      folder_prefix: moip/
+      file_extension: .bin
+      store_as: firmware_files
+  - eval.run:
+      expression: "next((f for f in firmware_files if '-DM' not in f), None)"
+      store_as: upgrade_file
+  - eval.run:
+      expression: "next((f for f in firmware_files if '-DM' in f), None)"
+      store_as: downgrade_file
+```
+
+This is useful for a `Setup: Firmware Manager` case that lists S3 files and sets `upgrade_file`/`downgrade_file` variables — it runs its steps every time a Feature: case is pending, without needing to be individually marked for retest.
 
 ---
 
