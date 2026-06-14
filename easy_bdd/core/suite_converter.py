@@ -81,6 +81,17 @@ def _slug(text: str) -> str:
 
 # ── step parsing helpers ──────────────────────────────────────────────────────
 
+def _sanitize(obj: Any) -> Any:
+    """Recursively convert tuples → lists so yaml.dump never emits !!python/tuple."""
+    if isinstance(obj, tuple):
+        return [_sanitize(v) for v in obj]
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    return obj
+
+
 def _parse_steps(body: str) -> Tuple[List[Dict], int]:
     """Parse a pipe-delimited mybdd step body → (Easy BDD steps list, todo_count)."""
     try:
@@ -539,7 +550,7 @@ class BddSuiteConverter:
             try:
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(out_path, "w", encoding="utf-8") as f:
-                    yaml.dump(test_dict, f, allow_unicode=True,
+                    yaml.dump(_sanitize(test_dict), f, allow_unicode=True,
                               default_flow_style=False, sort_keys=False)
                 if verbose:
                     dev_label = f" [{dev.get('name', '')}]" if dev_slug else ""
@@ -572,7 +583,7 @@ class BddSuiteConverter:
                 pass
         existing.update(shared_yaml)
         with open(path, "w", encoding="utf-8") as f:
-            yaml.dump(existing, f, allow_unicode=True,
+            yaml.dump(_sanitize(existing), f, allow_unicode=True,
                       default_flow_style=False, sort_keys=False)
         if verbose:
             print(f"[Convert] Wrote {len(shared_yaml)} shared step(s) → {path}")
@@ -664,7 +675,7 @@ class BddSuiteConverter:
             c   = ps["case"]
             sec = _target_section(c)
             steps_yaml = yaml.dump(
-                ps["steps"], allow_unicode=True,
+                _sanitize(ps["steps"]), allow_unicode=True,
                 default_flow_style=False, sort_keys=False
             ).rstrip()
             payload = {
