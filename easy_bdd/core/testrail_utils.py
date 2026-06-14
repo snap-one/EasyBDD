@@ -55,8 +55,11 @@ def build_testrail_preconditions(steps: list) -> str:
                         label = f"{action_key} ({params[hint_key]})"
                         break
             lines.append(f"# {step_num}. {label}")
-            lines.append(f"- {action_key}:")
-            if isinstance(params, dict):
+            if not params and params != 0:
+                # None / empty dict / empty list → bare action with no params
+                lines.append(f"- {action_key}:")
+            elif isinstance(params, dict):
+                lines.append(f"- {action_key}:")
                 for k, v in params.items():
                     if isinstance(v, dict):
                         # Inline flow-style keeps params flush-left so
@@ -72,6 +75,13 @@ def build_testrail_preconditions(steps: list) -> str:
                         lines.append(f"{k}: '{safe}'")
                     else:
                         lines.append(f"{k}: {v}")
+            else:
+                # Scalar value (string, int, bool) — write inline.
+                # This covers shared_step: "Slug_Name" and similar single-value steps.
+                val_str = str(params)
+                if isinstance(params, str) and _needs_quoting(params):
+                    val_str = f"'{params.replace(chr(39), chr(39)*2)}'"
+                lines.append(f"- {action_key}: {val_str}")
         else:
             step_num += 1
             lines.append(f"# {step_num}. step")

@@ -101,7 +101,7 @@ def _parse_steps(body: str) -> Tuple[List[Dict], int]:
             f"Could not import bdd_migrator from {_FRONTEND}. "
             f"Ensure frontend/bdd_migrator.py exists. Original error: {exc}"
         )
-    steps = parse_step_block(body or "")
+    steps, _data = parse_step_block(body or "")
     todos = sum(
         1 for s in steps
         if isinstance(s, dict)
