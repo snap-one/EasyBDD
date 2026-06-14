@@ -189,6 +189,9 @@ class AssertionEngine:
 
         elif isinstance(node, ast.Attribute):
             obj = self._eval_node(node.value, context)
+            # Allow dot-notation on dicts: response.data.restful_res.fwConfs
+            if isinstance(obj, dict) and node.attr in obj:
+                return obj[node.attr]
             return getattr(obj, node.attr)
 
         elif isinstance(node, ast.Subscript):
