@@ -127,9 +127,11 @@ def _sub_vars(text: str) -> str:
     text = re.sub(r"<\$([A-Za-z_][A-Za-z0-9_]*)\$>",       r"${\1}", text)
 
     # $variable → ${variable}  (dollar-sign variables, not already in ${...})
+    # Allow hyphens inside names (e.g. $unit_id_B-900-MOIP-4K-RX_...) but not
+    # trailing hyphens, so arithmetic like $count-1 is not consumed.
     def dollar_sub(m):
         return "${" + m.group(1) + "}"
-    text = re.sub(r"\$(?!\{)([A-Za-z_][A-Za-z0-9_]*)", dollar_sub, text)
+    text = re.sub(r"\$(?!\{)([A-Za-z_][\w]*(?:-[\w]+)*)", dollar_sub, text)
 
     return text
 
