@@ -241,9 +241,7 @@ So `login_response.data` is where the JSON body lives. Always go through `.data`
 - api.request:
 method: POST
 url: ${api_url}/system/login
-body:
-  user: ${api_username}
-  password: ${api_password}
+body: {'user': '${api_username}', 'password': '${api_password}'}
 store_as: login_response
 # 2. Verify login succeeded
 - test.assert:
@@ -445,6 +443,25 @@ exact: true
 - browser.click:
 selector: "#fun_1_0"
 ```
+
+### Nested body dict causes YAML parse error
+
+**Symptom:** `mapping values are not allowed here` pointing at a param like `store_as:`  
+**Cause:** A `body:` param with indented children breaks the flush-left re-indentation scheme.
+
+```
+# Wrong — indented children confuse the parser
+body:
+  user: ${api_username}
+  password: ${api_password}
+store_as: login_response
+
+# Correct — use inline flow-style dict
+body: {'user': '${api_username}', 'password': '${api_password}'}
+store_as: login_response
+```
+
+Same applies to `headers:` with multiple values.
 
 ### YAML parse error in long navigation tests
 
