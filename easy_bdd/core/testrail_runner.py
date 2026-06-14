@@ -1330,8 +1330,10 @@ class TestRailRunner:
                 f"{list(injected_vars.keys())}"
             )
 
-        # Build shared_steps.yaml from Shared: cases so Feature: cases can reference them
-        self._sync_keyword_cases(classified)
+        # Build shared_steps.yaml from Shared: cases so Feature: cases can reference them.
+        # Also fetches the full suite so nested shared_step refs (Shared: cases that aren't
+        # in this run) are available at runtime.
+        self._sync_keyword_cases(classified, run_id=run_id)
 
         # Filter Test: / Feature: cases to only those that need running
         pending_tests = [
@@ -1763,11 +1765,18 @@ class TestRailRunner:
             except Exception:
                 pass
 
-    def _sync_keyword_cases(self, classified: List[Dict]) -> None:
+    def _sync_keyword_cases(
+        self, classified: List[Dict], run_id: int = None
+    ) -> None:
         """Parse Shared: cases and write them into artifact_dir/shared_steps.yaml.
 
         Each Shared: case becomes one entry in shared_steps.yaml, keyed by its
         clean_title (title with the 'Shared: ' prefix stripped).
+
+        When run_id is given the method also fetches ALL Shared: cases from the
+        underlying suite, not just those included in the run.  This ensures that
+        nested shared_step references (a Shared: case calling another Shared: case
+        that was not added to the run) are always available at runtime.
 
         Accepted Preconditions formats:
 
@@ -1792,6 +1801,36 @@ class TestRailRunner:
         import yaml as _yaml
 
         keyword_cases = [c for c in classified if c.get("role") == "keyword"]
+
+        # Supplement with every Shared: case from the full suite so nested
+        # shared_step references always resolve even when the dependency case
+        # was not added to the run.
+        if run_id is not None:
+            try:
+                run_info = self._tr.get_run(run_id)
+                suite_id = run_info.get("suite_id")
+                project_id = run_info.get("project_id")
+                if suite_id and project_id:
+                    suite_cases = self._tr.get_cases(project_id, suite_id)
+                    run_ids_seen = {
+                        c.get("case_id") or c.get("id")
+                        for c in keyword_cases
+                    }
+                    extra = [
+                        {
+                            **c,
+                            "role": "keyword",
+                            "clean_title": _strip_prefix(c.get("title", "")),
+                        }
+                        for c in suite_cases
+                        if _classify(c.get("title", "")) == "keyword"
+                        and c.get("id") not in run_ids_seen
+                    ]
+                    if extra:
+                        keyword_cases = keyword_cases + extra
+            except Exception as exc:
+                print(f"  [warn] Could not fetch suite Shared: cases: {exc}")
+
         if not keyword_cases:
             return
 
