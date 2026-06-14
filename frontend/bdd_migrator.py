@@ -140,11 +140,11 @@ def _sub_vars(text: str) -> str:
 # Maps (pattern, replacement) where replacement can be a string or callable.
 _CODE_PATTERNS: List[Tuple[str, Any]] = [
     # gv.log response text — Easy BDD stores the full response dict under store_as;
-    # the body JSON string lives in last_response['body'].
-    (r"gv\.log\[-1\]\['response_txt'\]",    "last_response['body']"),
-    (r"gv\.log\[-1\]\['response'\]",         "last_response['body']"),
-    (r"gv\.log\[-2\]\['response_txt'\]",    "last_response['body']"),
-    (r"gv\.log\[-2\]\['response'\]",         "last_response['body']"),
+    # the body JSON string lives in last_response["body"].
+    (r"gv\.log\[-1\]\['response_txt'\]",    "last_response["body"]"),
+    (r"gv\.log\[-1\]\['response'\]",         "last_response["body"]"),
+    (r"gv\.log\[-2\]\['response_txt'\]",    "last_response["body"]"),
+    (r"gv\.log\[-2\]\['response'\]",         "last_response["body"]"),
     # gv.log response dict
     (r"gv\.log\[-1\]\['response_dict'\]",   "last_response_dict"),
     (r"gv\.log\[-2\]\['response_dict'\]",   "last_response_dict"),
@@ -153,7 +153,7 @@ _CODE_PATTERNS: List[Tuple[str, Any]] = [
     (r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "last_response['headers']"),
     # Numeric-indexed log entries
     (r"gv\.log\[(-?\d+)\]\['response(?:_txt)?'\]",
-        lambda m: "last_response['body']" if m.group(1) in ("-1",)
+        lambda m: "last_response["body"]" if m.group(1) in ("-1",)
                   else f"log_response_{m.group(1).lstrip('-')}['body']"),
     (r"gv\.log\[(-?\d+)\]\['response_dict'\]",
         lambda m: "last_response_dict" if m.group(1) in ("-1",)

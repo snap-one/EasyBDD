@@ -27,9 +27,11 @@ TARGET_SUITE_ID = 106670
 DRY_RUN = "--live" not in sys.argv
 
 _REPLACEMENTS = [
-    # str(str(last_response)) is a double-wrapped Python repr — the body JSON is in ['body']
-    (re.compile(r"str\(str\(last_response\)\)"),        "last_response['body']"),
-    (re.compile(r"str\(last_response\)"),               "last_response['body']"),
+    # str(str(last_response)) is a double-wrapped Python repr — the body JSON is in ["body"]
+    (re.compile(r"str\(str\(last_response\)\)"),        'last_response["body"]'),
+    (re.compile(r"str\(last_response\)"),               'last_response["body"]'),
+    # single-quoted ['body'] breaks YAML single-quoted strings — use double quotes
+    (re.compile(r"last_response\['body'\]"),            'last_response["body"]'),
     (re.compile(r"\bgv\.str2dict\b"),                   "json.loads"),
     (re.compile(r"\bstr2dict\b"),                       "json.loads"),
     (re.compile(r"\bgv\.get_text\b"),                   "str"),
@@ -40,7 +42,9 @@ _REPLACEMENTS = [
 
 def _needs_fix(preconds: str) -> bool:
     return bool(re.search(
-        r"\b(str2dict|get_text|prev_response)\b|str\((?:str\()?last_response\)?",
+        r"\b(str2dict|get_text|prev_response)\b"
+        r"|str\((?:str\()?last_response\)?"
+        r"|last_response\['body'\]",
         preconds,
     ))
 
