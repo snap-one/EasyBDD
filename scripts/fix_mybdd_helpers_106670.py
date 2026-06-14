@@ -1,8 +1,9 @@
-"""Replace mybdd helper function names in stored Easy BDD YAML in suite 106670.
+"""Replace mybdd helper names/implicit variables in stored Easy BDD YAML in suite 106670.
 
 Fixes cases that were migrated before _translate_code() learned to convert:
   str2dict(...)  ->  json.loads(...)
   get_text(...)  ->  str(...)
+  prev_response  ->  last_response   (mybdd implicit var; Easy BDD uses explicit store_as)
 
 These appear inside eval.exec code: lines and must be valid Python for the
 runner's exec() context.
@@ -26,15 +27,16 @@ TARGET_SUITE_ID = 106670
 DRY_RUN = "--live" not in sys.argv
 
 _REPLACEMENTS = [
-    (re.compile(r"\bgv\.str2dict\b"), "json.loads"),
-    (re.compile(r"\bstr2dict\b"),     "json.loads"),
-    (re.compile(r"\bgv\.get_text\b"), "str"),
-    (re.compile(r"\bget_text\b"),     "str"),
+    (re.compile(r"\bgv\.str2dict\b"),   "json.loads"),
+    (re.compile(r"\bstr2dict\b"),       "json.loads"),
+    (re.compile(r"\bgv\.get_text\b"),   "str"),
+    (re.compile(r"\bget_text\b"),       "str"),
+    (re.compile(r"\bprev_response\b"),  "last_response"),
 ]
 
 
 def _needs_fix(preconds: str) -> bool:
-    return bool(re.search(r"\b(str2dict|get_text)\b", preconds))
+    return bool(re.search(r"\b(str2dict|get_text|prev_response)\b", preconds))
 
 
 def _fix_preconds(preconds: str) -> str:

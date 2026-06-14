@@ -43,6 +43,7 @@ Key syntax being migrated
   gv.<attr>                   (Python code context) → attr  (plain name)
   str2dict(...)               (Python code context) → json.loads(...)
   get_text(...)               (Python code context) → str(...)
+  prev_response               (Python/YAML context) → last_response
   gv.tests['variables']['k']=v (Python assignment)  → eval.exec: "k = v" + store_as: k
   gv.tests['variables']['a-b']=v (Python assignment) → eval.exec: "variables['a-b'] = v" + store_as: a-b
   gv.message = v              (Python assignment)   → eval.exec: "message = v" + store_as: message
@@ -100,8 +101,8 @@ def _sub_vars(text: str) -> str:
     # gv.log indexed access — response text
     text = re.sub(r"gv\.log\[-1\]\['response_txt'\]",   "${last_response}",      text)
     text = re.sub(r"gv\.log\[-1\]\['response'\]",        "${last_response}",      text)
-    text = re.sub(r"gv\.log\[-2\]\['response_txt'\]",   "${prev_response}",      text)
-    text = re.sub(r"gv\.log\[-2\]\['response'\]",        "${prev_response}",      text)
+    text = re.sub(r"gv\.log\[-2\]\['response_txt'\]",   "${last_response}",      text)
+    text = re.sub(r"gv\.log\[-2\]\['response'\]",        "${last_response}",      text)
     text = re.sub(r"gv\.log\[(-?\d+)\]\['response(?:_txt)?'\]", r"${response_\1}", text)
 
     # gv.log indexed access — response dict
@@ -140,11 +141,11 @@ _CODE_PATTERNS: List[Tuple[str, Any]] = [
     # but also exposes last_response as a bare name)
     (r"gv\.log\[-1\]\['response_txt'\]",    "str(last_response)"),
     (r"gv\.log\[-1\]\['response'\]",         "str(last_response)"),
-    (r"gv\.log\[-2\]\['response_txt'\]",    "str(prev_response)"),
-    (r"gv\.log\[-2\]\['response'\]",         "str(prev_response)"),
+    (r"gv\.log\[-2\]\['response_txt'\]",    "str(last_response)"),
+    (r"gv\.log\[-2\]\['response'\]",         "str(last_response)"),
     # gv.log response dict
     (r"gv\.log\[-1\]\['response_dict'\]",   "last_response_dict"),
-    (r"gv\.log\[-2\]\['response_dict'\]",   "prev_response_dict"),
+    (r"gv\.log\[-2\]\['response_dict'\]",   "last_response_dict"),
     # gv.log response code / headers
     (r"gv\.log\[-1\]\['(?:response_code|status_code)'\]",  "last_response_code"),
     (r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "last_response_headers"),
