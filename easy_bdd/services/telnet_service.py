@@ -358,6 +358,7 @@ class TelnetService:
         host = params.get("host", "")
         port = int(params.get("port", 23))
         command = params.get("command", "")
+        commands = params.get("commands") or []
         prompt = params.get("prompt", "#")
         timeout = float(params.get("timeout", 55.0))
         encoding = params.get("encoding", "utf-8")
@@ -368,6 +369,25 @@ class TelnetService:
         max_retries = int(params.get("max_retries", 2))
         if not host:
             raise ValueError("telnet.send requires 'host'")
+
+        # Normalise: a 'commands' list takes precedence; a single 'command' is
+        # wrapped into a one-item list so the rest of the logic is uniform.
+        if isinstance(commands, str):
+            import ast as _ast
+            _s = commands.strip()
+            # YAML may deliver a Python list literal e.g. "['a', 'b', 'c']"
+            if _s.startswith("["):
+                try:
+                    commands = [str(c) for c in _ast.literal_eval(_s)]
+                except Exception:
+                    commands = [c.strip() for c in _s.strip("[]").split(",") if c.strip()]
+            else:
+                commands = [c.strip() for c in _s.splitlines() if c.strip()]
+        if not commands and command:
+            commands = [command]
+        if not commands:
+            raise ValueError("telnet.send requires 'command' or 'commands'")
+
         key = _pool_key(host, port)
         is_new = not self._pool.has(key)
         if is_new:
@@ -385,12 +405,16 @@ class TelnetService:
             print(f"         ♻️  Reusing existing connection to {host}:{port}")
             conn = self._pool.acquire(key, lambda: _TelnetConn(host, port, timeout))
 
-        data = command if command.endswith("\n") else command + "\n"
-        print(f"         📤 Sending: {command!r}")
+        result = ""
         try:
-            conn.send(data, encoding)
-            result = conn.read_until(prompt, timeout, encoding, stream=True)
-            print(f"         📥 Done ({len(result)} chars)")
+            for cmd in commands:
+                # Strip any trailing whitespace/newlines so we control the line ending.
+                # Use \r\n — the telnet standard — so devices that require CR+LF execute correctly.
+                data = cmd.rstrip("\r\n") + "\r\n"
+                print(f"         📤 Sending: {cmd!r}")
+                conn.send(data, encoding)
+                result = conn.read_until(prompt, timeout, encoding, stream=True)
+                print(f"         📥 Done ({len(result)} chars)")
             return result
         except OSError as exc:
             print(f"         ⚠️  Connection lost: {exc}")
@@ -399,7 +423,11 @@ class TelnetService:
             if new_conn is None:
                 raise
             try:
-                print(f"         📤 Resending: {command!r}")
+                # Re-send only the last command on reconnect — earlier commands
+                # in the sequence cannot be safely replayed automatically.
+                last_cmd = commands[-1]
+                data = last_cmd.rstrip("\r\n") + "\r\n"
+                print(f"         📤 Resending: {last_cmd!r}")
                 new_conn.send(data, encoding)
                 result = new_conn.read_until(prompt, timeout, encoding, stream=True)
                 print(f"         📥 Done ({len(result)} chars)")
