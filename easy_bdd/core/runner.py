@@ -4488,6 +4488,32 @@ class TestRunner:
                         "on",
                     )
 
+                # Sync mybdd-style login vars (login_path, login_json, token_path)
+                # into the auth_manager config so 401 auto-retry can authenticate.
+                _login_path = variables.get("login_path", "")
+                _login_json_raw = variables.get("login_json", "")
+                _token_path = variables.get("token_path", "accessToken")
+                if _login_path and _login_json_raw and hasattr(service, "auth_manager"):
+                    _base = variables.get("url", "").rstrip("/")
+                    _auth_ep = _base + _login_path if _login_path.startswith("/") else _login_path
+                    try:
+                        import ast as _ast
+                        _creds = _ast.literal_eval(str(_login_json_raw)) if isinstance(_login_json_raw, str) else _login_json_raw
+                    except Exception:
+                        _creds = {}
+                    _auth_cfg = {
+                        "type": "bearer_token",
+                        "endpoint": _auth_ep,
+                        "username": _creds.get("username", ""),
+                        "password": _creds.get("password", ""),
+                        "token_field": _token_path,
+                        "headers": variables.get("headers", {}),
+                        "verify_ssl": False,
+                    }
+                    existing = service.auth_manager.get_auth_config(device_id or "default")
+                    if not existing.get("endpoint"):
+                        service.auth_manager.config_manager.api_config_manager.auth_configs[device_id or "default"] = _auth_cfg
+
                 print(f"      API {method}: {url} (device: {device_id})")
                 if verbose_logging:
                     import json
