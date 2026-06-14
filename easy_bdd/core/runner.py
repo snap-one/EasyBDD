@@ -3277,10 +3277,6 @@ class TestRunner:
         # Always set the gv shim last so variables["gv"] (a plain dict used for
         # ${gv.x} substitution) never overwrites the _Gv object in exec context.
         ctx["gv"] = _Gv(variables)
-        # Backward-compat shims for mybdd helper functions that may appear in
-        # stored TestRail cases migrated before the _translate_code() fix.
-        ctx["str2dict"] = lambda s: _json.loads(s) if isinstance(s, str) else s
-        ctx["get_text"] = lambda r: str(r) if not isinstance(r, str) else r
 
         if "set" in action_lower and "extract" not in action_lower:
             key = params.get("key", "")
