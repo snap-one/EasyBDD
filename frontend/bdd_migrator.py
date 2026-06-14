@@ -57,6 +57,20 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 
+def _ensure_base_url(url: str) -> str:
+    """Prepend ${url} to relative paths that have no base URL.
+
+    Relative paths start with '/' and contain no existing base variable or
+    scheme.  Absolute URLs (http://, wss://, ...) and paths already using a
+    ${...} variable prefix are left unchanged.
+    """
+    if not url:
+        return url
+    if url.startswith("/") and not url.startswith("//"):
+        return "${url}" + url
+    return url
+
+
 def _int_or_var(value, default=0):
     """Return int if value is numeric, otherwise return the var-substituted string."""
     s = str(value).strip()
@@ -575,6 +589,7 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         url     = _sub_vars(str(param_dict.get("url", "")))
         path    = _sub_vars(str(param_dict.get("path", param_dict.get("command", ""))))
         full_url = (url.rstrip("/") + "/" + path.lstrip("/")) if path else url
+        full_url = _ensure_base_url(full_url)
         is_ws = method == "SEND" or full_url.startswith("wss://") or full_url.startswith("ws://")
         if is_ws:
             body_val = _expand_json_payload(data_str) if data_str and data_str not in ("{}", "") else None
@@ -592,7 +607,8 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         method  = param_dict.get("method", "get").upper()
         url     = _sub_vars(str(param_dict.get("url", "")))
         path    = _sub_vars(str(param_dict.get("path", "")))
-        step = {"action": "api.request", "method": method, "url": f"{url}{path}", "store_as": "last_response"}
+        full_url = _ensure_base_url(f"{url}{path}")
+        step = {"action": "api.request", "method": method, "url": full_url, "store_as": "last_response"}
         payload = _expand_json_payload(data_str)
         if payload is not None:
             step["body"] = payload
@@ -844,6 +860,7 @@ def _parse_step_line(line: str) -> Optional[Dict]:
             full_url = url.rstrip("/") + "/" + path.lstrip("/")
         else:
             full_url = url
+        full_url = _ensure_base_url(full_url)
         is_ws = method == "SEND" or url.startswith("wss://") or url.startswith("ws://")
         if is_ws:
             body_val = _expand_json_payload(data) if data and data not in ("{}", "") else None
@@ -864,7 +881,7 @@ def _parse_step_line(line: str) -> Optional[Dict]:
         path   = _sub_vars(m.group(2).strip())
         method = m.group(3).strip().upper()
         data   = m.group(5).strip()
-        step = {"action": "api.request", "method": method, "url": f"{url}{path}", "store_as": "last_response"}
+        step = {"action": "api.request", "method": method, "url": _ensure_base_url(f"{url}{path}"), "store_as": "last_response"}
         payload = _expand_json_payload(data)
         if payload is not None:
             step["body"] = payload
