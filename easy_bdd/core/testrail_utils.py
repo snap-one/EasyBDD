@@ -1,5 +1,21 @@
 """Shared utilities for building TestRail case content."""
 
+# Characters / patterns that require a string value to be single-quoted in YAML
+_YAML_UNSAFE = ('"', "'", '[', ']', '{', '}', '#', '\n')
+
+
+def _needs_quoting(v: str) -> bool:
+    """Return True if string value v must be quoted to be safe YAML."""
+    if not v:
+        return False
+    # Leading ! is a YAML tag indicator
+    if v.startswith('!'):
+        return True
+    # ': ' inside a value creates a spurious mapping entry
+    if ': ' in v:
+        return True
+    return any(c in v for c in _YAML_UNSAFE)
+
 
 def _flatten_steps(steps: list) -> list:
     """Flatten one level of list/tuple nesting that bdd_migrator sometimes produces.
@@ -42,14 +58,18 @@ def build_testrail_preconditions(steps: list) -> str:
             lines.append(f"- {action_key}:")
             if isinstance(params, dict):
                 for k, v in params.items():
-                    if isinstance(v, str) and any(c in v for c in ('"', "'", '[', ']', '{', '}', ':')):
-                        # Quote values containing YAML-unsafe characters
+                    if isinstance(v, dict):
+                        # Inline flow-style keeps params flush-left so
+                        # _fix_step_list_indent can safely re-indent them.
+                        # Block-style indented children break re-indentation.
+                        inner = ", ".join(
+                            f"'{dk}': '{str(dv).replace(chr(39), chr(39)*2)}'"
+                            for dk, dv in v.items()
+                        )
+                        lines.append(f"{k}: {{{inner}}}")
+                    elif isinstance(v, str) and _needs_quoting(v):
                         safe = v.replace("'", "''")
                         lines.append(f"{k}: '{safe}'")
-                    elif isinstance(v, dict):
-                        lines.append(f"{k}:")
-                        for dk, dv in v.items():
-                            lines.append(f"  {dk}: {dv}")
                     else:
                         lines.append(f"{k}: {v}")
         else:
