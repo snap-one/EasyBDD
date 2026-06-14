@@ -63,7 +63,7 @@ ping_target: 192.168.100.1
 **Rules:**
 - The `Var:` case must be **included in the run** (status Untested or Retest) — excluded cases are not read.
 - Variables are available in all Feature cases as `${variable_name}`.
-- If a URL value contains `://`, the parser still handles it correctly via `partition(":")`.
+- If a URL value contains `://`, the parser still handles it correctly.
 
 **Special control variables:**
 
@@ -220,8 +220,6 @@ Add these to your `Var:` case or test variables to control the browser:
 
 ## 5. API Tests with Bearer Tokens
 
-### Step 1 — Login and get token
-
 ### store_as response structure
 
 `store_as` wraps the HTTP response in a dict with these keys:
@@ -234,7 +232,9 @@ Add these to your `Var:` case or test variables to control the browser:
 | `headers` | Response headers dict |
 | `response_time` | Elapsed time in milliseconds |
 
-So `login_response.data` is where the JSON body lives. Always go through `.data` in expressions and `${var.data...}` in headers.
+The JSON body lives under `.data`. Use dot-notation to navigate it directly in both expressions and `${...}` substitutions.
+
+### Step 1 — Login and get token
 
 ```
 # 1. POST login
@@ -245,27 +245,23 @@ body: {'user': '${api_username}', 'password': '${api_password}'}
 store_as: login_response
 # 2. Verify login succeeded
 - test.assert:
-expression: "login_response.get('data', {}).get('restful_res', {}).get('errCode') == 0"
+expression: login_response.data.restful_res.errCode == 0
 message: Login should return errCode 0
 ```
 
-> ⚠️ **Expression quoting rule:** Any `test.assert` expression containing `'`, `"`, `[`, `]`, or `{` must be wrapped in the **opposite** quote style to avoid YAML misparse.
->
-> ✅ Use double quotes as outer wrapper: `expression: "login_response.get('data', {}).get('errCode') == 0"`  
-> ❌ Wrong: `expression: login_response["data"]["errCode"] == 0`
-
 ### Step 2 — Use token in subsequent requests
-
-Reference a nested response field using dot-notation in `${...}` substitution. Because `store_as` wraps JSON under `.data`, the path includes `data`:
 
 ```
 # 3. GET endpoint with bearer token
 - api.request:
 method: GET
 url: ${api_url}/system/firmware
-headers:
-  Authorization: Bearer ${login_response.data.restful_res.token}
+headers: {'Authorization': 'Bearer ${login_response.data.restful_res.token}'}
 store_as: firmware_response
+# 4. Check key is present in response
+- test.assert:
+expression: "'partition1Version' in firmware_response.data.restful_res.fwConfs"
+message: Firmware response should contain partition1Version
 ```
 
 ### Token response structure mapping (device config `token_field`)
@@ -315,24 +311,48 @@ store_as: firmware_response
 
 ## 6. Assertions
 
-### test.assert — evaluate a Python expression
+### test.assert — dot-notation (preferred)
+
+Use dot-notation to navigate nested response data. No quoting needed unless the expression contains single quotes.
 
 ```
 - test.assert:
-expression: 'firmware_response.get("restful_res", {}).get("errCode") == 0'
-message: Firmware request should succeed
+expression: login_response.data.restful_res.errCode == 0
+message: Login should return errCode 0
 ```
 
 ```
 - test.assert:
-expression: '"partition1Version" in firmware_response.get("restful_res", {})'
-message: partition1Version key should be present
+expression: firmware_response.data.restful_res.fwConfs.partition1Version == 'IMG-1.0.23.01'
+message: Firmware version should match expected
 ```
 
-**Expression rules:**
-- Wrap the whole value in single quotes `'...'` when it contains double quotes or brackets.
-- Use `.get("key", {})` instead of `["key"]` to avoid `KeyError` when a key might be absent.
-- Dictionary key strings inside expressions must be quoted: `"key"` or `'key'`.
+### test.assert — `in` checks
+
+When checking for a key inside a dict, the `'key' in dict` expression contains single quotes, so wrap the whole expression in double quotes:
+
+```
+- test.assert:
+expression: "'token' in login_response.data.restful_res"
+message: Response should contain a token
+```
+
+```
+- test.assert:
+expression: "'partition1Version' in firmware_response.data.restful_res.fwConfs"
+message: Firmware response should contain partition1Version
+```
+
+### Expression quoting rule
+
+| Expression type | Quoting needed | Example |
+|----------------|---------------|---------|
+| Comparison with numbers or booleans | None | `expression: response.data.errCode == 0` |
+| Comparison with string literal | None (if no special chars) | `expression: response.data.status == OK` |
+| `in` check (contains single quotes) | Wrap in double quotes | `expression: "'key' in response.data.items"` |
+| Contains `[`, `]`, `{`, `}` | Wrap in double quotes | `expression: "response.data.get('key', {}) == {}"` |
+
+**Bottom line:** prefer dot-notation to avoid special characters entirely. Only reach for `.get()` when you need a fallback default if a key might be absent.
 
 ### browser.verify_text — check text appears on page
 
@@ -379,17 +399,18 @@ Screenshots are saved to `reports/` and attached to the TestRail result automati
 
 ## 8. Common Pitfalls and Fixes
 
-### YAML breaks on expressions with quotes or brackets
+### YAML breaks on expressions with single quotes
 
 **Symptom:** `Could not parse Preconditions as YAML: expected <block end>`  
-**Fix:** Wrap the expression value in single quotes.
+**Cause:** An expression containing `'key' in ...` has unbalanced quotes when YAML reads the line.  
+**Fix:** Wrap the entire expression in double quotes.
 
 ```
 # Wrong
-expression: "token" in login_response["restful_res"]
+expression: 'token' in login_response.data.restful_res
 
 # Correct
-expression: '"token" in login_response.get("restful_res", {})'
+expression: "'token' in login_response.data.restful_res"
 ```
 
 ### Selector with `#` is ignored
@@ -420,7 +441,7 @@ selector: "#fun_1_0"
 ### `headless: False` has no effect
 
 **Symptom:** Browser still launches headless.  
-**Fix:** The value must be a boolean, not a string. Write `headless: False` (capital F, no quotes). Strings `"false"` and `"False"` are now coerced automatically, but the boolean form is clearest.
+**Fix:** The value must be a boolean, not a string. Write `headless: False` (capital F, no quotes). Strings `"false"` and `"False"` are coerced automatically, but the boolean form is clearest.
 
 ### Login lock-out from too many failed attempts
 
@@ -444,10 +465,10 @@ exact: true
 selector: "#fun_1_0"
 ```
 
-### Nested body dict causes YAML parse error
+### Nested body/headers dict causes YAML parse error
 
 **Symptom:** `mapping values are not allowed here` pointing at a param like `store_as:`  
-**Cause:** A `body:` param with indented children breaks the flush-left re-indentation scheme.
+**Cause:** A `body:` or `headers:` param with indented children breaks the flush-left re-indentation scheme.
 
 ```
 # Wrong — indented children confuse the parser
@@ -461,7 +482,10 @@ body: {'user': '${api_username}', 'password': '${api_password}'}
 store_as: login_response
 ```
 
-Same applies to `headers:` with multiple values.
+Same applies to `headers:` with multiple values:
+```
+headers: {'Authorization': 'Bearer ${login_response.data.restful_res.token}'}
+```
 
 ### YAML parse error in long navigation tests
 

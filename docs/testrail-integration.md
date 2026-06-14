@@ -54,7 +54,7 @@ Use this checklist before saving any Feature case in TestRail.
 - Keep one step per line starting with `- action.name: {...}`.
 - Quote variable substitutions and expressions, for example `"${token}"` and `"'systemInfo' in last_json"`.
 - Put `store_as` and `store_response` at step level, not inside `headers` or `body`.
-- For JSON extraction, use `last_json[...]` instead of `last_response[...]`.
+- For JSON extraction, use dot-notation: `last_json.restful_res.token` — bracket access also works but is more verbose.
 - For authenticated requests, set header as `Authorization: "Bearer ${token}"`.
 - Avoid `Content-Type` on GET requests unless endpoint requires it.
 - Ensure keys in assert expressions are quoted, for example `'errCode'`.
@@ -65,7 +65,7 @@ Quick validation snippet:
 
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
-- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- eval.run: {expression: "last_json.restful_res.token", store_as: token}
 - api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}"}}
 - assert: {expression: "last_status == 200"}
 ```
@@ -202,7 +202,7 @@ TestRail text fields can flatten indentation, merge lines, or replace spaces wit
 
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
-- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- eval.run: {expression: "last_json.restful_res.token", store_as: token}
 - api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}", Accept: application/json}}
 - assert: {expression: "'systemInfo' in last_json"}
 ```
@@ -227,7 +227,7 @@ TestRail text fields can flatten indentation, merge lines, or replace spaces wit
 
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
-- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- eval.run: {expression: "last_json.restful_res.token", store_as: token}
 - assert: {expression: "token is not None and len(token) > 10"}
 ```
 
@@ -242,9 +242,9 @@ TestRail text fields can flatten indentation, merge lines, or replace spaces wit
 ### Recipe 3: Validate key/value pairs
 
 ```yaml
-- assert: {expression: "last_json['restful_res']['errCode'] == 0"}
-- assert: {expression: "last_json['restful_res']['message'] == 'OK'"}
-- assert: {expression: "'token' in last_json['restful_res']"}
+- assert: {expression: "last_json.restful_res.errCode == 0"}
+- assert: {expression: "last_json.restful_res.message == 'OK'"}
+- assert: {expression: "'token' in last_json.restful_res"}
 ```
 
 ### Recipe 4: Reuse login via shared step
@@ -259,29 +259,43 @@ TestRail text fields can flatten indentation, merge lines, or replace spaces wit
 
 ## Response Variables and Extraction Rules
 
-After each `api.request`, the runner provides these variables:
+After each `api.request`, the runner provides these automatic variables:
 
 | Variable | Type | Use |
 |----------|------|-----|
-| `last_response` | `requests.Response` | Raw response object (status, headers, text access) |
+| `last_response` | `requests.Response` | Raw response object |
 | `last_status` | `int` | HTTP status code |
-| `last_json` | `dict \| None` | Parsed JSON body when content-type is JSON |
+| `last_json` | `dict \| None` | Parsed JSON body — use dot-notation directly |
 
-Important:
+When you use `store_as: my_response`, the runner wraps the response in an envelope:
 
-- `last_response` is not subscriptable. This fails: `last_response['restful_res']`.
-- Use `last_json[...]` for JSON key extraction.
-- `store_as` in `api.request` is not required for token extraction if you use `last_json`.
-- Use `store_response` only if you need a custom captured response dictionary.
+| Key | Contents |
+|-----|---------|
+| `my_response.status` | HTTP status code |
+| `my_response.data` | Parsed JSON body — navigate with dot-notation from here |
+| `my_response.body` | Raw response text |
+| `my_response.headers` | Response headers dict |
+| `my_response.response_time` | Elapsed time (ms) |
 
-### Correct vs incorrect extraction
+### Dot-notation access (preferred)
 
 ```yaml
-# Correct
-- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+# last_json — JSON is at the top level, no .data needed
+- eval.run: {expression: "last_json.restful_res.token", store_as: token}
+- assert: {expression: "last_json.restful_res.errCode == 0"}
+- assert: {expression: "'systemInfo' in last_json"}
 
-# Incorrect
-- eval.run: {expression: "last_response['restful_res']['token']", store_as: token}
+# store_as — JSON is under .data
+- api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}, store_as: login_response}
+- assert: {expression: "login_response.data.restful_res.errCode == 0"}
+- assert: {expression: "'token' in login_response.data.restful_res"}
+```
+
+### Bracket-access also works but is verbose
+
+```yaml
+# Also valid, but prefer dot-notation
+- assert: {expression: "last_json['restful_res']['errCode'] == 0"}
 ```
 
 ---
@@ -295,7 +309,7 @@ Copy/paste these patterns into a Feature case Preconditions field.
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
 - assert: {expression: "last_status == 200"}
-- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- eval.run: {expression: "last_json.restful_res.token", store_as: token}
 ```
 
 ### 2) Token reuse for authenticated GET
@@ -375,7 +389,7 @@ steps:
         password: ${password}
 
   - eval.run:
-      expression: last_json['restful_res']['token']
+      expression: last_json.restful_res.token
       store_as: token
 
   - api.request:
@@ -392,7 +406,7 @@ steps:
 
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
-- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- eval.run: {expression: "last_json.restful_res.token", store_as: token}
 - api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}"}}
 - assert: {expression: "'systemInfo' in last_json"}
 ```
