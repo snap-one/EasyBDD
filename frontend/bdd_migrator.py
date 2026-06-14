@@ -137,22 +137,22 @@ def _sub_vars(text: str) -> str:
 # ── patterns applied to Python code strings (eval.exec, test.assert, etc.) ──
 # Maps (pattern, replacement) where replacement can be a string or callable.
 _CODE_PATTERNS: List[Tuple[str, Any]] = [
-    # gv.log response text  (old framework used 'response'; Easy BDD uses 'response_txt'
-    # but also exposes last_response as a bare name)
-    (r"gv\.log\[-1\]\['response_txt'\]",    "str(last_response)"),
-    (r"gv\.log\[-1\]\['response'\]",         "str(last_response)"),
-    (r"gv\.log\[-2\]\['response_txt'\]",    "str(last_response)"),
-    (r"gv\.log\[-2\]\['response'\]",         "str(last_response)"),
+    # gv.log response text — Easy BDD stores the full response dict under store_as;
+    # the body JSON string lives in last_response['body'].
+    (r"gv\.log\[-1\]\['response_txt'\]",    "last_response['body']"),
+    (r"gv\.log\[-1\]\['response'\]",         "last_response['body']"),
+    (r"gv\.log\[-2\]\['response_txt'\]",    "last_response['body']"),
+    (r"gv\.log\[-2\]\['response'\]",         "last_response['body']"),
     # gv.log response dict
     (r"gv\.log\[-1\]\['response_dict'\]",   "last_response_dict"),
     (r"gv\.log\[-2\]\['response_dict'\]",   "last_response_dict"),
     # gv.log response code / headers
-    (r"gv\.log\[-1\]\['(?:response_code|status_code)'\]",  "last_response_code"),
-    (r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "last_response_headers"),
+    (r"gv\.log\[-1\]\['(?:response_code|status_code)'\]",  "last_response['status']"),
+    (r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "last_response['headers']"),
     # Numeric-indexed log entries
     (r"gv\.log\[(-?\d+)\]\['response(?:_txt)?'\]",
-        lambda m: "str(last_response)" if m.group(1) in ("-1",)
-                  else f"str(log_response_{m.group(1).lstrip('-')})"),
+        lambda m: "last_response['body']" if m.group(1) in ("-1",)
+                  else f"log_response_{m.group(1).lstrip('-')}['body']"),
     (r"gv\.log\[(-?\d+)\]\['response_dict'\]",
         lambda m: "last_response_dict" if m.group(1) in ("-1",)
                   else f"log_response_dict_{m.group(1).lstrip('-')}"),

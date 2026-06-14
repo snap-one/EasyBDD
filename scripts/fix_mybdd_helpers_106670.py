@@ -27,16 +27,22 @@ TARGET_SUITE_ID = 106670
 DRY_RUN = "--live" not in sys.argv
 
 _REPLACEMENTS = [
-    (re.compile(r"\bgv\.str2dict\b"),   "json.loads"),
-    (re.compile(r"\bstr2dict\b"),       "json.loads"),
-    (re.compile(r"\bgv\.get_text\b"),   "str"),
-    (re.compile(r"\bget_text\b"),       "str"),
-    (re.compile(r"\bprev_response\b"),  "last_response"),
+    # str(str(last_response)) is a double-wrapped Python repr — the body JSON is in ['body']
+    (re.compile(r"str\(str\(last_response\)\)"),        "last_response['body']"),
+    (re.compile(r"str\(last_response\)"),               "last_response['body']"),
+    (re.compile(r"\bgv\.str2dict\b"),                   "json.loads"),
+    (re.compile(r"\bstr2dict\b"),                       "json.loads"),
+    (re.compile(r"\bgv\.get_text\b"),                   "str"),
+    (re.compile(r"\bget_text\b"),                       "str"),
+    (re.compile(r"\bprev_response\b"),                  "last_response"),
 ]
 
 
 def _needs_fix(preconds: str) -> bool:
-    return bool(re.search(r"\b(str2dict|get_text|prev_response)\b", preconds))
+    return bool(re.search(
+        r"\b(str2dict|get_text|prev_response)\b|str\((?:str\()?last_response\)?",
+        preconds,
+    ))
 
 
 def _fix_preconds(preconds: str) -> str:
