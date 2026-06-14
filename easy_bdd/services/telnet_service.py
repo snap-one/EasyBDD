@@ -359,6 +359,10 @@ class TelnetService:
         port = int(params.get("port", 23))
         command = params.get("command", "")
         commands = params.get("commands") or []
+        # If 'command' was given a YAML list value, promote it to 'commands'
+        if isinstance(command, list):
+            commands = command
+            command = ""
         prompt = params.get("prompt", "#")
         timeout = float(params.get("timeout", 55.0))
         encoding = params.get("encoding", "utf-8")
