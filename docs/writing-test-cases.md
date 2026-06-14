@@ -222,6 +222,20 @@ Add these to your `Var:` case or test variables to control the browser:
 
 ### Step 1 — Login and get token
 
+### store_as response structure
+
+`store_as` wraps the HTTP response in a dict with these keys:
+
+| Key | Contents |
+|-----|---------|
+| `status` | HTTP status code (integer) |
+| `data` | Parsed JSON body (dict/list), or raw text if not JSON |
+| `body` | Raw response text (string) |
+| `headers` | Response headers dict |
+| `response_time` | Elapsed time in milliseconds |
+
+So `login_response.data` is where the JSON body lives. Always go through `.data` in expressions and `${var.data...}` in headers.
+
 ```
 # 1. POST login
 - api.request:
@@ -233,18 +247,18 @@ body:
 store_as: login_response
 # 2. Verify login succeeded
 - test.assert:
-expression: 'login_response.get("restful_res", {}).get("errCode") == 0'
+expression: "login_response.get('data', {}).get('restful_res', {}).get('errCode') == 0"
 message: Login should return errCode 0
 ```
 
-> ⚠️ **Expression quoting rule:** Any `test.assert` expression containing `"`, `'`, `[`, `]`, or `{` must be wrapped in single quotes so YAML does not misparse it.
+> ⚠️ **Expression quoting rule:** Any `test.assert` expression containing `'`, `"`, `[`, `]`, or `{` must be wrapped in the **opposite** quote style to avoid YAML misparse.
 >
-> ✅ Correct: `expression: 'login_response.get("restful_res", {}).get("errCode") == 0'`  
-> ❌ Wrong: `expression: login_response["restful_res"]["errCode"] == 0`
+> ✅ Use double quotes as outer wrapper: `expression: "login_response.get('data', {}).get('errCode') == 0"`  
+> ❌ Wrong: `expression: login_response["data"]["errCode"] == 0`
 
 ### Step 2 — Use token in subsequent requests
 
-Reference a nested response field using dot-notation in `${...}` substitution:
+Reference a nested response field using dot-notation in `${...}` substitution. Because `store_as` wraps JSON under `.data`, the path includes `data`:
 
 ```
 # 3. GET endpoint with bearer token
@@ -252,19 +266,19 @@ Reference a nested response field using dot-notation in `${...}` substitution:
 method: GET
 url: ${api_url}/system/firmware
 headers:
-  Authorization: Bearer ${login_response.restful_res.token}
+  Authorization: Bearer ${login_response.data.restful_res.token}
 store_as: firmware_response
 ```
 
-### Token response structure mapping
+### Token response structure mapping (device config `token_field`)
 
-| Response shape | `token_field` in device config |
-|---------------|-------------------------------|
-| `{"token": "..."}` | `token` |
-| `{"data": {"token": "..."}}` | `data.token` |
-| `{"restful_res": {"token": "..."}}` | `restful_res.token` |
+| Device response shape | `token_field` value | In-step dot path |
+|----------------------|--------------------|--------------------|
+| `{"token": "..."}` | `token` | `login_response.data.token` |
+| `{"data": {"token": "..."}}` | `data.token` | `login_response.data.data.token` |
+| `{"restful_res": {"token": "..."}}` | `restful_res.token` | `login_response.data.restful_res.token` |
 
-Dot-notation is supported at any depth.
+The `token_field` in the device config file describes the *device's* JSON structure (no `data` wrapper — that's the framework's). The in-step `${...}` substitution always needs the `data.` prefix.
 
 ### Device config file (for reusable auth)
 
