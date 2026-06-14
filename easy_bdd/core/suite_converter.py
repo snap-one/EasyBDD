@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
+from .testrail_utils import build_testrail_preconditions
 
 # Add frontend/ to path once at module load so bdd_migrator is importable
 _FRONTEND = Path(__file__).parent.parent.parent / "frontend"
@@ -688,17 +689,13 @@ class BddSuiteConverter:
             sec = _target_section(c)
 
             if pf["extra_vars"]:
-                # Include both variables and steps so the runner can read both
-                preconds_doc = {"variables": pf["extra_vars"], "steps": pf["steps"]}
-                preconds_text = yaml.dump(
-                    preconds_doc, allow_unicode=True,
-                    default_flow_style=False, sort_keys=False
-                ).rstrip()
+                # Prepend variables block then numbered steps
+                var_lines = ["variables:"]
+                for k, v in pf["extra_vars"].items():
+                    var_lines.append(f"  {k}: {v}")
+                preconds_text = "\n".join(var_lines) + "\n" + build_testrail_preconditions(pf["steps"])
             else:
-                preconds_text = yaml.dump(
-                    pf["steps"], allow_unicode=True,
-                    default_flow_style=False, sort_keys=False
-                ).rstrip() if pf["steps"] else ""
+                preconds_text = build_testrail_preconditions(pf["steps"]) if pf["steps"] else ""
 
             payload: Dict[str, Any] = {
                 "title":           f"Feature: {pf['clean']}",

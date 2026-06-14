@@ -637,6 +637,19 @@ class TestRunner:
         variables = {**config_vars, **(test.variables or {})}
         test.variables = variables  # single source of truth for the rest of _run_test
 
+        # Push test-level variables into the variable manager so services like
+        # BrowserService can read them via config.get_variable() (e.g. headless: false).
+        try:
+            test_scope = next(
+                (s for s in self.config.variable_manager.scopes if s.name == "test_variables"),
+                None,
+            )
+            if test_scope is not None:
+                test_scope.variables.clear()
+                test_scope.update(test.variables or {})
+        except Exception:
+            pass
+
         # Store original stdout to capture console output
         original_stdout = sys.stdout
 
@@ -4198,7 +4211,7 @@ class TestRunner:
                     service.fill_form_field(field, value)
                 elif selector:
                     print(f"      Filling field '{selector}' with value '{value}'")
-                    service.fill_element(selector, value)
+                    service.fill_form_field(selector, value)
                 return True
 
             elif hasattr(service, "take_screenshot") and "screenshot" in action:
