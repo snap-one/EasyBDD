@@ -522,10 +522,17 @@ class AWSService:
 
         def sort_key(url):
             key, filename = extract_filename(url)
-            m = re.search(r"-(\d{10})(?:-DM)?(?:\.|$)", filename)
-            build_ts = int(m.group(1)) if m else 0
             is_dm = 1 if "-DM." in filename or filename.endswith("-DM") else 0
-            return (-build_ts, is_dm, key)
+            # Primary: 10-digit build timestamp (e.g. wattbox firmware)
+            m = re.search(r"-(\d{10})(?:-DM)?(?:\.|$)", filename)
+            if m:
+                return (-int(m.group(1)), is_dm, key)
+            # Fallback: semver X.Y.Z (e.g. upgrade_moip_4.7.0.bin)
+            sv = re.search(r"(\d+)\.(\d+)\.(\d+)", filename)
+            if sv:
+                version_int = int(sv.group(1)) * 1_000_000 + int(sv.group(2)) * 1_000 + int(sv.group(3))
+                return (-version_int, is_dm, key)
+            return (0, is_dm, key)
 
         return sorted(urls, key=sort_key)
 

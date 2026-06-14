@@ -3413,9 +3413,11 @@ class TestRunner:
             exec(code, ctx)  # noqa: S102
             # Persist any new/changed keys back to eval state (exclude builtins)
             for k, v in ctx.items():
-                if not k.startswith("_") and k not in ("state", "variables", "math", "re", "json", "datetime", "collections"):
+                if not k.startswith("_") and k not in ("state", "variables", "math", "re", "json", "datetime", "collections", "platform"):
                     self._eval_state[k] = v
                     variables[k] = v
+                    if hasattr(self.config, "set_variable"):
+                        self.config.set_variable(k, v, "runtime_data")
             # Mirror attributes set on the gv shim (e.g. gv.message = "...") into
             # variables["gv"] as a plain dict so ${gv.message} resolves correctly.
             _gv_obj = ctx.get("gv")
