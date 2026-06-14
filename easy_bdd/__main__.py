@@ -344,6 +344,54 @@ Examples:
         help="Suppress per-case progress output",
     )
 
+    # TestRail sync command — Easy BDD TestRail suite → local YAML files
+    trs_parser = subparsers.add_parser(
+        "testrail-sync",
+        help="Sync an Easy BDD TestRail suite to local YAML files runnable via 'easy_bdd run'",
+    )
+    trs_parser.add_argument(
+        "project_id",
+        type=int,
+        help="TestRail project ID",
+    )
+    _trs_src = trs_parser.add_mutually_exclusive_group(required=True)
+    _trs_src.add_argument(
+        "--suite",
+        type=int,
+        dest="source_suite_id",
+        metavar="SUITE_ID",
+        help="Easy BDD suite ID to sync (Feature:/Shared:/Var: cases)",
+    )
+    _trs_src.add_argument(
+        "--run",
+        type=int,
+        dest="source_run_id",
+        metavar="RUN_ID",
+        help="Run ID to read cases from instead of a suite",
+    )
+    trs_parser.add_argument(
+        "--output-dir",
+        default=None,
+        metavar="PATH",
+        help="Directory to write generated YAML files (default: tests/cases/<suite_slug>)",
+    )
+    trs_parser.add_argument(
+        "--tag",
+        default=None,
+        metavar="TAG",
+        help="Tag added to every generated test (default: slugified suite name)",
+    )
+    trs_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be written without creating any files",
+    )
+    trs_parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-case progress output",
+    )
+
     # MCP serve command
     mcp_parser = subparsers.add_parser(
         "mcp-serve",
@@ -546,6 +594,8 @@ Examples:
             return testrail_create_run(args)
         elif args.command == "testrail-convert":
             return testrail_convert(args)
+        elif args.command == "testrail-sync":
+            return testrail_sync(args)
         elif args.command == "mcp-serve":
             return mcp_serve(args)
         elif args.command == "selector-audit":
@@ -1645,6 +1695,41 @@ def testrail_convert(args) -> int:
 
     result.print_summary()
     return 1 if result.errors > 0 else 0
+
+
+def testrail_sync(args) -> int:
+    """Sync an Easy BDD TestRail suite to local runnable YAML files."""
+    from .services.testrail_service import TestRailService, TestRailError
+    from .core.testrail_syncer import TestrailSyncer
+
+    try:
+        tr = TestRailService()
+    except TestRailError as e:
+        print(f"TestRail configuration error: {e}", file=sys.stderr)
+        print("Set TESTRAIL_URL, TESTRAIL_USERNAME, and TESTRAIL_API_KEY in your .env file.",
+              file=sys.stderr)
+        return 1
+
+    output_dir = Path(args.output_dir) if args.output_dir else None
+
+    mode = "DRY-RUN" if args.dry_run else "LIVE"
+    src_desc = f"suite {args.source_suite_id}" if args.source_suite_id else f"run {args.source_run_id}"
+    print(f"\n[Sync] {mode} — {src_desc} → {output_dir or 'tests/cases/<suite_slug>'}")
+    print()
+
+    syncer = TestrailSyncer(tr)
+    result = syncer.sync(
+        project_id=args.project_id,
+        source_suite_id=args.source_suite_id,
+        source_run_id=args.source_run_id,
+        output_dir=output_dir,
+        suite_tag=args.tag,
+        dry_run=args.dry_run,
+        verbose=not args.quiet,
+    )
+
+    result.print_summary()
+    return 1 if result.error_count > 0 else 0
 
 
 def testrail_list(args) -> int:
