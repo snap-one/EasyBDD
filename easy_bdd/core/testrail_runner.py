@@ -459,7 +459,33 @@ def _fix_step_list_indent(text: str) -> str:
         else:
             result.append(line)
             i += 1
-    return '\n'.join(result)
+
+    text = '\n'.join(result)
+
+    # Post-pass: re-indent flush-left list items that follow a bare top-level key.
+    # e.g. "steps:\n- api.request:" → "steps:\n  - api.request:"
+    # YAML requires list items to be indented under their mapping key.
+    import re as _re_post
+    out_lines = text.split('\n')
+    fixed: List[str] = []
+    j = 0
+    while j < len(out_lines):
+        ln = out_lines[j]
+        # Bare key at col 0 with no inline value (e.g. "steps:", "variables:")
+        if _re_post.match(r'^[a-zA-Z_]\w*:\s*$', ln) and j + 1 < len(out_lines) and out_lines[j + 1].startswith('-'):
+            fixed.append(ln)
+            j += 1
+            # Indent the entire following block by 2 spaces until next root bare key
+            while j < len(out_lines):
+                sub = out_lines[j]
+                if sub and _re_post.match(r'^[a-zA-Z_]\w*:\s*$', sub):
+                    break  # next root-level bare key starts a new block
+                fixed.append('  ' + sub if sub else sub)
+                j += 1
+        else:
+            fixed.append(ln)
+            j += 1
+    return '\n'.join(fixed)
 
 
 # Ordered prefix → role mapping (order matters: longest prefix checked first)
@@ -1407,8 +1433,11 @@ class TestRailRunner:
                 # Setup:/Teardown: cases whose body starts with 'steps:' are treated
                 # as inline Feature: cases so they can contain YAML steps directly.
                 _stripped = body.lstrip()
-                _is_inline_steps = role in ("setup", "teardown") and (
-                    _stripped.startswith("steps:") or _stripped.startswith("-")
+                # Setup:/Teardown: cases are inline steps unless they explicitly use
+                # tag:/file: routing.  Any other non-empty body is treated as inline so
+                # _run_feature can give a proper diagnostic rather than "Unrecognised body".
+                _is_inline_steps = role in ("setup", "teardown") and bool(_stripped) and not (
+                    _stripped.startswith("tag:") or _stripped.startswith("file:")
                 )
                 if role == "inline" or _is_inline_steps:
                     test_passed, comment_lines, case_test_details = self._run_feature(case, injected_vars, verbose)
