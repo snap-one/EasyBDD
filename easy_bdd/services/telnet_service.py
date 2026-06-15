@@ -238,10 +238,12 @@ class _TelnetConn:
                 last_recv = time.time()
                 if stream:
                     text = chunk.decode(encoding, errors="replace")
-                    _stream_line_buf += text.replace("\r\n", "\n").replace("\r", "\n")
+                    # Normalize: \r\n → \n, then drop orphaned \r (avoids blank lines)
+                    _stream_line_buf += text.replace("\r\n", "\n").replace("\r", "")
                     while "\n" in _stream_line_buf:
                         line, _stream_line_buf = _stream_line_buf.split("\n", 1)
-                        if line.strip() and line.strip() != "--More--":
+                        stripped = line.strip()
+                        if stripped and stripped != "--More--" and "�" not in stripped:
                             print(f"             {line}")
                     sys.stdout.flush()
                 self._buf += chunk
@@ -482,18 +484,26 @@ class TelnetService:
                 conn.send(data, encoding)
                 result = conn.read_until(prompt, timeout, encoding, stream=True)
 
-                # Strip remote echo: devices echo the sent command as the first line,
-                # sometimes prefixed by the device prompt (e.g. "AN-220-SW-R-16-POE# cmd").
-                # Without this, assertions against str(last_response) match the command
-                # text itself and produce false positives when no real output follows.
-                _stripped = result.lstrip("\r\n")
-                _nl = _stripped.find("\n")
-                if _nl >= 0:
-                    _first_line = _stripped[:_nl].strip("\r\n ")
-                    _cmd_clean = cmd.rstrip("\r\n").strip()
-                    # Match exact echo OR prompt-prefixed echo (e.g. "Device# show version")
-                    if _first_line == _cmd_clean or _first_line.endswith(_cmd_clean):
-                        result = _stripped[_nl + 1:]
+                # Normalize line endings: \r\n → \n, then drop orphaned \r.
+                # Devices often send \r\n\r (CR LF CR) per line; without this the
+                # extra \r decodes as a second newline and every field double-spaces.
+                result = result.replace("\r\n", "\n").replace("\r", "")
+
+                # Strip remote echo: the first line is the echoed command, sometimes
+                # with telnet control bytes interleaved (decoded as � replacement
+                # chars). Strip it if it contains the command text OR garbled chars.
+                _cmd_clean = cmd.rstrip("\r\n").strip()
+                _lines = result.lstrip("\n").split("\n")
+                if _lines:
+                    _first = _lines[0].strip()
+                    # Remove replacement chars to get the printable chars for comparison
+                    _first_printable = _first.replace("�", "").strip()
+                    if (
+                        _first_printable == _cmd_clean
+                        or _first_printable.endswith(_cmd_clean)
+                        or "�" in _first  # garbled echo line — always drop
+                    ):
+                        result = "\n".join(_lines[1:]).lstrip("\n")
 
                 print(f"         📥 Done ({len(result)} chars)")
             return result
