@@ -1365,6 +1365,8 @@ class TestRunner:
                 return self._handle_json_schema_action(step_params, variables)
             elif action_lower in ["assert response", "test.assert_response"]:
                 return self._handle_response_assertion(step_params, variables)
+            elif action_lower in ["test.extract", "extract"]:
+                return self._handle_extract_action(step_params, variables)
 
             # JSON-RPC WebSocket actions (support both formats)
             if (
@@ -1472,7 +1474,7 @@ class TestRunner:
             if (
                 action_lower_check in ("assert", "test.assert", "assert json schema",
                                        "test.assert_schema", "assert response",
-                                       "test.assert_response")
+                                       "test.assert_response", "test.extract", "extract")
                 or action_lower_check.startswith("websocket")
                 or action_lower_check.startswith("ws.")
                 or action_lower_check.startswith("telnet")
@@ -1872,6 +1874,99 @@ class TestRunner:
                 for failure in failures:
                     print(f"        - {failure}")
             raise AssertionError(result.message)
+
+    def _handle_extract_action(self, step_params: dict, variables: dict) -> bool:
+        """Handle test.extract — parse a field from a key:value text response.
+
+        Supports two response formats:
+          - CLI text:  'Switch Name          : AN-220-SW-R-16-POE'
+          - JSON dict: {'restful_res': {'token': 'abc...'}}  (dot-notation field)
+
+        Parameters
+        ----------
+        field     : field name to search for (case-insensitive substring match on the key)
+        from      : variable name to read from (default: last_response)
+        store_as  : variable name to store the extracted value
+        equals    : if given, assert the extracted value equals this (after variable substitution)
+        contains  : if given, assert the extracted value contains this string
+        message   : custom assertion failure message
+        """
+        import re as _re
+        params = self._get_params(step_params)
+
+        field    = str(params.get("field", ""))
+        from_var = str(params.get("from", "last_response"))
+        store_as = str(params.get("store_as", ""))
+        equals   = params.get("equals")
+        contains = params.get("contains")
+        message  = params.get("message", "")
+
+        if not field:
+            raise ValueError("test.extract requires 'field'")
+
+        # Resolve the source variable
+        source = variables.get(from_var, variables.get("last_response", ""))
+
+        extracted = None
+
+        if isinstance(source, dict):
+            # JSON/dict response — dot-notation field lookup
+            parts = field.split(".")
+            node = source
+            for part in parts:
+                if isinstance(node, dict):
+                    # case-insensitive key search
+                    match = next((v for k, v in node.items() if k.lower() == part.lower()), None)
+                    node = match
+                else:
+                    node = None
+                    break
+            extracted = str(node) if node is not None else None
+        else:
+            # CLI text response — scan for "Key ... : Value" lines
+            text = str(source)
+            field_lower = field.lower()
+            for line in text.splitlines():
+                if ":" in line:
+                    key, _, val = line.partition(":")
+                    if field_lower in key.lower():
+                        extracted = val.strip()
+                        break
+
+        if extracted is None:
+            raise AssertionError(
+                f"test.extract: field {field!r} not found in {from_var}"
+            )
+
+        print(f"      🔍 extract: {field!r} → {extracted!r}")
+
+        # Store if requested
+        if store_as:
+            variables[store_as] = extracted
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, extracted, "runtime_data")
+
+        # Assert equals
+        if equals is not None:
+            equals_str = str(equals)
+            if hasattr(self.config, "substitute_variables"):
+                equals_str = self.config.substitute_variables(equals_str, variables)
+            if extracted != equals_str:
+                msg = message or f"Expected {field!r} = {equals_str!r}, got {extracted!r}"
+                raise AssertionError(msg)
+            print(f"      ✅ {field!r} == {equals_str!r}")
+
+        # Assert contains
+        if contains is not None:
+            contains_str = str(contains)
+            if hasattr(self.config, "substitute_variables"):
+                contains_str = self.config.substitute_variables(contains_str, variables)
+            if contains_str not in extracted:
+                msg = message or f"Expected {field!r} to contain {contains_str!r}, got {extracted!r}"
+                raise AssertionError(msg)
+            print(f"      ✅ {field!r} contains {contains_str!r}")
+
+        return True
 
     def _ensure_ovrc_connection(
         self, variables: dict, params: dict = None
