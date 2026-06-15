@@ -1406,7 +1406,10 @@ class TestRailRunner:
                 case_test_details: List[Dict] = []
                 # Setup:/Teardown: cases whose body starts with 'steps:' are treated
                 # as inline Feature: cases so they can contain YAML steps directly.
-                _is_inline_steps = role in ("setup", "teardown") and body.lstrip().startswith("steps:")
+                _stripped = body.lstrip()
+                _is_inline_steps = role in ("setup", "teardown") and (
+                    _stripped.startswith("steps:") or _stripped.startswith("-")
+                )
                 if role == "inline" or _is_inline_steps:
                     test_passed, comment_lines, case_test_details = self._run_feature(case, injected_vars, verbose)
                 else:
