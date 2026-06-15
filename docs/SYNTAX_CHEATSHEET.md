@@ -599,6 +599,28 @@ Navigate to URL in existing browser
 
 ---
 
+## Wake-on-LAN
+
+### wol.send / Send Magic Packet
+```yaml
+# Wake device using mac_for_report suite variable (simplest)
+- wol.send: {}
+
+# Explicit MAC address
+- wol.send:
+    mac: 'AA:BB:CC:DD:EE:FF'
+
+# All options
+- wol.send:
+    mac: '${mac_for_report}'      # XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX
+    broadcast: 255.255.255.255    # default
+    port: 9                       # UDP port (default: 9, alt: 7)
+    sleep: 5                      # seconds to wait after sending (default: 5)
+    store_as: wol_result          # optional
+```
+
+---
+
 ## Test & Assertion Actions
 
 ### test.assert / Assert Condition

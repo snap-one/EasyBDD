@@ -273,6 +273,42 @@ The runner accepts Python-style single-quoted strings inside `data:` values and 
 - assert: {expression: "last_status == 200"}
 ```
 
+### Auto-Authentication via Suite Variables
+
+Instead of manually calling a login step in every test, you can configure automatic token acquisition using three suite variables in your `Var:` case:
+
+| Variable | Description |
+|----------|-------------|
+| `login_path` | URL path (or full URL) of the auth endpoint, e.g. `/system/login` |
+| `login_json` | Python dict literal with the exact POST body for authentication |
+| `token_path` | Dot-notation path to the token in the response, e.g. `restful_res.token` or `access_token` |
+
+**`Var:` case example:**
+```
+login_path: /system/login
+login_json: {'user': '${username}', 'password': '${password}'}
+token_path: restful_res.token
+```
+
+When these three variables are set, the runner automatically:
+1. Posts `login_json` to `${url}${login_path}` before the first API request
+2. Extracts the token at `token_path` using dot-notation
+3. Injects `Authorization: Bearer <token>` into every subsequent `api.request`
+4. Refreshes the token automatically on 401 responses
+
+The `login_json` dict is sent verbatim as the POST body — no field name assumptions are made, so non-standard credential fields like `user` (instead of `username`) work without any extra configuration. `token_path` supports nested fields using dot-notation (e.g. `restful_res.token` navigates `response["restful_res"]["token"]`).
+
+With auto-auth configured, test cases do not need to include any login steps or pass `Authorization` headers manually:
+
+```yaml
+- api.request:
+    method: GET
+    url: '${url}/system/firmware-info'
+    store_as: last_response
+- test.assert:
+    expression: last_response['status'] == 200
+```
+
 ---
 
 ## Response Variables and Extraction Rules
@@ -709,10 +745,23 @@ Steps:
 file: setup/load_firmware.yaml
 ```
 
-### Format 3 — Inline steps with `steps:` block
+### Format 3 — Inline steps
 
-If the body starts with `steps:`, the runner executes it as inline YAML steps. This allows Setup:/Teardown: cases to include any action (`aws.list_files`, `eval.run`, `websocket.send`, etc.) without needing to reference an external file.
+Any non-empty body that does not start with `tag:` or `file:` is treated as inline steps. You can write them as a bare list or with an explicit `steps:` header — both are equivalent.
 
+**Bare list (simplest):**
+```
+- aws.list_files:
+bucket_name: ${bucket_name}
+folder_prefix: moip/
+file_extension: .bin
+store_as: firmware_files
+- eval.run:
+expression: "next((f for f in firmware_files if '-DM' not in f), None)"
+store_as: upgrade_file
+```
+
+**With `steps:` header (also valid):**
 ```yaml
 steps:
   - aws.list_files:
@@ -729,6 +778,8 @@ steps:
 ```
 
 This is useful for a `Setup: Firmware Manager` case that lists S3 files and sets `upgrade_file`/`downgrade_file` variables — it runs its steps every time a Feature: case is pending, without needing to be individually marked for retest.
+
+> **TestRail editing note:** When writing directly in TestRail's Preconditions field, parameters can be flush-left (no indentation required). The runner automatically re-indents them before parsing. Indentation IS required in local YAML files.
 
 ---
 
