@@ -1406,6 +1406,10 @@ class TestRunner:
             ):
                 return self._handle_command_action(action, step_params, variables)
 
+            # Wake-on-LAN
+            if action_lower.startswith("wol"):
+                return self._handle_wol_action(action, step_params, variables)
+
             # Serial port actions
             if action_lower.startswith("serial"):
                 return self._handle_serial_action(action, step_params, variables)
@@ -1473,6 +1477,7 @@ class TestRunner:
                 or action_lower_check.startswith("ws.")
                 or action_lower_check.startswith("telnet")
                 or action_lower_check.startswith("serial")
+                or action_lower_check.startswith("wol")
             ):
                 raise
             print(f"      Warning: Custom action '{action}' failed: {e}")
@@ -3069,6 +3074,22 @@ class TestRunner:
                 return True
             else:
                 raise
+
+    def _handle_wol_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle Wake-on-LAN actions (wol.send)."""
+        from ..services.wol_service import WoLService
+        params = self._get_params(step_params)
+        service = WoLService()
+        result = service.execute(action, params, variables)
+        store_as = params.get("store_as", "")
+        if store_as and result is not None:
+            variables[store_as] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, result, "runtime_data")
+        print(f"      wol: packet sent to {params.get('mac') or variables.get('mac_for_report', '?')}")
+        return True
 
     def _handle_serial_action(
         self, action: str, step_params: dict, variables: dict
