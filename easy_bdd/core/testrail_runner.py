@@ -1885,6 +1885,9 @@ class TestRailRunner:
                 parsed = _yaml_safe_load_lenient(body)
             except Exception as exc:
                 print(f"  [warn] Shared '{name}': could not parse body: {exc}")
+                if name in existing:
+                    existing.pop(name)
+                    updated = True
                 continue
 
             if isinstance(parsed, list):
