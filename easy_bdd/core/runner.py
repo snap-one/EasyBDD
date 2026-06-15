@@ -1976,9 +1976,9 @@ class TestRunner:
 
         # Get verbose logging
         verbose_logging = (
-            variables.get("verbose_logging", False)
+            variables.get("verbose_logging", True)
             or variables.get("show_full_response", False)
-            or params.get("verbose_logging", False)
+            or params.get("verbose_logging", True)
             or params.get("show_full_response", False)
         )
         if isinstance(verbose_logging, str):
@@ -2086,9 +2086,9 @@ class TestRunner:
 
                 # Get verbose logging flag from variables or params
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
-                    or params.get("verbose_logging", False)
+                    or params.get("verbose_logging", True)
                     or params.get("show_full_response", False)
                 )
                 # Convert string "true"/"false" to boolean
@@ -2214,9 +2214,9 @@ class TestRunner:
 
                 # Update verbose logging if changed
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
-                    or params.get("verbose_logging", False)
+                    or params.get("verbose_logging", True)
                     or params.get("show_full_response", False)
                 )
                 if isinstance(verbose_logging, str):
@@ -2580,9 +2580,9 @@ class TestRunner:
 
         # Update verbose logging if changed
         verbose_logging = (
-            variables.get("verbose_logging", False)
+            variables.get("verbose_logging", True)
             or variables.get("show_full_response", False)
-            or params.get("verbose_logging", False)
+            or params.get("verbose_logging", True)
             or params.get("show_full_response", False)
         )
         if isinstance(verbose_logging, str):
@@ -3125,11 +3125,22 @@ class TestRunner:
             variables["last_response"] = result
             if hasattr(self.config, "set_variable"):
                 self.config.set_variable("last_response", result, "runtime_data")
+            # Print response so authors can see the actual device output immediately
+            _resp_clean = result.strip()
+            if _resp_clean:
+                _lines = _resp_clean.splitlines()
+                _preview_lines = _lines[:20]
+                indented = "\n".join("         " + ln for ln in _preview_lines)
+                print(f"      📥 response:\n{indented}")
+                if len(_lines) > 20:
+                    print(f"         ... ({len(_lines) - 20} more lines)")
         store_as = params.get("store_as", "")
         if store_as and result is not None:
             variables[store_as] = result
             if hasattr(self.config, "set_variable"):
                 self.config.set_variable(store_as, result, "runtime_data")
+            if store_as != "last_response":
+                print(f"         stored as: {store_as}")
         print(f"      telnet: {action.split('.')[-1]} OK")
         return True
 
@@ -4493,13 +4504,13 @@ class TestRunner:
 
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
                     or variables.get("full_log", False)
-                    or step_params.get("verbose_logging", False)
+                    or step_params.get("verbose_logging", True)
                     or step_params.get("show_full_response", False)
                     or step_params.get("full_log", False)
-                    or params_dict.get("verbose_logging", False)
+                    or params_dict.get("verbose_logging", True)
                     or params_dict.get("show_full_response", False)
                     or params_dict.get("full_log", False)
                 )
@@ -4751,10 +4762,10 @@ class TestRunner:
 
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
                     or variables.get("full_log", False)
-                    or step_params.get("verbose_logging", False)
+                    or step_params.get("verbose_logging", True)
                     or step_params.get("show_full_response", False)
                     or step_params.get("full_log", False)
                 )
@@ -4904,7 +4915,19 @@ class TestRunner:
                         else:
                             print(f"           (empty)")
                 else:
-                    print(f"         📡 Status: {response.status_code}")
+                    # Always show a brief response preview so test authors can verify output
+                    import json as _j
+                    _body_preview = ""
+                    if is_json and response_json:
+                        _raw = _j.dumps(response_json)
+                        _body_preview = _raw[:200] + ("…" if len(_raw) > 200 else "")
+                    elif response.text:
+                        _t = response.text.strip()
+                        _body_preview = _t[:200] + ("…" if len(_t) > 200 else "")
+                    if _body_preview:
+                        print(f"         📡 Status: {response.status_code} | {_body_preview}")
+                    else:
+                        print(f"         📡 Status: {response.status_code}")
 
                 # Check if we should fail on error status codes
                 fail_on_error = step_params.get("fail_on_error", True)
@@ -4954,10 +4977,10 @@ class TestRunner:
 
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
                     or variables.get("full_log", False)
-                    or step_params.get("verbose_logging", False)
+                    or step_params.get("verbose_logging", True)
                     or step_params.get("show_full_response", False)
                     or step_params.get("full_log", False)
                 )
@@ -5155,10 +5178,10 @@ class TestRunner:
 
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
                     or variables.get("full_log", False)
-                    or step_params.get("verbose_logging", False)
+                    or step_params.get("verbose_logging", True)
                     or step_params.get("show_full_response", False)
                     or step_params.get("full_log", False)
                 )
@@ -5359,10 +5382,10 @@ class TestRunner:
 
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
                     or variables.get("full_log", False)
-                    or step_params.get("verbose_logging", False)
+                    or step_params.get("verbose_logging", True)
                     or step_params.get("show_full_response", False)
                     or step_params.get("full_log", False)
                 )
@@ -5543,10 +5566,10 @@ class TestRunner:
 
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
                     or variables.get("full_log", False)
-                    or step_params.get("verbose_logging", False)
+                    or step_params.get("verbose_logging", True)
                     or step_params.get("show_full_response", False)
                     or step_params.get("full_log", False)
                 )

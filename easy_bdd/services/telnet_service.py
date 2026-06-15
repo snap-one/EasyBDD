@@ -52,6 +52,7 @@ from ..core.connection_pool import ConnectionPool
 
 _LOGIN_FAILURE_MARKERS = (
     "invalid login",
+    "incorrect login",   # e.g. "% Incorrect Login/Password" (Araknis switches)
     "login failed",
     "login incorrect",
     "authentication failed",
@@ -123,6 +124,7 @@ class _TelnetConn:
         password: str,
         username_prompt: str = "Username:",
         password_prompt: str = "Password:",
+        shell_prompt: str = "",
         timeout: float = 10.0,
         encoding: str = "utf-8",
     ) -> str:
@@ -137,14 +139,29 @@ class _TelnetConn:
         output += chunk
         print(f"         🔑 Sending password")
         self.send(password + "\n", encoding)
-        print(f"         🔑 Draining welcome banner (up to 2s)...")
-        try:
-            chunk = self.read_available(timeout=2.0, encoding=encoding)
-            output += chunk
-            if chunk.strip():
-                print(f"         🔑 Banner: {chunk.strip()!r}")
-        except Exception:
-            pass
+
+        if shell_prompt:
+            # Wait for the actual shell prompt so the socket buffer is fully drained
+            # before we hand control back to _send.  This prevents stale prompt bytes
+            # from being returned as the response to the first command.
+            print(f"         🔑 Waiting for shell prompt {shell_prompt!r}...")
+            try:
+                chunk = self.read_until(shell_prompt, timeout=15.0, encoding=encoding)
+                output += chunk
+                if chunk.strip():
+                    print(f"         🔑 Banner: {chunk.strip()!r}")
+            except Exception as exc:
+                print(f"         ⚠️  Shell prompt not seen: {exc}")
+        else:
+            print(f"         🔑 Draining welcome banner (up to 3s)...")
+            try:
+                chunk = self.read_available(timeout=3.0, encoding=encoding)
+                output += chunk
+                if chunk.strip():
+                    print(f"         🔑 Banner: {chunk.strip()!r}")
+            except Exception:
+                pass
+
         if any(marker in output.lower() for marker in _LOGIN_FAILURE_MARKERS):
             print(f"         ❌ Login rejected — device response: {output!r}")
             raise LoginError(f"Login rejected by device: {output!r}")
@@ -155,16 +172,51 @@ class _TelnetConn:
         raw = data.encode(encoding) if isinstance(data, str) else data
         self._sock.sendall(raw)
 
+    _MORE_PROMPT = b"--More--"
+
+    def _prompt_found(self, prompt_bytes: bytes) -> bool:
+        """Return True only when the prompt appears as a real device prompt.
+
+        A single-character prompt like '#' also appears inside the echo line
+        (e.g. 'AN-220-SW-R-16-POE# show version') so we must distinguish the
+        real prompt from mid-line occurrences.  The rule: the prompt is "real"
+        when it is followed by optional whitespace and then a line-ending or
+        end-of-buffer — NOT by non-whitespace text on the same line.
+
+        Examples:
+          'AN-220-SW-R-16-POE# show version\\r\\n'  → False  (echo line)
+          'AN-220-SW-R-16-POE# \\r\\n'              → True   (real prompt)
+          'AN-220-SW-R-16-POE# '  (end of buffer)  → True   (real prompt, partial)
+        """
+        import re as _re
+        try:
+            text = self._buf.decode("utf-8", errors="replace")
+            prompt_str = prompt_bytes.decode("utf-8", errors="replace")
+        except Exception:
+            return prompt_bytes in self._buf  # fallback
+        # Match prompt followed by optional spaces/tabs then line-end or end-of-string
+        pattern = _re.escape(prompt_str) + r"[ \t]*(?:\r\n|\r|\n|$)"
+        return bool(_re.search(pattern, text))
+
+    def _handle_more_pagination(self, encoding: str) -> None:
+        """Send a space to page through --More-- prompts and strip the marker."""
+        import re as _re
+        text = self._buf.decode(encoding, errors="replace")
+        # Strip --More-- with surrounding whitespace/CR from the accumulated buffer
+        cleaned = _re.sub(r"\s*--More--\s*", "\n", text)
+        self._buf = cleaned.encode(encoding)
+        self._sock.sendall(b" ")
+
     def read_until(
         self,
         prompt: str,
         timeout: float = 45.0,
         encoding: str = "utf-8",
-        idle_timeout: float = 1.0,
+        idle_timeout: float = 5.0,
         stream: bool = False,
     ) -> str:
         prompt_bytes = prompt.encode(encoding)
-        if prompt_bytes in self._buf:
+        if self._prompt_found(prompt_bytes):
             result = self._buf.decode(encoding, errors="replace")
             self._buf = b""
             return result
@@ -172,6 +224,7 @@ class _TelnetConn:
         last_recv: float = 0.0
         received_any = False
         conn_error: Optional[Exception] = None
+        _stream_line_buf = ""  # accumulates partial lines for stream output
         while time.time() < deadline:
             remaining = deadline - time.time()
             self._sock.settimeout(min(remaining, 0.5))
@@ -185,12 +238,18 @@ class _TelnetConn:
                 last_recv = time.time()
                 if stream:
                     text = chunk.decode(encoding, errors="replace")
-                    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-                        if line.strip():
+                    _stream_line_buf += text.replace("\r\n", "\n").replace("\r", "\n")
+                    while "\n" in _stream_line_buf:
+                        line, _stream_line_buf = _stream_line_buf.split("\n", 1)
+                        if line.strip() and line.strip() != "--More--":
                             print(f"             {line}")
                     sys.stdout.flush()
                 self._buf += chunk
-                if prompt_bytes in self._buf:
+                # Auto-page through --More-- prompts
+                if self._MORE_PROMPT in self._buf:
+                    self._handle_more_pagination(encoding)
+                    continue
+                if self._prompt_found(prompt_bytes):
                     result = self._buf.decode(encoding, errors="replace")
                     self._buf = b""
                     return result
@@ -278,7 +337,7 @@ class TelnetService:
             creds["host"], creds["port"], creds["timeout"],
             creds["username"], creds["password"],
             creds["username_prompt"], creds["password_prompt"],
-            creds["encoding"], creds["max_retries"],
+            creds["shell_prompt"], creds["encoding"], creds["max_retries"],
         )
 
     def _login_with_retry(
@@ -291,6 +350,7 @@ class TelnetService:
         password: str,
         username_prompt: str,
         password_prompt: str,
+        shell_prompt: str,
         encoding: str,
         max_retries: int,
     ) -> "_TelnetConn":
@@ -306,6 +366,7 @@ class TelnetService:
                     username, password,
                     username_prompt=username_prompt,
                     password_prompt=password_prompt,
+                    shell_prompt=shell_prompt,
                     timeout=timeout,
                     encoding=encoding,
                 )
@@ -314,6 +375,7 @@ class TelnetService:
                     host=host, port=port, timeout=timeout,
                     username=username, password=password,
                     username_prompt=username_prompt, password_prompt=password_prompt,
+                    shell_prompt=shell_prompt,
                     encoding=encoding, max_retries=max_retries,
                 )
                 return conn
@@ -343,12 +405,13 @@ class TelnetService:
         if self._pool.has(key):
             print(f"         ♻️  Reusing existing connection to {host}:{port}")
             return True
+        shell_prompt = params.get("prompt", params.get("shell_prompt", ""))
         if username:
             self._login_with_retry(
                 key, host, port, timeout,
                 username, password,
                 username_prompt, password_prompt,
-                encoding, max_retries,
+                shell_prompt, encoding, max_retries,
             )
         else:
             self._pool.acquire(key, lambda: _TelnetConn(host, port, timeout))
@@ -400,7 +463,7 @@ class TelnetService:
                     key, host, port, timeout,
                     username, password,
                     username_prompt, password_prompt,
-                    encoding, max_retries,
+                    prompt, encoding, max_retries,
                 )
             else:
                 print(f"         🔌 Opening unauthenticated connection to {host}:{port}")
@@ -418,6 +481,20 @@ class TelnetService:
                 print(f"         📤 Sending: {cmd!r}")
                 conn.send(data, encoding)
                 result = conn.read_until(prompt, timeout, encoding, stream=True)
+
+                # Strip remote echo: devices echo the sent command as the first line,
+                # sometimes prefixed by the device prompt (e.g. "AN-220-SW-R-16-POE# cmd").
+                # Without this, assertions against str(last_response) match the command
+                # text itself and produce false positives when no real output follows.
+                _stripped = result.lstrip("\r\n")
+                _nl = _stripped.find("\n")
+                if _nl >= 0:
+                    _first_line = _stripped[:_nl].strip("\r\n ")
+                    _cmd_clean = cmd.rstrip("\r\n").strip()
+                    # Match exact echo OR prompt-prefixed echo (e.g. "Device# show version")
+                    if _first_line == _cmd_clean or _first_line.endswith(_cmd_clean):
+                        result = _stripped[_nl + 1:]
+
                 print(f"         📥 Done ({len(result)} chars)")
             return result
         except OSError as exc:
