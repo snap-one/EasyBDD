@@ -4506,8 +4506,7 @@ class TestRunner:
                     _auth_cfg = {
                         "type": "bearer_token",
                         "endpoint": _auth_ep,
-                        "username": _creds.get("username", ""),
-                        "password": _creds.get("password", ""),
+                        "additional_fields": _creds,  # pass login_json verbatim as payload
                         "token_field": _token_path,
                         "headers": variables.get("headers", {}),
                         "verify_ssl": False,
