@@ -79,7 +79,7 @@ class _TelnetConn:
     DONT = b"\xff\xfe"
     IAC = b"\xff"
 
-    def __init__(self, host: str, port: int, timeout: float = 55.0):
+    def __init__(self, host: str, port: int, timeout: float = 15.0):
         print(f"         🔌 Connecting to {host}:{port} (timeout={timeout}s)...")
         self._sock = socket.create_connection((host, port), timeout=timeout)
         self._sock.settimeout(timeout)
@@ -495,7 +495,7 @@ class TelnetService:
             commands = command
             command = ""
         prompt = params.get("prompt", "#")
-        timeout = float(params.get("timeout", 55.0))
+        timeout = float(params.get("timeout", 15.0))
         encoding = params.get("encoding", "utf-8")
         username = params.get("username", "")
         password = params.get("password", "")
