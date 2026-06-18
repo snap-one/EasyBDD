@@ -928,4 +928,68 @@ Closes the TCP connection to the device.
 
 ---
 
+## Wake-on-LAN Actions
+
+Send a Wake-on-LAN (WoL) magic packet over UDP broadcast to wake a device from a powered-off or suspended state. No external library required — uses Python's built-in `socket`.
+
+### wol.send
+
+Broadcasts a standard 802.3 magic packet (6×`0xFF` + 16 repetitions of the target MAC address) to the network broadcast address on UDP port 9.
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `mac` | no* | `${mac_for_report}` | Target device MAC address. Accepts `XX:XX:XX:XX:XX:XX` or `XX-XX-XX-XX-XX-XX` format. Falls back to the `mac_for_report` suite variable if omitted. |
+| `broadcast` | no | `255.255.255.255` | Broadcast address. Change if the device is on a different subnet. |
+| `port` | no | `9` | UDP port. Port `7` is an alternative supported by some devices. |
+| `sleep` | no | `5` | Seconds to wait after sending the packet (allows time for the device to boot). Set to `0` to skip the wait. |
+| `store_as` | no | — | Variable name to store the result message in. |
+
+\* Required if `mac_for_report` is not set in suite variables.
+
+### Example — wake using suite variable
+
+```yaml
+- wol.send: {}
+```
+Uses `${mac_for_report}` automatically.
+
+### Example — explicit MAC address
+
+```yaml
+- wol.send:
+    mac: 'AA:BB:CC:DD:EE:FF'
+    sleep: 10
+```
+
+### Example — different subnet with result stored
+
+```yaml
+- wol.send:
+    mac: '${device_mac}'
+    broadcast: 192.168.30.255
+    port: 9
+    sleep: 30
+    store_as: wol_result
+```
+
+### Example — firmware upgrade test with power-on sequence
+
+```yaml
+- wol.send:
+    mac: '${mac_for_report}'
+    sleep: 30
+
+- api.request:
+    method: GET
+    url: '${url}/api/system/status'
+    store_as: last_response
+
+- test.assert:
+    expression: last_response['status'] == 200
+```
+
+> **Note:** WoL only works on the same Layer 2 network segment (or with a directed broadcast configured on the router). If the device is on a different VLAN or subnet, set `broadcast` to the subnet's directed broadcast address (e.g., `192.168.30.255`).
+
+---
+
 *For more action examples, see the [Examples Directory](./examples/)*

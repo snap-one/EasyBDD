@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Easy BDD — Framework Comparison</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#f9f9f7;color:#1a1a18;padding:2rem 1rem;line-height:1.5}
+.deck{max-width:760px;margin:0 auto}
+.top-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:8px;padding-bottom:1rem;border-bottom:1px solid #e8e7e0}
+.nav{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+.nav button{font-size:12px;padding:5px 11px;border:1px solid #d0cfc8;background:#fff;color:#666;border-radius:8px;cursor:pointer;transition:background .15s}
+.nav button:hover,.nav button.active{background:#f0efe8;color:#1a1a18;border-color:#aaa;font-weight:500}
+.controls{display:flex;align-items:center;gap:8px}
+.arrow-btn{width:32px;height:32px;display:flex;align-items:center;justify-content:center;border:1px solid #d0cfc8;background:#fff;color:#555;border-radius:8px;cursor:pointer;font-size:18px;transition:background .15s}
+.arrow-btn:hover{background:#f0efe8}
+.print-btn{font-size:12px;padding:6px 12px;border:1px solid #d0cfc8;background:#fff;color:#555;border-radius:8px;cursor:pointer}
+.print-btn:hover{background:#f0efe8}
+.slide{display:none}.slide.active{display:block}
+.slide-num{font-size:12px;color:#aaa;margin-bottom:.5rem}
+.hero{padding:2rem 0 1.5rem;border-bottom:1px solid #e8e7e0;margin-bottom:1.5rem}
+.hero h1{font-size:24px;font-weight:500;margin-bottom:.5rem}
+.hero p{font-size:15px;color:#555;line-height:1.6}
+.badge-row{display:flex;gap:8px;margin-top:1rem;flex-wrap:wrap}
+.badge{font-size:12px;padding:4px 12px;border-radius:20px;font-weight:500}
+.badge-blue{background:#E6F1FB;color:#0C447C}
+.badge-teal{background:#E1F5EE;color:#085041}
+.badge-purple{background:#EEEDFE;color:#3C3489}
+.section-label{font-size:11px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:#999;margin-bottom:1rem}
+.card{background:#fff;border:1px solid #e8e7e0;border-radius:12px;padding:1rem 1.25rem;margin-bottom:.75rem}
+.card-title{font-size:14px;font-weight:500;margin-bottom:.5rem;display:flex;align-items:center;gap:8px;color:#1a1a18}
+.card p{font-size:13px;color:#555;line-height:1.6}
+.card-success{border-color:#9FE1CB}
+.three-col{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1rem}
+.two-col{display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem;margin-bottom:1rem}
+.pill{display:inline-block;font-size:11px;padding:2px 9px;border-radius:10px;font-weight:500}
+.pill-red{background:#FCEBEB;color:#A32D2D}
+.pill-amber{background:#FAEEDA;color:#854F0B}
+.pill-green{background:#EAF3DE;color:#3B6D11}
+pre{font-family:'SF Mono',Menlo,Consolas,'Courier New',monospace;font-size:11px;line-height:1.65;background:#f5f4ee;border:1px solid #e8e7e0;border-radius:8px;padding:.75rem 1rem;overflow-x:auto;white-space:pre;margin:0;color:#1a1a18}
+.code-label{font-size:11px;color:#999;margin-bottom:4px;font-weight:500;margin-top:8px}
+.code-label:first-child{margin-top:0}
+.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:1rem 0}
+.metric{background:#f5f4ee;border-radius:8px;padding:.85rem;text-align:center}
+.metric-val{font-size:26px;font-weight:500;color:#1a1a18}
+.metric-label{font-size:11px;color:#666;margin-top:3px}
+.metric-sub{font-size:10px;color:#999}
+.check-list{list-style:none;padding:0}
+.check-list li{font-size:13px;color:#555;padding:5px 0;display:flex;align-items:flex-start;gap:8px;line-height:1.5}
+.check-list li i{flex-shrink:0;margin-top:1px;font-size:15px}
+.list-ok li i{color:#3B6D11}
+.list-no li i{color:#A32D2D}
+.row-compare{display:grid;grid-template-columns:120px 1fr 1fr 1fr;border:1px solid #e8e7e0;border-radius:12px;overflow:hidden;margin:.75rem 0}
+.row-compare>div{padding:9px 11px;font-size:12px;border-bottom:1px solid #e8e7e0;color:#444;line-height:1.45}
+.row-compare>div:nth-last-child(-n+4){border-bottom:none}
+.rh{font-weight:500;font-size:11px;color:#999;background:#f5f4ee}
+.ch{font-size:11px;font-weight:500;color:#1a1a18;background:#f5f4ee}
+.ec{background:#EAF3DE;color:#27500A}
+@media print{
+  .top-bar{display:none}
+  .slide{display:block!important;margin-bottom:0;page-break-after:always;padding-top:1.5rem}
+  .slide:last-child{page-break-after:auto}
+  body{background:#fff;padding:0}
+  pre{border:1px solid #ccc}
+}
+</style>
+</head>
+<body>
+<div class="deck">
+  <div class="top-bar">
+    <div class="nav" id="nav"></div>
+    <div class="controls">
+      <button class="arrow-btn" id="prev" aria-label="Previous">&#8249;</button>
+      <button class="arrow-btn" id="next" aria-label="Next">&#8250;</button>
+      <button class="print-btn" onclick="window.print()"><i class="ti ti-printer"></i> Print / PDF</button>
+    </div>
+  </div>
+
+  <div id="slides">
+
+    <div class="slide active" data-title="Overview">
+      <div class="slide-num">1 / 9</div>
+      <div class="hero">
+        <h1>Easy BDD — framework comparison</h1>
+        <p>How Easy BDD simplifies test authoring compared to traditional BDD (Behave/Cucumber) and Robot Framework.</p>
+        <div class="badge-row">
+          <span class="badge badge-blue">No Python required</span>
+          <span class="badge badge-teal">TestRail-native</span>
+          <span class="badge badge-purple">Browser + API + Hardware</span>
+        </div>
+      </div>
+      <div class="section-label">Three frameworks compared</div>
+      <div class="three-col">
+        <div class="card">
+          <div class="card-title"><i class="ti ti-history" aria-hidden="true"></i> Behave / Cucumber BDD</div>
+          <p>Gherkin feature files + Python step definitions. Two separate files per test. Engineers only.</p>
+        </div>
+        <div class="card">
+          <div class="card-title"><i class="ti ti-robot" aria-hidden="true"></i> Robot Framework</div>
+          <p>Keyword-driven .robot files with custom libraries. Verbose DSL, complex setup, heavy IDE dependency.</p>
+        </div>
+        <div class="card card-success">
+          <div class="card-title"><i class="ti ti-check" aria-hidden="true"></i> Easy BDD</div>
+          <p>Single YAML file per test. Written directly in TestRail. No coding, no setup, runs on Jenkins automatically.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-title="Setup">
+      <div class="slide-num">2 / 9</div>
+      <div class="section-label">Getting started — time to first test</div>
+      <div class="row-compare">
+        <div class="rh"></div><div class="ch">Behave BDD</div><div class="ch">Robot Framework</div><div class="ch ec">Easy BDD</div>
+        <div class="rh">Install</div><div>pip install behave + selenium + step libs</div><div>pip install robotframework + SeleniumLibrary + RequestsLibrary</div><div class="ec">pip install easy_bdd + playwright install</div>
+        <div class="rh">Config</div><div>behave.ini, environment.py, conftest hooks</div><div>robot.yaml, resource files, suite setup keywords</div><div class="ec">One framework.yaml + .env file</div>
+        <div class="rh">Files per test</div><div>2 — feature file + steps.py</div><div>1–2 — .robot + resource file</div><div class="ec">1 YAML — or zero (write directly in TestRail)</div>
+        <div class="rh">Test runner</div><div>behave CLI + driver management</div><div>robot CLI + listener plugins</div><div class="ec">Jenkins polls TestRail active runs automatically</div>
+        <div class="rh">Time to first run</div><div><span class="pill pill-red">Hours – days</span></div><div><span class="pill pill-amber">1–2 hours</span></div><div class="ec"><span class="pill pill-green">~15 minutes</span></div>
+      </div>
+    </div>
+
+    <div class="slide" data-title="Browser tests">
+      <div class="slide-num">3 / 9</div>
+      <div class="section-label">Writing a browser login test</div>
+      <div class="two-col">
+        <div>
+          <div class="code-label">Behave — feature file</div>
+          <pre>Feature: Login
+  Scenario: Valid login
+    Given I open the browser
+    And I navigate to "${URL}"
+    When I enter "admin" in "#user"
+    And I enter "pass" in "#pass"
+    And I click "#login-btn"
+    Then I should see "Dashboard"</pre>
+          <div class="code-label">+ steps/login_steps.py (separate file)</div>
+          <pre>@given('I open the browser')
+def step(context):
+    context.driver = webdriver.Chrome()
+
+@when('I enter "{text}" in "{sel}"')
+def step(context, text, sel):
+    context.driver.find_element(
+        By.CSS_SELECTOR, sel
+    ).send_keys(text)
+    
+@then('I should see "{text}"')
+def step(context, text):
+    assert text in context.driver.page_source</pre>
+        </div>
+        <div>
+          <div class="code-label">Robot Framework — .robot file</div>
+          <pre>*** Settings ***
+Library    SeleniumLibrary
+
+*** Test Cases ***
+Valid Login
+    Open Browser    ${URL}    chrome
+    Input Text      id:username    admin
+    Input Text      id:password    pass
+    Click Button    Login
+    Page Should Contain    Dashboard
+    [Teardown]    Close Browser</pre>
+          <div class="code-label">Easy BDD — single YAML (or TestRail Preconditions)</div>
+          <pre>- browser.open:
+  url: ${base_url}
+- browser.fill:
+  selector: input[type="text"]
+  value: ${username}
+- browser.fill:
+  selector: input[type="password"]
+  value: ${password}
+- browser.click:
+  role: button
+  name: Log In
+- browser.wait_for_element:
+  text: Dashboard</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-title="API tests">
+      <div class="slide-num">4 / 9</div>
+      <div class="section-label">Writing an API test with bearer token auth</div>
+      <div class="two-col">
+        <div>
+          <div class="code-label">Behave — feature file + 100+ line steps file</div>
+          <pre>Feature: Firmware API
+  Scenario: Get firmware info
+    Given I have a valid auth token
+    When I GET "/api/system/firmware"
+    Then the status code should be 200
+    And "partition1Version" should be
+        present in "restful_res.fwConfs"</pre>
+          <div class="code-label">Robot Framework — RequestsLibrary</div>
+          <pre>*** Settings ***
+Library    RequestsLibrary
+
+*** Test Cases ***
+Get Firmware Info
+    ${body}=    Create Dict
+    ...    user=${USERNAME}
+    ...    password=${PASSWORD}
+    ${login}=    POST On Session
+    ...    api    /system/login    json=${body}
+    ${token}=    Set Variable
+    ...    ${login.json()['restful_res']['token']}
+    ${headers}=    Create Dict
+    ...    Authorization=Bearer ${token}
+    ${resp}=    GET On Session
+    ...    api    /system/firmware
+    ...    headers=${headers}
+    Should Be Equal As Integers
+    ...    ${resp.status_code}    200</pre>
+        </div>
+        <div>
+          <div class="code-label">Easy BDD — TestRail Preconditions only. No code files.</div>
+          <pre>- api.request:
+  method: POST
+  url: ${api_url}/system/login
+  body: {'user': '${api_username}',
+    'password': '${api_password}'}
+  store_as: login_response
+- test.assert:
+  expression: login_response.data
+    .restful_res.errCode == 0
+  message: Login should return errCode 0
+- api.request:
+  method: GET
+  url: ${api_url}/system/firmware
+  headers: {'Authorization': 'Bearer
+    ${login_response.data
+    .restful_res.token}'}
+  store_as: firmware_response
+- test.assert:
+  expression: "'partition1Version' in
+    firmware_response.data
+    .restful_res.fwConfs"
+  message: partition1Version should exist</pre>
+          <br>
+          <div class="card card-success">
+            <div class="card-title" style="font-size:13px"><i class="ti ti-check" aria-hidden="true"></i> No step library. No Python. No IDE.</div>
+            <p>Any QA engineer writes and modifies this directly in TestRail.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-title="TestRail">
+      <div class="slide-num">5 / 9</div>
+      <div class="section-label">TestRail integration</div>
+      <div class="row-compare">
+        <div class="rh"></div><div class="ch">Behave BDD</div><div class="ch">Robot Framework</div><div class="ch ec">Easy BDD</div>
+        <div class="rh">Authoring</div><div>IDE only, manual export/import to TestRail</div><div>IDE only, plugin required</div><div class="ec">Write steps directly in TestRail Preconditions field</div>
+        <div class="rh">Trigger from TR</div><div><span class="pill pill-red">Not supported</span></div><div><span class="pill pill-amber">Partial — plugin required</span></div><div class="ec"><span class="pill pill-green">Native — Jenkins polls active runs</span></div>
+        <div class="rh">Shared variables</div><div>environment.py hooks or fixtures</div><div>Variable files + suite setup keywords</div><div class="ec">Var: case — one place, all cases in run inherit it</div>
+        <div class="rh">Result upload</div><div>Custom reporter plugin</div><div>Custom listener class</div><div class="ec">Automatic — HTML report attached per run</div>
+        <div class="rh">Scheduling</div><div>Jenkins cron, separate from TestRail</div><div>Jenkins cron, separate from TestRail</div><div class="ec">Cron expression written in TestRail run description</div>
+        <div class="rh">Who can author</div><div>Python developers only</div><div>Developers + trained QA</div><div class="ec">Anyone who can edit a TestRail case</div>
+      </div>
+    </div>
+
+    <div class="slide" data-title="Variables">
+      <div class="slide-num">6 / 9</div>
+      <div class="section-label">Variable management — sharing data across tests</div>
+      <div class="two-col" style="margin-bottom:.75rem">
+        <div class="card">
+          <div class="card-title"><span class="pill pill-red">Behave</span></div>
+          <p>Data flows via Python <code>context</code> object. Hooks written in environment.py. No cross-test shared variables without custom code.</p>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="pill pill-amber">Robot Framework</span></div>
+          <p>Variable files (.yaml or .py), suite-level variables, resource files. Complex scoping rules. IDE required to manage safely.</p>
+        </div>
+      </div>
+      <div class="card card-success">
+        <div class="card-title"><span class="pill pill-green">Easy BDD — Var: case pattern</span></div>
+        <p style="margin-bottom:.75rem">One <code>Var:</code> case in the TestRail run holds all shared values. Every other case resolves <code>${variable_name}</code> from it automatically. No code, no files.</p>
+        <pre>base_url: http://192.168.100.3/cgi-bin/luci
+username: araknis
+password: SnapAV704
+headless: False
+retry: 0
+no_datalake: True</pre>
+      </div>
+      <div class="card" style="margin-top:.5rem">
+        <div class="card-title" style="font-size:13px">Resolution priority (highest → lowest)</div>
+        <p style="font-size:12px;color:#555">CLI overrides → store_as runtime values → test-level variables → Var: case → framework.yaml defaults</p>
+      </div>
+    </div>
+
+    <div class="slide" data-title="Assertions">
+      <div class="slide-num">7 / 9</div>
+      <div class="section-label">Assertion syntax — all three side by side</div>
+      <div class="three-col" style="margin-bottom:.75rem">
+        <div>
+          <div class="code-label">Behave (Python code)</div>
+          <pre>assert resp.status_code == 200
+data = resp.json()
+rr = data['restful_res']
+assert rr['errCode'] == 0
+assert 'token' in rr
+fwc = rr['fwConfs']
+assert 'partition1Version' \
+    in fwc</pre>
+        </div>
+        <div>
+          <div class="code-label">Robot Framework</div>
+          <pre>Should Be Equal
+...  ${resp.status_code}
+...  ${200}
+Dictionary Should
+...  Contain Key
+...  ${resp.json()
+...  ['restful_res']}
+...  token</pre>
+        </div>
+        <div>
+          <div class="code-label">Easy BDD (TestRail)</div>
+          <pre>- test.assert:
+  expression:
+    response.data
+    .restful_res
+    .errCode == 0
+
+- test.assert:
+  expression:
+    "'token' in
+    response.data
+    .restful_res"</pre>
+        </div>
+      </div>
+      <div class="card card-success">
+        <div class="card-title"><i class="ti ti-bulb" aria-hidden="true"></i> Dot-notation traversal — no brackets, no imports</div>
+        <p><code>firmware_response.data.restful_res.fwConfs.partition1Version == 'IMG-1.0.23.01'</code><br><br>Works directly in TestRail preconditions. No libraries, no step definitions, no Python knowledge required.</p>
+      </div>
+    </div>
+
+    <div class="slide" data-title="Key metrics">
+      <div class="slide-num">8 / 9</div>
+      <div class="section-label">Reduction in complexity</div>
+      <div class="metric-grid">
+        <div class="metric"><div class="metric-val">1</div><div class="metric-label">file per test</div><div class="metric-sub">vs 2 in Behave</div></div>
+        <div class="metric"><div class="metric-val">0</div><div class="metric-label">lines of Python</div><div class="metric-sub">to write a test</div></div>
+        <div class="metric"><div class="metric-val">15m</div><div class="metric-label">time to first run</div><div class="metric-sub">vs hours for others</div></div>
+        <div class="metric"><div class="metric-val">6+</div><div class="metric-label">protocols</div><div class="metric-sub">Browser, API, SSH, WS…</div></div>
+      </div>
+      <div class="two-col">
+        <div>
+          <div class="section-label" style="margin-bottom:.5rem">What Easy BDD eliminates</div>
+          <ul class="check-list list-no">
+            <li><i class="ti ti-x"></i>Step definition files (Behave)</li>
+            <li><i class="ti ti-x"></i>Resource and library imports (Robot)</li>
+            <li><i class="ti ti-x"></i>Driver and browser management boilerplate</li>
+            <li><i class="ti ti-x"></i>Manual TestRail result upload scripts</li>
+            <li><i class="ti ti-x"></i>Separate cron/scheduler configuration</li>
+            <li><i class="ti ti-x"></i>IDE dependency for test authoring</li>
+          </ul>
+        </div>
+        <div>
+          <div class="section-label" style="margin-bottom:.5rem">What Easy BDD adds</div>
+          <ul class="check-list list-ok">
+            <li><i class="ti ti-check"></i>TestRail-native authoring (no IDE needed)</li>
+            <li><i class="ti ti-check"></i>Self-healing selectors</li>
+            <li><i class="ti ti-check"></i>Automatic HTML reports attached per run</li>
+            <li><i class="ti ti-check"></i>Playwright recording → YAML conversion</li>
+            <li><i class="ti ti-check"></i>Hardware and device API testing built-in</li>
+            <li><i class="ti ti-check"></i>Run scheduling inside TestRail run description</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide" data-title="Summary">
+      <div class="slide-num">9 / 9</div>
+      <div class="section-label">Summary — when to use each</div>
+      <div class="row-compare">
+        <div class="rh"></div><div class="ch">Behave BDD</div><div class="ch">Robot Framework</div><div class="ch ec">Easy BDD</div>
+        <div class="rh">Best for</div><div>Large teams where PMs write Gherkin stories and devs implement steps</div><div>Enterprise regression suites with trained QA engineers and IDE workflows</div><div class="ec">Product QA teams testing hardware, APIs, and web UIs — without a development background</div>
+        <div class="rh">Skill required</div><div>Python + Gherkin</div><div>Robot DSL + library knowledge</div><div class="ec">YAML editing + TestRail</div>
+        <div class="rh">Protocol coverage</div><div>Web + API (libraries vary)</div><div>Web + API + SSH (libraries vary)</div><div class="ec">Browser, REST API, SSH, WebSocket, AWS S3, OvrC, hardware device UIs</div>
+        <div class="rh">Test management</div><div>Separate tooling from TestRail</div><div>Separate tooling from TestRail</div><div class="ec">First-class TestRail citizen — run, schedule, and report from one place</div>
+        <div class="rh">Maintenance</div><div>High — step library drift over time</div><div>High — keyword library updates required</div><div class="ec">Low — self-healing selectors, single source of truth in TestRail</div>
+      </div>
+      <div class="card card-success" style="margin-top:.75rem">
+        <div class="card-title"><i class="ti ti-bulb" aria-hidden="true"></i> Bottom line</div>
+        <p>Easy BDD reduces a 3-file, code-heavy test into a single YAML case that a QA engineer writes directly in TestRail — and Jenkins runs it automatically without any additional configuration.</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+const navEl = document.getElementById('nav');
+let current = 0;
+
+slides.forEach((s, i) => {
+  const btn = document.createElement('button');
+  btn.textContent = s.dataset.title;
+  if (i === 0) btn.classList.add('active');
+  btn.addEventListener('click', () => go(i));
+  navEl.appendChild(btn);
+});
+
+document.getElementById('prev').addEventListener('click', () => go(current - 1));
+document.getElementById('next').addEventListener('click', () => go(current + 1));
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') go(current + 1);
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   go(current - 1);
+});
+
+function go(n) {
+  if (n < 0 || n >= slides.length) return;
+  slides[current].classList.remove('active');
+  navEl.querySelectorAll('button')[current].classList.remove('active');
+  current = n;
+  slides[current].classList.add('active');
+  navEl.querySelectorAll('button')[current].classList.add('active');
+}
+</script>
+</body>
+</html>

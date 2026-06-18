@@ -637,6 +637,19 @@ class TestRunner:
         variables = {**config_vars, **(test.variables or {})}
         test.variables = variables  # single source of truth for the rest of _run_test
 
+        # Push test-level variables into the variable manager so services like
+        # BrowserService can read them via config.get_variable() (e.g. headless: false).
+        try:
+            test_scope = next(
+                (s for s in self.config.variable_manager.scopes if s.name == "test_variables"),
+                None,
+            )
+            if test_scope is not None:
+                test_scope.variables.clear()
+                test_scope.update(test.variables or {})
+        except Exception:
+            pass
+
         # Store original stdout to capture console output
         original_stdout = sys.stdout
 
@@ -1317,11 +1330,10 @@ class TestRunner:
 
             # Sleep / wait action (no browser required)
             if action_lower in ["test.sleep", "sleep", "test.wait", "wait"]:
-                params = self._get_params(step_params)
                 seconds = float(
-                    params.get("seconds")
-                    or params.get("duration")
-                    or params.get("timeout")
+                    self._get_param(step_params, "seconds")
+                    or self._get_param(step_params, "duration")
+                    or self._get_param(step_params, "timeout")
                     or 1
                 )
                 print(f"      ⏳ Sleeping {seconds}s...")
@@ -1333,11 +1345,10 @@ class TestRunner:
             #   - action: test.print / message: "..."   (explicit)
             #   - test.print: "..."                     (shorthand scalar)
             if action_lower in ["test.log", "log", "test.print", "print"]:
-                params = self._get_params(step_params)
                 message = str(
-                    params.get("message")
-                    or params.get("text")
-                    or params.get("value")
+                    self._get_param(step_params, "message")
+                    or self._get_param(step_params, "text")
+                    or self._get_param(step_params, "value")
                     or ""
                 )
                 if hasattr(self.config, "substitute_variables"):
@@ -1352,6 +1363,8 @@ class TestRunner:
                 return self._handle_json_schema_action(step_params, variables)
             elif action_lower in ["assert response", "test.assert_response"]:
                 return self._handle_response_assertion(step_params, variables)
+            elif action_lower in ["test.extract", "extract"]:
+                return self._handle_extract_action(step_params, variables)
 
             # JSON-RPC WebSocket actions (support both formats)
             if (
@@ -1392,6 +1405,10 @@ class TestRunner:
                 cmd_type in action_lower for cmd_type in command_types
             ):
                 return self._handle_command_action(action, step_params, variables)
+
+            # Wake-on-LAN
+            if action_lower.startswith("wol"):
+                return self._handle_wol_action(action, step_params, variables)
 
             # Serial port actions
             if action_lower.startswith("serial"):
@@ -1455,11 +1472,12 @@ class TestRunner:
             if (
                 action_lower_check in ("assert", "test.assert", "assert json schema",
                                        "test.assert_schema", "assert response",
-                                       "test.assert_response")
+                                       "test.assert_response", "test.extract", "extract")
                 or action_lower_check.startswith("websocket")
                 or action_lower_check.startswith("ws.")
                 or action_lower_check.startswith("telnet")
                 or action_lower_check.startswith("serial")
+                or action_lower_check.startswith("wol")
             ):
                 raise
             print(f"      Warning: Custom action '{action}' failed: {e}")
@@ -1855,6 +1873,99 @@ class TestRunner:
                     print(f"        - {failure}")
             raise AssertionError(result.message)
 
+    def _handle_extract_action(self, step_params: dict, variables: dict) -> bool:
+        """Handle test.extract — parse a field from a key:value text response.
+
+        Supports two response formats:
+          - CLI text:  'Switch Name          : AN-220-SW-R-16-POE'
+          - JSON dict: {'restful_res': {'token': 'abc...'}}  (dot-notation field)
+
+        Parameters
+        ----------
+        field     : field name to search for (case-insensitive substring match on the key)
+        from      : variable name to read from (default: last_response)
+        store_as  : variable name to store the extracted value
+        equals    : if given, assert the extracted value equals this (after variable substitution)
+        contains  : if given, assert the extracted value contains this string
+        message   : custom assertion failure message
+        """
+        import re as _re
+        params = self._get_params(step_params)
+
+        field    = str(params.get("field", ""))
+        from_var = str(params.get("from", "last_response"))
+        store_as = str(params.get("store_as", ""))
+        equals   = params.get("equals")
+        contains = params.get("contains")
+        message  = params.get("message", "")
+
+        if not field:
+            raise ValueError("test.extract requires 'field'")
+
+        # Resolve the source variable
+        source = variables.get(from_var, variables.get("last_response", ""))
+
+        extracted = None
+
+        if isinstance(source, dict):
+            # JSON/dict response — dot-notation field lookup
+            parts = field.split(".")
+            node = source
+            for part in parts:
+                if isinstance(node, dict):
+                    # case-insensitive key search
+                    match = next((v for k, v in node.items() if k.lower() == part.lower()), None)
+                    node = match
+                else:
+                    node = None
+                    break
+            extracted = str(node) if node is not None else None
+        else:
+            # CLI text response — scan for "Key ... : Value" lines
+            text = str(source)
+            field_lower = field.lower()
+            for line in text.splitlines():
+                if ":" in line:
+                    key, _, val = line.partition(":")
+                    if field_lower in key.lower():
+                        extracted = val.strip()
+                        break
+
+        if extracted is None:
+            raise AssertionError(
+                f"test.extract: field {field!r} not found in {from_var}"
+            )
+
+        print(f"      🔍 extract: {field!r} → {extracted!r}")
+
+        # Store if requested
+        if store_as:
+            variables[store_as] = extracted
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, extracted, "runtime_data")
+
+        # Assert equals
+        if equals is not None:
+            equals_str = str(equals)
+            if hasattr(self.config, "substitute_variables"):
+                equals_str = self.config.substitute_variables(equals_str, variables)
+            if extracted != equals_str:
+                msg = message or f"Expected {field!r} = {equals_str!r}, got {extracted!r}"
+                raise AssertionError(msg)
+            print(f"      ✅ {field!r} == {equals_str!r}")
+
+        # Assert contains
+        if contains is not None:
+            contains_str = str(contains)
+            if hasattr(self.config, "substitute_variables"):
+                contains_str = self.config.substitute_variables(contains_str, variables)
+            if contains_str not in extracted:
+                msg = message or f"Expected {field!r} to contain {contains_str!r}, got {extracted!r}"
+                raise AssertionError(msg)
+            print(f"      ✅ {field!r} contains {contains_str!r}")
+
+        return True
+
     def _ensure_ovrc_connection(
         self, variables: dict, params: dict = None
     ) -> OvrCApiService:
@@ -1958,9 +2069,9 @@ class TestRunner:
 
         # Get verbose logging
         verbose_logging = (
-            variables.get("verbose_logging", False)
+            variables.get("verbose_logging", True)
             or variables.get("show_full_response", False)
-            or params.get("verbose_logging", False)
+            or params.get("verbose_logging", True)
             or params.get("show_full_response", False)
         )
         if isinstance(verbose_logging, str):
@@ -2068,9 +2179,9 @@ class TestRunner:
 
                 # Get verbose logging flag from variables or params
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
-                    or params.get("verbose_logging", False)
+                    or params.get("verbose_logging", True)
                     or params.get("show_full_response", False)
                 )
                 # Convert string "true"/"false" to boolean
@@ -2196,9 +2307,9 @@ class TestRunner:
 
                 # Update verbose logging if changed
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
-                    or params.get("verbose_logging", False)
+                    or params.get("verbose_logging", True)
                     or params.get("show_full_response", False)
                 )
                 if isinstance(verbose_logging, str):
@@ -2562,9 +2673,9 @@ class TestRunner:
 
         # Update verbose logging if changed
         verbose_logging = (
-            variables.get("verbose_logging", False)
+            variables.get("verbose_logging", True)
             or variables.get("show_full_response", False)
-            or params.get("verbose_logging", False)
+            or params.get("verbose_logging", True)
             or params.get("show_full_response", False)
         )
         if isinstance(verbose_logging, str):
@@ -3057,6 +3168,22 @@ class TestRunner:
             else:
                 raise
 
+    def _handle_wol_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle Wake-on-LAN actions (wol.send)."""
+        from ..services.wol_service import WoLService
+        params = self._get_params(step_params)
+        service = WoLService()
+        result = service.execute(action, params, variables)
+        store_as = params.get("store_as", "")
+        if store_as and result is not None:
+            variables[store_as] = result
+            if hasattr(self.config, "set_variable"):
+                self.config.set_variable(store_as, result, "runtime_data")
+        print(f"      wol: packet sent to {params.get('mac') or variables.get('mac_for_report', '?')}")
+        return True
+
     def _handle_serial_action(
         self, action: str, step_params: dict, variables: dict
     ) -> bool:
@@ -3091,11 +3218,22 @@ class TestRunner:
             variables["last_response"] = result
             if hasattr(self.config, "set_variable"):
                 self.config.set_variable("last_response", result, "runtime_data")
+            # Print response so authors can see the actual device output immediately
+            _resp_clean = result.strip()
+            if _resp_clean:
+                _lines = _resp_clean.splitlines()
+                _preview_lines = _lines[:20]
+                indented = "\n".join("         " + ln for ln in _preview_lines)
+                print(f"      📥 response:\n{indented}")
+                if len(_lines) > 20:
+                    print(f"         ... ({len(_lines) - 20} more lines)")
         store_as = params.get("store_as", "")
         if store_as and result is not None:
             variables[store_as] = result
             if hasattr(self.config, "set_variable"):
                 self.config.set_variable(store_as, result, "runtime_data")
+            if store_as != "last_response":
+                print(f"         stored as: {store_as}")
         print(f"      telnet: {action.split('.')[-1]} OK")
         return True
 
@@ -3400,9 +3538,11 @@ class TestRunner:
             exec(code, ctx)  # noqa: S102
             # Persist any new/changed keys back to eval state (exclude builtins)
             for k, v in ctx.items():
-                if not k.startswith("_") and k not in ("state", "variables", "math", "re", "json", "datetime", "collections"):
+                if not k.startswith("_") and k not in ("state", "variables", "math", "re", "json", "datetime", "collections", "platform"):
                     self._eval_state[k] = v
                     variables[k] = v
+                    if hasattr(self.config, "set_variable"):
+                        self.config.set_variable(k, v, "runtime_data")
             # Mirror attributes set on the gv shim (e.g. gv.message = "...") into
             # variables["gv"] as a plain dict so ${gv.message} resolves correctly.
             _gv_obj = ctx.get("gv")
@@ -3448,11 +3588,20 @@ class TestRunner:
             # Handle SSH command
             # Support both "command.ssh" and "command ssh" formats
             if "command" in action_lower and "ssh" in action_lower:
-                host = params.get("host", "")
-                command = params.get("command", "")
+                host = params.get("host") or ""
+                command = params.get("command") or ""
                 if not host or not command:
+                    missing = []
+                    if not host:
+                        missing.append("'host'")
+                    if not command:
+                        missing.append(
+                            f"'command' (got {params.get('command')!r} — "
+                            "check YAML: unquoted '#' starts a comment, "
+                            "empty value becomes null)"
+                        )
                     raise ValueError(
-                        "SSH command requires 'host' and 'command' parameters"
+                        f"SSH command requires {' and '.join(missing)}"
                     )
 
                 print(f"      🔐 Executing SSH command on {host}: {command[:50]}...")
@@ -4198,7 +4347,7 @@ class TestRunner:
                     service.fill_form_field(field, value)
                 elif selector:
                     print(f"      Filling field '{selector}' with value '{value}'")
-                    service.fill_element(selector, value)
+                    service.fill_form_field(selector, value)
                 return True
 
             elif hasattr(service, "take_screenshot") and "screenshot" in action:
@@ -4457,13 +4606,13 @@ class TestRunner:
 
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
                     or variables.get("full_log", False)
-                    or step_params.get("verbose_logging", False)
+                    or step_params.get("verbose_logging", True)
                     or step_params.get("show_full_response", False)
                     or step_params.get("full_log", False)
-                    or params_dict.get("verbose_logging", False)
+                    or params_dict.get("verbose_logging", True)
                     or params_dict.get("show_full_response", False)
                     or params_dict.get("full_log", False)
                 )
@@ -4474,6 +4623,31 @@ class TestRunner:
                         "yes",
                         "on",
                     )
+
+                # Sync mybdd-style login vars (login_path, login_json, token_path)
+                # into the auth_manager config so 401 auto-retry can authenticate.
+                _login_path = variables.get("login_path", "")
+                _login_json_raw = variables.get("login_json", "")
+                _token_path = variables.get("token_path", "accessToken")
+                if _login_path and _login_json_raw and hasattr(service, "auth_manager"):
+                    _base = variables.get("url", "").rstrip("/")
+                    _auth_ep = _base + _login_path if _login_path.startswith("/") else _login_path
+                    try:
+                        import ast as _ast
+                        _creds = _ast.literal_eval(str(_login_json_raw)) if isinstance(_login_json_raw, str) else _login_json_raw
+                    except Exception:
+                        _creds = {}
+                    _auth_cfg = {
+                        "type": "bearer_token",
+                        "endpoint": _auth_ep,
+                        "additional_fields": _creds,  # pass login_json verbatim as payload
+                        "token_field": _token_path,
+                        "headers": variables.get("headers", {}),
+                        "verify_ssl": False,
+                    }
+                    existing = service.auth_manager.get_auth_config(device_id or "default")
+                    if not existing.get("endpoint"):
+                        service.auth_manager.config_manager.api_config_manager.auth_configs[device_id or "default"] = _auth_cfg
 
                 print(f"      API {method}: {url} (device: {device_id})")
                 if verbose_logging:
@@ -4560,11 +4734,11 @@ class TestRunner:
                     print(f"      Stored response as: {store_as}")
 
                 # Check if we should fail on error status codes
-                fail_on_error = step_params.get(
-                    "fail_on_error", True
-                ) or params_dict.get("fail_on_error", True)
-                if isinstance(fail_on_error, str):
-                    fail_on_error = fail_on_error.lower() in ("true", "1", "yes", "on")
+                _foe_raw = step_params.get("fail_on_error", params_dict.get("fail_on_error", True))
+                if isinstance(_foe_raw, str):
+                    fail_on_error = _foe_raw.lower() in ("true", "1", "yes", "on")
+                else:
+                    fail_on_error = bool(_foe_raw)
 
                 if fail_on_error and response.status_code >= 400:
                     import json
@@ -4690,10 +4864,10 @@ class TestRunner:
 
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
                     or variables.get("full_log", False)
-                    or step_params.get("verbose_logging", False)
+                    or step_params.get("verbose_logging", True)
                     or step_params.get("show_full_response", False)
                     or step_params.get("full_log", False)
                 )
@@ -4843,7 +5017,19 @@ class TestRunner:
                         else:
                             print(f"           (empty)")
                 else:
-                    print(f"         📡 Status: {response.status_code}")
+                    # Always show a brief response preview so test authors can verify output
+                    import json as _j
+                    _body_preview = ""
+                    if is_json and response_json:
+                        _raw = _j.dumps(response_json)
+                        _body_preview = _raw[:200] + ("…" if len(_raw) > 200 else "")
+                    elif response.text:
+                        _t = response.text.strip()
+                        _body_preview = _t[:200] + ("…" if len(_t) > 200 else "")
+                    if _body_preview:
+                        print(f"         📡 Status: {response.status_code} | {_body_preview}")
+                    else:
+                        print(f"         📡 Status: {response.status_code}")
 
                 # Check if we should fail on error status codes
                 fail_on_error = step_params.get("fail_on_error", True)
@@ -4893,10 +5079,10 @@ class TestRunner:
 
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
                     or variables.get("full_log", False)
-                    or step_params.get("verbose_logging", False)
+                    or step_params.get("verbose_logging", True)
                     or step_params.get("show_full_response", False)
                     or step_params.get("full_log", False)
                 )
@@ -5094,10 +5280,10 @@ class TestRunner:
 
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
                     or variables.get("full_log", False)
-                    or step_params.get("verbose_logging", False)
+                    or step_params.get("verbose_logging", True)
                     or step_params.get("show_full_response", False)
                     or step_params.get("full_log", False)
                 )
@@ -5298,10 +5484,10 @@ class TestRunner:
 
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
                     or variables.get("full_log", False)
-                    or step_params.get("verbose_logging", False)
+                    or step_params.get("verbose_logging", True)
                     or step_params.get("show_full_response", False)
                     or step_params.get("full_log", False)
                 )
@@ -5482,10 +5668,10 @@ class TestRunner:
 
                 # Check for verbose logging
                 verbose_logging = (
-                    variables.get("verbose_logging", False)
+                    variables.get("verbose_logging", True)
                     or variables.get("show_full_response", False)
                     or variables.get("full_log", False)
-                    or step_params.get("verbose_logging", False)
+                    or step_params.get("verbose_logging", True)
                     or step_params.get("show_full_response", False)
                     or step_params.get("full_log", False)
                 )

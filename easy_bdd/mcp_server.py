@@ -964,6 +964,12 @@ def serve(transport: str = "stdio", host: str = "0.0.0.0", port: int = 8080) -> 
     port      : port for SSE transport.
     """
     if transport == "sse":
-        mcp.run(transport="sse", host=host, port=port)
+        from mcp.server.transport_security import TransportSecuritySettings
+        mcp.settings.host = host
+        mcp.settings.port = port
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False
+        )
+        mcp.run(transport="sse")
     else:
         mcp.run(transport="stdio")

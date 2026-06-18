@@ -157,20 +157,30 @@ class BrowserService:
             # Legacy ConfigManager
             return config.get(key.replace("_", "."), default)
 
+    @staticmethod
+    def _coerce_bool(value):
+        """Convert string 'true'/'false' to bool; pass other types through unchanged."""
+        if isinstance(value, str):
+            lower = value.lower()
+            if lower in ("true", "yes", "1"):
+                return True
+            if lower in ("false", "no", "0"):
+                return False
+        return value
+
     def _get_browser_config(self, key: str, default=None):
         """Get browser-specific configuration value"""
         full_key = f"browser.{key}"
         value = self._get_config_value(self.config, full_key, default)
-        
+
         # Also check test variables if not found in config (for slow_mo, etc.)
         if value is None or value == default:
             if hasattr(self.config, "get_variable"):
-                # Check test variables directly
                 test_var_value = self.config.get_variable(key, None)
                 if test_var_value is not None:
-                    return test_var_value
-        
-        return value
+                    return self._coerce_bool(test_var_value)
+
+        return self._coerce_bool(value)
 
     def _try_heal_selector(
         self,
@@ -1366,7 +1376,10 @@ class BrowserService:
                     )
                     return  # Don't raise, continue test execution
 
-                raise AssertionError(f"Text '{text}' not found on page: {e}")
+                # Truncate Playwright's verbose HTML dump to first meaningful line
+                err_lines = [ln for ln in str(e).splitlines() if ln.strip() and "<" not in ln]
+                err_summary = err_lines[0].strip() if err_lines else str(e)[:120]
+                raise AssertionError(f"Text '{text}' not found on page. {err_summary}")
         elif self.selenium_driver:
             try:
                 from selenium.webdriver.support import expected_conditions as EC

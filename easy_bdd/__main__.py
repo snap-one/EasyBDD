@@ -1,6 +1,7 @@
 """
 Main entry point for the Easy BDD Framework
 Usage: python -m easy_bdd [command] [options]
+       python -m easy_bdd [command] ?         # contextual help
 """
 
 import os
@@ -21,9 +22,379 @@ from .core.runner import TestRunner
 from .core.generator import GherkinGenerator
 from .core.config import ConfigManager
 from .core.variable_manager import GlobalConfigManager
+from .core.testrail_utils import build_testrail_preconditions
+
+
+# ---------------------------------------------------------------------------
+# Contextual help — triggered by appending '?' to any command or sub-command
+# ---------------------------------------------------------------------------
+
+_W = 78  # output width
+
+_COMMANDS = {
+    "testrail-run": {
+        "summary": "Execute tests driven by an active TestRail EASY_BDD: run",
+        "usage":   "easy_bdd testrail-run <project_id> [options]",
+        "required": [
+            ("project_id", "int", "TestRail project ID to scan for an active EASY_BDD: run"),
+        ],
+        "optional": [
+            ("--run-id",       "int",  None,                  "Target a specific run ID (skips auto-discovery)"),
+            ("--tests-dir",    "path", "tests/cases",          "Directory to search for local YAML tests"),
+            ("--artifact-dir", "path", "reports/testrail",     "Directory for generated artifacts and reports"),
+            ("--prefix",       "str",  "EASY_BDD:",            "Run name prefix to match (or TESTRAIL_RUN_PREFIX env var)"),
+            ("--quiet",        "flag", None,                   "Suppress per-test progress output"),
+            ("--no-datalake",  "flag", None,                   "Skip posting results to the datalake"),
+            ("--find-only",    "flag", None,                   "Check if an active run exists, write .properties file, no execution"),
+        ],
+        "examples": [
+            ("Run active tests in project 79",
+             "easy_bdd testrail-run 79"),
+            ("Target a specific run instead of auto-discovering",
+             "easy_bdd testrail-run 79 --run-id 194886"),
+            ("Quiet mode (Jenkins-friendly)",
+             "easy_bdd testrail-run 79 --quiet"),
+            ("Check if a run exists without executing",
+             "easy_bdd testrail-run 79 --find-only"),
+        ],
+        "notes": [
+            "Requires TESTRAIL_URL, TESTRAIL_USERNAME, TESTRAIL_API_KEY in .env",
+            "Results (pass/fail) are posted back to TestRail automatically",
+            "An HTML report is saved to --artifact-dir and attached to the TestRail run",
+        ],
+    },
+
+    "testrail-list": {
+        "summary": "List TestRail projects or active EASY_BDD: runs",
+        "usage":   "easy_bdd testrail-list [project_id] [options]",
+        "required": [],
+        "optional": [
+            ("project_id", "int", None,        "Show runs for this project (omit to list all projects)"),
+            ("--prefix",   "str", "EASY_BDD:", "Filter runs by name prefix"),
+        ],
+        "examples": [
+            ("List all TestRail projects",
+             "easy_bdd testrail-list"),
+            ("List active runs in project 79",
+             "easy_bdd testrail-list 79"),
+        ],
+        "notes": [],
+    },
+
+    "testrail-create-run": {
+        "summary": "Create TestRail run(s) from a suite, optionally filtered to sections",
+        "usage":   "easy_bdd testrail-create-run <project_id> <suite_id> [options]",
+        "required": [
+            ("project_id", "int", "TestRail project ID"),
+            ("suite_id",   "int", "TestRail suite ID to create the run from"),
+        ],
+        "optional": [
+            ("--name",              "str",  None,           "Run name (default: EASY_BDD: <suite name>)"),
+            ("--sections",          "str+", None,           "Section names to include (substring match, repeatable)"),
+            ("--prefix",            "str",  "EASY_BDD:",    "Run name prefix"),
+            ("--description",       "str",  "",             "Run description (supports JSON run-config syntax)"),
+            ("--milestone-id",      "int",  None,           "Associate run with this milestone"),
+            ("--given-section",     "str",  None,           "Section with Given: cases — creates one run per Given: case (per-SKU mode)"),
+            ("--run-name-template", "str",  "{prefix} {sku} Smoke Test", "Format string for per-SKU run names ({prefix}, {sku}, {product_category})"),
+            ("--product-category",  "str",  "",             "Substituted as {product_category} in --run-name-template"),
+            ("--dry-run",           "flag", None,           "Preview what would be created without creating it"),
+        ],
+        "examples": [
+            ("Create a single run for all cases in suite 106670",
+             "easy_bdd testrail-create-run 79 106670"),
+            ("Create a run with only the Firmware and Functions sections",
+             "easy_bdd testrail-create-run 79 106670 --sections Firmware Functions"),
+            ("Per-SKU mode: one run per device in the 'Products' section",
+             "easy_bdd testrail-create-run 79 106670 --given-section Products --sections Firmware Functions"),
+            ("Dry-run to preview without creating",
+             "easy_bdd testrail-create-run 79 106670 --given-section Products --sections Firmware --dry-run"),
+        ],
+        "notes": [
+            "--sections uses case-insensitive substring match against section names",
+            "--given-section mode requires Given: case titles in that section (e.g. 'Given: AN-220-SW-R-16-POE')",
+        ],
+    },
+
+    "testrail-convert": {
+        "summary": "Convert a mybdd-format TestRail suite to Easy BDD YAML files",
+        "usage":   "easy_bdd testrail-convert <project_id> (--suite SUITE_ID | --run RUN_ID) [options]",
+        "required": [
+            ("project_id",       "int", "TestRail project ID"),
+            ("--suite / --run",  "int", "Source suite ID or run ID (one required)"),
+        ],
+        "optional": [
+            ("--output-dir",        "path", "tests/cases/<slug>", "Directory to write generated YAML files"),
+            ("--shared-steps-file", "path", "<output-dir>/shared_steps.yaml", "Path for shared_steps.yaml"),
+            ("--tag",               "str",  "<suite slug>",        "Tag added to every generated test"),
+            ("--no-testrail",       "flag", None,                  "Write YAML files only — do NOT create a new TestRail suite"),
+            ("--no-yaml",           "flag", None,                  "Create TestRail suite only — do NOT write YAML files"),
+            ("--target-suite",      "int",  None,                  "Write into an existing TestRail suite instead of creating new"),
+            ("--target-suite-name", "str",  "EASY_BDD: <name>",    "Name for the new TestRail suite"),
+            ("--dry-run",           "flag", None,                  "Preview without creating files or TestRail cases"),
+            ("--quiet",             "flag", None,                  "Suppress per-case progress output"),
+        ],
+        "examples": [
+            ("Convert mybdd suite 12345 in project 79 to YAML + new TestRail suite",
+             "easy_bdd testrail-convert 79 --suite 12345"),
+            ("Preview only (no files, no TestRail changes)",
+             "easy_bdd testrail-convert 79 --suite 12345 --dry-run"),
+            ("Convert to YAML only (no new TestRail suite)",
+             "easy_bdd testrail-convert 79 --suite 12345 --no-testrail --output-dir tests/cases/moip"),
+        ],
+        "notes": [
+            "Reads Given:/Shared:/Feature: prefixed cases from the source suite",
+            "Produces Var:/Setup:/Shared:/Feature:/Teardown: cases in the new format",
+        ],
+    },
+
+    "testrail-sync": {
+        "summary": "Sync an Easy BDD TestRail suite to local YAML files (for 'easy_bdd run')",
+        "usage":   "easy_bdd testrail-sync <project_id> (--suite SUITE_ID | --run RUN_ID) [options]",
+        "required": [
+            ("project_id",      "int", "TestRail project ID"),
+            ("--suite / --run", "int", "Source suite or run ID (one required)"),
+        ],
+        "optional": [
+            ("--output-dir", "path", "tests/cases/<slug>", "Directory to write YAML files"),
+            ("--tag",        "str",  "<suite slug>",        "Tag added to every generated test"),
+            ("--dry-run",    "flag", None,                  "Preview without writing files"),
+            ("--quiet",      "flag", None,                  "Suppress per-case progress output"),
+        ],
+        "examples": [
+            ("Sync suite 106670 from project 79 to local YAML",
+             "easy_bdd testrail-sync 79 --suite 106670"),
+            ("Preview what would be written",
+             "easy_bdd testrail-sync 79 --suite 106670 --dry-run"),
+        ],
+        "notes": [
+            "Produces runnable YAML files — use 'easy_bdd run <dir>' to execute them locally",
+            "Feature:, Shared:, Var: cases are all synced",
+        ],
+    },
+
+    "validate": {
+        "summary": "Validate test YAML files or TestRail cases for syntax errors",
+        "usage":   "easy_bdd validate [path] [options]",
+        "required": [],
+        "optional": [
+            ("path",               "path", "tests/cases/", "File or directory to validate"),
+            ("--strict",           "flag", None,           "Treat warnings as errors"),
+            ("--snippet",          "str",  None,           "Validate a YAML step snippet string inline"),
+            ("--snippet-file",     "path", None,           "Validate a file containing YAML steps (not a full test)"),
+            ("--stdin",            "flag", None,           "Read YAML snippet from stdin"),
+            ("--shared-steps-dir", "path", None,           "Directory with shared_steps.yaml for reference validation"),
+            ("--testrail-case",    "int",  None,           "Validate a single TestRail case by ID"),
+            ("--testrail-suite",   "int",  None,           "Validate all cases in a TestRail suite (requires --project)"),
+            ("--testrail-run",     "int",  None,           "Validate all Feature:/Shared: cases in a TestRail run"),
+            ("--project",          "int",  None,           "TestRail project ID (required with --testrail-suite)"),
+        ],
+        "examples": [
+            ("Validate all local YAML files",
+             "easy_bdd validate tests/cases/"),
+            ("Validate a single TestRail case",
+             "easy_bdd validate --testrail-case 18684737"),
+            ("Validate all cases in a TestRail run",
+             "easy_bdd validate --testrail-run 194886"),
+            ("Validate all cases in a TestRail suite",
+             "easy_bdd validate --testrail-suite 106670 --project 79"),
+            ("Validate a step snippet inline",
+             "easy_bdd validate --snippet '- test.assert:\\n    expression: last_response[\"status\"] == 200'"),
+        ],
+        "notes": [],
+    },
+
+    "run": {
+        "summary": "Run local YAML test files",
+        "usage":   "easy_bdd run [path] [options]",
+        "required": [],
+        "optional": [
+            ("path",             "path",   "tests/cases/",            "Test file or directory to run"),
+            ("--tags",           "str",    None,                      "Comma-separated tags to filter tests"),
+            ("--headless",       "flag",   None,                      "Run browser in headless mode"),
+            ("--headed",         "flag",   None,                      "Run browser with visible window"),
+            ("--browser",        "choice", "chrome",                  "Browser: chrome | firefox | edge | safari"),
+            ("--ignore-https",   "flag",   None,                      "Ignore HTTPS certificate errors"),
+            ("--record-video",   "flag",   None,                      "Record video of browser steps"),
+            ("--export-results", "path",   None,                      "Export results to .json / .csv / .xml"),
+        ],
+        "examples": [
+            ("Run all tests",
+             "easy_bdd run"),
+            ("Run a specific test file",
+             "easy_bdd run tests/cases/my_test.yaml"),
+            ("Run tests tagged 'firmware'",
+             "easy_bdd run --tags firmware"),
+            ("Run headless with results exported",
+             "easy_bdd run tests/cases/ --headless --export-results results.json"),
+        ],
+        "notes": [
+            "For TestRail-driven runs use 'easy_bdd testrail-run' instead",
+        ],
+    },
+
+    "generate": {
+        "summary": "Generate Gherkin .feature files from local YAML tests",
+        "usage":   "easy_bdd generate <path> [options]",
+        "required": [
+            ("path", "path", "YAML test file or directory to convert"),
+        ],
+        "optional": [
+            ("--output", "path",   "tests/features/", "Output directory for .feature files"),
+            ("--format", "choice", "gherkin",         "Output format: gherkin | yaml | json"),
+        ],
+        "examples": [
+            ("Generate Gherkin from all YAML tests",
+             "easy_bdd generate tests/cases/"),
+        ],
+        "notes": [],
+    },
+
+    "mcp-serve": {
+        "summary": "Start the Easy BDD MCP server (for Claude / AI integrations)",
+        "usage":   "easy_bdd mcp-serve [options]",
+        "required": [],
+        "optional": [
+            ("--sse",  "flag", None,    "Use HTTP/SSE transport instead of STDIO"),
+            ("--host", "str",  "0.0.0.0", "Bind address for SSE mode"),
+            ("--port", "int",  "8080",  "Port for SSE mode"),
+        ],
+        "examples": [
+            ("Start in STDIO mode (default, for Claude Desktop)",
+             "easy_bdd mcp-serve"),
+            ("Start in SSE/HTTP mode",
+             "easy_bdd mcp-serve --sse --port 8080"),
+        ],
+        "notes": [],
+    },
+}
+
+_ALL_COMMANDS_SUMMARY = [
+    ("testrail-run",        "Execute tests driven by an active TestRail EASY_BDD: run"),
+    ("testrail-list",       "List TestRail projects or active runs"),
+    ("testrail-create-run", "Create TestRail run(s) from a suite"),
+    ("testrail-convert",    "Convert mybdd-format suite → Easy BDD YAML + TestRail suite"),
+    ("testrail-sync",       "Sync Easy BDD TestRail suite → local YAML files"),
+    ("validate",            "Validate local YAML files or TestRail cases for syntax errors"),
+    ("run",                 "Run local YAML test files"),
+    ("generate",            "Generate Gherkin .feature files from YAML tests"),
+    ("mcp-serve",           "Start the MCP server for AI integrations"),
+    ("docker-run",          "Build and run a test inside a Docker container"),
+    ("record",              "Launch Playwright codegen and convert recording to YAML"),
+    ("selector-audit",      "Scan YAML files for fragile CSS/XPath selectors"),
+    ("edit-test",           "Open a test file in the default editor"),
+    ("convert",             "Convert a UI recorder file to Easy BDD YAML"),
+]
+
+
+def _hr(char="─"):
+    return char * _W
+
+
+def _print_contextual_help(tokens: list) -> None:
+    """Print rich contextual help based on tokens typed before the '?'."""
+    # Separate flags/options (start with -) from positional args
+    positional = [t for t in tokens if not t.startswith("-")]
+    command = positional[0] if positional else None
+
+    # ── No command yet: list everything ──────────────────────────────────────
+    if command is None:
+        print()
+        print("  Easy BDD — available commands")
+        print(_hr())
+        for cmd, desc in _ALL_COMMANDS_SUMMARY:
+            print(f"  {cmd:<26}  {desc}")
+        print(_hr())
+        print()
+        print("  Usage:  easy_bdd <command> ?         show help for a command")
+        print("  Usage:  easy_bdd <command> <args> ?  show what comes next")
+        print()
+        print("  Most common:")
+        print("    easy_bdd testrail-run ?")
+        print("    easy_bdd testrail-create-run ?")
+        print("    easy_bdd testrail-list ?")
+        print("    easy_bdd validate ?")
+        print()
+        return
+
+    info = _COMMANDS.get(command)
+
+    # ── Unknown command ───────────────────────────────────────────────────────
+    if info is None:
+        print(f"\n  Unknown command: '{command}'")
+        print("  Available commands:")
+        for cmd, _ in _ALL_COMMANDS_SUMMARY:
+            print(f"    {cmd}")
+        print()
+        return
+
+    # ── Work out which required args are already satisfied ───────────────────
+    already_provided_positional = positional[1:]  # tokens after the command name
+    required = info.get("required", [])
+    remaining_required = required[len(already_provided_positional):]
+    satisfied = required[:len(already_provided_positional)]
+
+    print()
+    print(f"  {command}  —  {info['summary']}")
+    print(_hr())
+    print(f"  Usage: {info['usage']}")
+    print()
+
+    # Already-provided positional values
+    if satisfied and already_provided_positional:
+        print("  Already provided:")
+        for (name, typ, desc), val in zip(satisfied, already_provided_positional):
+            print(f"    {name} = {val}")
+        print()
+
+    # What's required next
+    if remaining_required:
+        print("  REQUIRED — next argument(s):")
+        for name, typ, desc in remaining_required:
+            print(f"    {name:<22} <{typ}>   {desc}")
+        print()
+    else:
+        print("  All required arguments provided.")
+        print()
+
+    # Optional flags
+    optional = info.get("optional", [])
+    if optional:
+        print("  OPTIONAL flags:")
+        for name, typ, default, desc in optional:
+            default_str = f"  (default: {default})" if default else ""
+            flag_type   = "" if typ == "flag" else f" <{typ}>"
+            col = f"    {name}{flag_type}"
+            print(f"{col:<42}  {desc}{default_str}")
+        print()
+
+    # Examples
+    examples = info.get("examples", [])
+    if examples:
+        print("  Examples:")
+        for label, cmd in examples:
+            print(f"    # {label}")
+            print(f"    {cmd}")
+            print()
+
+    # Notes
+    notes = info.get("notes", [])
+    if notes:
+        print("  Notes:")
+        for note in notes:
+            print(f"    • {note}")
+        print()
+
+    print(_hr())
+    print()
 
 
 def main():
+    # Handle '?' contextual help before argparse touches argv
+    _argv = sys.argv[1:]
+    if _argv and _argv[-1] == "?":
+        _print_contextual_help(_argv[:-1])
+        return 0
+
     parser = argparse.ArgumentParser(
         description="Easy BDD Testing Framework",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -344,6 +715,54 @@ Examples:
         help="Suppress per-case progress output",
     )
 
+    # TestRail sync command — Easy BDD TestRail suite → local YAML files
+    trs_parser = subparsers.add_parser(
+        "testrail-sync",
+        help="Sync an Easy BDD TestRail suite to local YAML files runnable via 'easy_bdd run'",
+    )
+    trs_parser.add_argument(
+        "project_id",
+        type=int,
+        help="TestRail project ID",
+    )
+    _trs_src = trs_parser.add_mutually_exclusive_group(required=True)
+    _trs_src.add_argument(
+        "--suite",
+        type=int,
+        dest="source_suite_id",
+        metavar="SUITE_ID",
+        help="Easy BDD suite ID to sync (Feature:/Shared:/Var: cases)",
+    )
+    _trs_src.add_argument(
+        "--run",
+        type=int,
+        dest="source_run_id",
+        metavar="RUN_ID",
+        help="Run ID to read cases from instead of a suite",
+    )
+    trs_parser.add_argument(
+        "--output-dir",
+        default=None,
+        metavar="PATH",
+        help="Directory to write generated YAML files (default: tests/cases/<suite_slug>)",
+    )
+    trs_parser.add_argument(
+        "--tag",
+        default=None,
+        metavar="TAG",
+        help="Tag added to every generated test (default: slugified suite name)",
+    )
+    trs_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be written without creating any files",
+    )
+    trs_parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-case progress output",
+    )
+
     # MCP serve command
     mcp_parser = subparsers.add_parser(
         "mcp-serve",
@@ -612,6 +1031,8 @@ Examples:
             return testrail_create_run(args)
         elif args.command == "testrail-convert":
             return testrail_convert(args)
+        elif args.command == "testrail-sync":
+            return testrail_sync(args)
         elif args.command == "mcp-serve":
             return mcp_serve(args)
         elif args.command == "selector-audit":
@@ -930,23 +1351,7 @@ def record_and_upload(args) -> int:
         if section_id is None:
             return 1
 
-    # Build preconditions as a steps: wrapper — the runner parses this as path 2
-    # (dict with 'steps' key). Each step param is written flush-left under the
-    # step key so _fix_step_list_indent can recover indentation if TestRail
-    # mangles whitespace on retrieval.
-    preconds_lines = ["steps:"]
-    for step in steps:
-        if isinstance(step, dict) and len(step) == 1:
-            action_key, params = next(iter(step.items()))
-            if params:
-                preconds_lines.append(f"- {action_key}:")
-                for k, v in params.items():
-                    preconds_lines.append(f"{k}: {v}")
-            else:
-                preconds_lines.append(f"- {action_key}:")
-        else:
-            preconds_lines.append(f"- {step}")
-    preconditions = "\n".join(preconds_lines)
+    preconditions = build_testrail_preconditions(steps)
 
     try:
         case = tr.add_case(
@@ -1729,6 +2134,41 @@ def testrail_convert(args) -> int:
 
     result.print_summary()
     return 1 if result.errors > 0 else 0
+
+
+def testrail_sync(args) -> int:
+    """Sync an Easy BDD TestRail suite to local runnable YAML files."""
+    from .services.testrail_service import TestRailService, TestRailError
+    from .core.testrail_syncer import TestrailSyncer
+
+    try:
+        tr = TestRailService()
+    except TestRailError as e:
+        print(f"TestRail configuration error: {e}", file=sys.stderr)
+        print("Set TESTRAIL_URL, TESTRAIL_USERNAME, and TESTRAIL_API_KEY in your .env file.",
+              file=sys.stderr)
+        return 1
+
+    output_dir = Path(args.output_dir) if args.output_dir else None
+
+    mode = "DRY-RUN" if args.dry_run else "LIVE"
+    src_desc = f"suite {args.source_suite_id}" if args.source_suite_id else f"run {args.source_run_id}"
+    print(f"\n[Sync] {mode} — {src_desc} → {output_dir or 'tests/cases/<suite_slug>'}")
+    print()
+
+    syncer = TestrailSyncer(tr)
+    result = syncer.sync(
+        project_id=args.project_id,
+        source_suite_id=args.source_suite_id,
+        source_run_id=args.source_run_id,
+        output_dir=output_dir,
+        suite_tag=args.tag,
+        dry_run=args.dry_run,
+        verbose=not args.quiet,
+    )
+
+    result.print_summary()
+    return 1 if result.error_count > 0 else 0
 
 
 def testrail_list(args) -> int:

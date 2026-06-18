@@ -497,17 +497,40 @@ class YAMLParser:
                             # This is likely the action
                             action = key
                             if isinstance(value, dict):
-                                parameters = value
+                                parameters = value.copy()
                             elif value is not None:
                                 # If value is not a dict, it might be a single parameter
                                 parameters = {"value": value}
                             break
-                    
+
                     if action is None:
                         raise ValueError(f"Step {i} must have an 'action' field or use dot notation (e.g., browser.navigate: {{url: ...}})")
-                    
+
+                    # Collect sibling keys as parameters — handles YAML where params are
+                    # at the same indent level as the action key instead of nested under it:
+                    #   - test.sleep:      ← action value is None
+                    #     seconds: 120     ← sibling key, not nested
+                    _skip = {action, "condition", "if", "then", "else", "retry", "description"}
+                    for key, value in step_data.items():
+                        if key not in _skip and key not in parameters:
+                            parameters[key] = value
+
                     # Extract retry if present
                     retry_config = step_data.get("retry")
+
+                # Warn about null parameter values — common cause of runtime
+                # failures (e.g. unquoted '#' starts a YAML comment, empty key
+                # becomes null, or YAML 'None'/'null' used as a literal value).
+                null_params = [k for k, v in parameters.items() if v is None]
+                if null_params:
+                    import warnings
+                    warnings.warn(
+                        f"Step '{action}': parameter(s) {null_params} are null/None. "
+                        "If this is unintentional, check your YAML: "
+                        "unquoted '#' starts a comment (quote the value), "
+                        "and an empty 'key:' line becomes null.",
+                        stacklevel=2,
+                    )
 
                 steps.append(
                     TestStep(

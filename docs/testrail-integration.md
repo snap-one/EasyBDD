@@ -54,7 +54,7 @@ Use this checklist before saving any Feature case in TestRail.
 - Keep one step per line starting with `- action.name: {...}`.
 - Quote variable substitutions and expressions, for example `"${token}"` and `"'systemInfo' in last_json"`.
 - Put `store_as` and `store_response` at step level, not inside `headers` or `body`.
-- For JSON extraction, use `last_json[...]` instead of `last_response[...]`.
+- For JSON extraction, use dot-notation: `last_json.restful_res.token` — bracket access also works but is more verbose.
 - For authenticated requests, set header as `Authorization: "Bearer ${token}"`.
 - Avoid `Content-Type` on GET requests unless endpoint requires it.
 - Ensure keys in assert expressions are quoted, for example `'errCode'`.
@@ -65,7 +65,7 @@ Quick validation snippet:
 
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
-- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- eval.run: {expression: "last_json.restful_res.token", store_as: token}
 - api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}"}}
 - assert: {expression: "last_status == 200"}
 ```
@@ -99,14 +99,14 @@ Store a JSON object in the **run description** field to configure scheduling, re
 
 Every case title must begin with one of these prefixes:
 
-| Prefix | Role | Runs when |
-|--------|------|-----------|
-| `Var: Name` | Variable definitions | Always (variables injected into all tests) |
-| `Setup: Name` | Pre-test setup | Before any Test:/Feature: case |
-| `Test: Name` | Points to a local YAML file or tag | In order, if status is Untested/Retest |
-| `Feature: Name` | Steps written directly in TestRail | In order, if status is Untested/Retest |
-| `Teardown: Name` | Post-test cleanup | After all Test:/Feature: cases |
-| `Shared: Name` | Shared step definition | Referenced by other cases via `shared_step` |
+| Prefix | Role | Runs when | Body format |
+|--------|------|-----------|-------------|
+| `Var: Name` | Variable definitions | Always (variables injected into all tests) | `key: value` pairs |
+| `Setup: Name` | Pre-test setup | Always when Feature:/Test: cases are pending | `tag:`, `file:`, OR `steps:` (inline) |
+| `Test: Name` | Points to a local YAML file or tag | In order, if status is Untested/Retest | `tag:` or `file:` |
+| `Feature: Name` | Steps written directly in TestRail | In order, if status is Untested/Retest | inline steps |
+| `Teardown: Name` | Post-test cleanup | Always after tests | `tag:`, `file:`, OR `steps:` (inline) |
+| `Shared: Name` | Shared step definition | Referenced by other cases via `shared_step` | inline steps |
 
 Example run layout:
 ```
@@ -202,7 +202,7 @@ TestRail text fields can flatten indentation, merge lines, or replace spaces wit
 
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
-- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- eval.run: {expression: "last_json.restful_res.token", store_as: token}
 - api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}", Accept: application/json}}
 - assert: {expression: "'systemInfo' in last_json"}
 ```
@@ -219,6 +219,24 @@ TestRail text fields can flatten indentation, merge lines, or replace spaces wit
 - Keep `store_as` and `store_response` as top-level step params, not inside `headers` or `body`.
 - For GET requests, do not send `Content-Type` unless the endpoint explicitly requires it.
 
+### `data:` dict quoting — avoid unquoted `${var}` inside flow mappings
+
+**Problem:** When a variable substitution (`${var}`) appears inside a YAML flow mapping (curly braces `{...}`), YAML may interpret the `{` as starting a nested mapping and fail to parse:
+
+```yaml
+# WRONG — ${wb_mac} contains characters YAML interprets as a nested mapping
+data: {deviceId: ${wb_mac}, version: 1, outlets: [13, 14, 15, 16]}
+```
+
+**Fix:** Use Python dict literal style with single-quoted string values:
+
+```yaml
+# CORRECT
+data: {'deviceId': '${wb_mac}', 'version': 1, 'outlets': [13, 14, 15, 16]}
+```
+
+The runner accepts Python-style single-quoted strings inside `data:` values and substitutes `${var}` references before evaluation. Numeric values (`1`, `0`) and lists (`[13, 14, 15, 16]`) do not need quotes.
+
 ---
 
 ## API + Token + Assert Recipes
@@ -227,7 +245,7 @@ TestRail text fields can flatten indentation, merge lines, or replace spaces wit
 
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
-- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- eval.run: {expression: "last_json.restful_res.token", store_as: token}
 - assert: {expression: "token is not None and len(token) > 10"}
 ```
 
@@ -242,9 +260,9 @@ TestRail text fields can flatten indentation, merge lines, or replace spaces wit
 ### Recipe 3: Validate key/value pairs
 
 ```yaml
-- assert: {expression: "last_json['restful_res']['errCode'] == 0"}
-- assert: {expression: "last_json['restful_res']['message'] == 'OK'"}
-- assert: {expression: "'token' in last_json['restful_res']"}
+- assert: {expression: "last_json.restful_res.errCode == 0"}
+- assert: {expression: "last_json.restful_res.message == 'OK'"}
+- assert: {expression: "'token' in last_json.restful_res"}
 ```
 
 ### Recipe 4: Reuse login via shared step
@@ -255,33 +273,83 @@ TestRail text fields can flatten indentation, merge lines, or replace spaces wit
 - assert: {expression: "last_status == 200"}
 ```
 
+### Auto-Authentication via Suite Variables
+
+Instead of manually calling a login step in every test, you can configure automatic token acquisition using three suite variables in your `Var:` case:
+
+| Variable | Description |
+|----------|-------------|
+| `login_path` | URL path (or full URL) of the auth endpoint, e.g. `/system/login` |
+| `login_json` | Python dict literal with the exact POST body for authentication |
+| `token_path` | Dot-notation path to the token in the response, e.g. `restful_res.token` or `access_token` |
+
+**`Var:` case example:**
+```
+login_path: /system/login
+login_json: {'user': '${username}', 'password': '${password}'}
+token_path: restful_res.token
+```
+
+When these three variables are set, the runner automatically:
+1. Posts `login_json` to `${url}${login_path}` before the first API request
+2. Extracts the token at `token_path` using dot-notation
+3. Injects `Authorization: Bearer <token>` into every subsequent `api.request`
+4. Refreshes the token automatically on 401 responses
+
+The `login_json` dict is sent verbatim as the POST body — no field name assumptions are made, so non-standard credential fields like `user` (instead of `username`) work without any extra configuration. `token_path` supports nested fields using dot-notation (e.g. `restful_res.token` navigates `response["restful_res"]["token"]`).
+
+With auto-auth configured, test cases do not need to include any login steps or pass `Authorization` headers manually:
+
+```yaml
+- api.request:
+    method: GET
+    url: '${url}/system/firmware-info'
+    store_as: last_response
+- test.assert:
+    expression: last_response['status'] == 200
+```
+
 ---
 
 ## Response Variables and Extraction Rules
 
-After each `api.request`, the runner provides these variables:
+After each `api.request`, the runner provides these automatic variables:
 
 | Variable | Type | Use |
 |----------|------|-----|
-| `last_response` | `requests.Response` | Raw response object (status, headers, text access) |
+| `last_response` | `requests.Response` | Raw response object |
 | `last_status` | `int` | HTTP status code |
-| `last_json` | `dict \| None` | Parsed JSON body when content-type is JSON |
+| `last_json` | `dict \| None` | Parsed JSON body — use dot-notation directly |
 
-Important:
+When you use `store_as: my_response`, the runner wraps the response in an envelope:
 
-- `last_response` is not subscriptable. This fails: `last_response['restful_res']`.
-- Use `last_json[...]` for JSON key extraction.
-- `store_as` in `api.request` is not required for token extraction if you use `last_json`.
-- Use `store_response` only if you need a custom captured response dictionary.
+| Key | Contents |
+|-----|---------|
+| `my_response.status` | HTTP status code |
+| `my_response.data` | Parsed JSON body — navigate with dot-notation from here |
+| `my_response.body` | Raw response text |
+| `my_response.headers` | Response headers dict |
+| `my_response.response_time` | Elapsed time (ms) |
 
-### Correct vs incorrect extraction
+### Dot-notation access (preferred)
 
 ```yaml
-# Correct
-- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+# last_json — JSON is at the top level, no .data needed
+- eval.run: {expression: "last_json.restful_res.token", store_as: token}
+- assert: {expression: "last_json.restful_res.errCode == 0"}
+- assert: {expression: "'systemInfo' in last_json"}
 
-# Incorrect
-- eval.run: {expression: "last_response['restful_res']['token']", store_as: token}
+# store_as — JSON is under .data
+- api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}, store_as: login_response}
+- assert: {expression: "login_response.data.restful_res.errCode == 0"}
+- assert: {expression: "'token' in login_response.data.restful_res"}
+```
+
+### Bracket-access also works but is verbose
+
+```yaml
+# Also valid, but prefer dot-notation
+- assert: {expression: "last_json['restful_res']['errCode'] == 0"}
 ```
 
 ---
@@ -295,7 +363,7 @@ Copy/paste these patterns into a Feature case Preconditions field.
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
 - assert: {expression: "last_status == 200"}
-- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- eval.run: {expression: "last_json.restful_res.token", store_as: token}
 ```
 
 ### 2) Token reuse for authenticated GET
@@ -375,7 +443,7 @@ steps:
         password: ${password}
 
   - eval.run:
-      expression: last_json['restful_res']['token']
+      expression: last_json.restful_res.token
       store_as: token
 
   - api.request:
@@ -392,7 +460,7 @@ steps:
 
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
-- eval.run: {expression: "last_json['restful_res']['token']", store_as: token}
+- eval.run: {expression: "last_json.restful_res.token", store_as: token}
 - api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}"}}
 - assert: {expression: "'systemInfo' in last_json"}
 ```
@@ -636,9 +704,13 @@ Variables from Var: cases are injected into the YAML test automatically.
 
 ## Setup: and Teardown: Cases
 
-- **Setup:** cases run before all Test:/Feature: cases, regardless of their status.
+- **Setup:** cases run before all Test:/Feature: cases, regardless of their status. They always run when at least one Feature: or Test: case is pending (Untested/Retest).
 - **Teardown:** cases run after all Test:/Feature: cases, regardless of pass/fail.
-- Both use the same step formats as Feature: cases.
+- Both support three body formats: `tag:`, `file:`, or inline `steps:`.
+
+### Format 1 — Inline steps (most common)
+
+Write steps directly in the Preconditions field, same as a Feature: case:
 
 ```
 Setup: Connect to OvrC Server
@@ -656,6 +728,58 @@ Teardown: Disconnect from OvrC
 Preconditions:
 - ovrc.disconnect: {}
 ```
+
+### Format 2 — Tag or file reference
+
+```
+Setup: Device Precheck
+
+Steps:
+tag: device_precheck
+```
+
+```
+Setup: Load Firmware List
+
+Steps:
+file: setup/load_firmware.yaml
+```
+
+### Format 3 — Inline steps
+
+Any non-empty body that does not start with `tag:` or `file:` is treated as inline steps. You can write them as a bare list or with an explicit `steps:` header — both are equivalent.
+
+**Bare list (simplest):**
+```
+- aws.list_files:
+bucket_name: ${bucket_name}
+folder_prefix: moip/
+file_extension: .bin
+store_as: firmware_files
+- eval.run:
+expression: "next((f for f in firmware_files if '-DM' not in f), None)"
+store_as: upgrade_file
+```
+
+**With `steps:` header (also valid):**
+```yaml
+steps:
+  - aws.list_files:
+      bucket_name: ${bucket_name}
+      folder_prefix: moip/
+      file_extension: .bin
+      store_as: firmware_files
+  - eval.run:
+      expression: "next((f for f in firmware_files if '-DM' not in f), None)"
+      store_as: upgrade_file
+  - eval.run:
+      expression: "next((f for f in firmware_files if '-DM' in f), None)"
+      store_as: downgrade_file
+```
+
+This is useful for a `Setup: Firmware Manager` case that lists S3 files and sets `upgrade_file`/`downgrade_file` variables — it runs its steps every time a Feature: case is pending, without needing to be individually marked for retest.
+
+> **TestRail editing note:** When writing directly in TestRail's Preconditions field, parameters can be flush-left (no indentation required). The runner automatically re-indents them before parsing. Indentation IS required in local YAML files.
 
 ---
 

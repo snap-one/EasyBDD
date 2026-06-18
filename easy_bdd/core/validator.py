@@ -218,6 +218,17 @@ ACTION_SCHEMA: Dict[str, Dict] = {
     "pagerduty.acknowledge": {"required": [], "optional": ["dedup_key"]},
     "pd.acknowledge":     {"alias_of": "pagerduty.acknowledge"},
 
+    # ssh.* (stateful Paramiko sessions — preferred over command.ssh for device work)
+    "ssh.connect":    {
+        "required": ["host", "username"],
+        "optional": ["password", "key_filename", "passphrase", "port", "timeout", "look_for_keys", "allow_agent"],
+    },
+    "ssh.command":    {
+        "required": ["host", "command"],
+        "optional": ["username", "password", "key_filename", "port", "timeout", "prompt", "use_shell", "store_as"],
+    },
+    "ssh.disconnect": {"required": ["host"], "optional": ["port"]},
+
     # command.*
     "command.ssh":    {
         "required": ["command"],

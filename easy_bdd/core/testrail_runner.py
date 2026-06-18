@@ -459,7 +459,33 @@ def _fix_step_list_indent(text: str) -> str:
         else:
             result.append(line)
             i += 1
-    return '\n'.join(result)
+
+    text = '\n'.join(result)
+
+    # Post-pass: re-indent flush-left list items that follow a bare top-level key.
+    # e.g. "steps:\n- api.request:" → "steps:\n  - api.request:"
+    # YAML requires list items to be indented under their mapping key.
+    import re as _re_post
+    out_lines = text.split('\n')
+    fixed: List[str] = []
+    j = 0
+    while j < len(out_lines):
+        ln = out_lines[j]
+        # Bare key at col 0 with no inline value (e.g. "steps:", "variables:")
+        if _re_post.match(r'^[a-zA-Z_]\w*:\s*$', ln) and j + 1 < len(out_lines) and out_lines[j + 1].startswith('-'):
+            fixed.append(ln)
+            j += 1
+            # Indent the entire following block by 2 spaces until next root bare key
+            while j < len(out_lines):
+                sub = out_lines[j]
+                if sub and _re_post.match(r'^[a-zA-Z_]\w*:\s*$', sub):
+                    break  # next root-level bare key starts a new block
+                fixed.append('  ' + sub if sub else sub)
+                j += 1
+        else:
+            fixed.append(ln)
+            j += 1
+    return '\n'.join(fixed)
 
 
 # Ordered prefix → role mapping (order matters: longest prefix checked first)
@@ -1129,6 +1155,15 @@ class TestRailRunner:
             if test["role"] != "var":
                 continue
             body = _get_case_body(test)
+            # If get_tests didn't return case body fields, fetch the full case
+            if not body:
+                case_id = test.get("case_id")
+                if case_id:
+                    try:
+                        full_case = self._tr.get_case(int(case_id))
+                        body = _get_case_body(full_case)
+                    except Exception:
+                        pass
             # Skip step-list bodies — handled by _execute_step_var_cases
             try:
                 parsed = _yaml_safe_load_lenient(body)
@@ -1321,8 +1356,10 @@ class TestRailRunner:
                 f"{list(injected_vars.keys())}"
             )
 
-        # Build shared_steps.yaml from Shared: cases so Feature: cases can reference them
-        self._sync_keyword_cases(classified)
+        # Build shared_steps.yaml from Shared: cases so Feature: cases can reference them.
+        # Also fetches the full suite so nested shared_step refs (Shared: cases that aren't
+        # in this run) are available at runtime.
+        self._sync_keyword_cases(classified, run_id=run_id)
 
         # Filter Test: / Feature: cases to only those that need running
         pending_tests = [
@@ -1393,7 +1430,16 @@ class TestRailRunner:
                 start_time = time.time()
 
                 case_test_details: List[Dict] = []
-                if role == "inline":
+                # Setup:/Teardown: cases whose body starts with 'steps:' are treated
+                # as inline Feature: cases so they can contain YAML steps directly.
+                _stripped = body.lstrip()
+                # Setup:/Teardown: cases are inline steps unless they explicitly use
+                # tag:/file: routing.  Any other non-empty body is treated as inline so
+                # _run_feature can give a proper diagnostic rather than "Unrecognised body".
+                _is_inline_steps = role in ("setup", "teardown") and bool(_stripped) and not (
+                    _stripped.startswith("tag:") or _stripped.startswith("file:")
+                )
+                if role == "inline" or _is_inline_steps:
                     test_passed, comment_lines, case_test_details = self._run_feature(case, injected_vars, verbose)
                 else:
                     yaml_files = self._resolve(body, title, injected_vars)
@@ -1754,11 +1800,18 @@ class TestRailRunner:
             except Exception:
                 pass
 
-    def _sync_keyword_cases(self, classified: List[Dict]) -> None:
+    def _sync_keyword_cases(
+        self, classified: List[Dict], run_id: int = None
+    ) -> None:
         """Parse Shared: cases and write them into artifact_dir/shared_steps.yaml.
 
         Each Shared: case becomes one entry in shared_steps.yaml, keyed by its
         clean_title (title with the 'Shared: ' prefix stripped).
+
+        When run_id is given the method also fetches ALL Shared: cases from the
+        underlying suite, not just those included in the run.  This ensures that
+        nested shared_step references (a Shared: case calling another Shared: case
+        that was not added to the run) are always available at runtime.
 
         Accepted Preconditions formats:
 
@@ -1783,6 +1836,36 @@ class TestRailRunner:
         import yaml as _yaml
 
         keyword_cases = [c for c in classified if c.get("role") == "keyword"]
+
+        # Supplement with every Shared: case from the full suite so nested
+        # shared_step references always resolve even when the dependency case
+        # was not added to the run.
+        if run_id is not None:
+            try:
+                run_info = self._tr.get_run(run_id)
+                suite_id = run_info.get("suite_id")
+                project_id = run_info.get("project_id")
+                if suite_id and project_id:
+                    suite_cases = self._tr.get_cases(project_id, suite_id)
+                    run_ids_seen = {
+                        c.get("case_id") or c.get("id")
+                        for c in keyword_cases
+                    }
+                    extra = [
+                        {
+                            **c,
+                            "role": "keyword",
+                            "clean_title": _strip_prefix(c.get("title", "")),
+                        }
+                        for c in suite_cases
+                        if _classify(c.get("title", "")) == "keyword"
+                        and c.get("id") not in run_ids_seen
+                    ]
+                    if extra:
+                        keyword_cases = keyword_cases + extra
+            except Exception as exc:
+                print(f"  [warn] Could not fetch suite Shared: cases: {exc}")
+
         if not keyword_cases:
             return
 
@@ -1834,6 +1917,9 @@ class TestRailRunner:
                 parsed = _yaml_safe_load_lenient(body)
             except Exception as exc:
                 print(f"  [warn] Shared '{name}': could not parse body: {exc}")
+                if name in existing:
+                    existing.pop(name)
+                    updated = True
                 continue
 
             if isinstance(parsed, list):

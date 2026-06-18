@@ -141,13 +141,40 @@ auth_config:
   type: "none"
 ```
 
+## Auto-Auth via Suite Variables (TestRail)
+
+When running from TestRail, you can configure automatic token injection using three variables in your `Var:` case — no device config file needed:
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `login_path` | `/system/login` | Auth endpoint path (appended to `url`) or full URL |
+| `login_json` | `{'user': 'admin', 'password': 'secret'}` | Exact POST body for authentication |
+| `token_path` | `restful_res.token` | Dot-notation path to token in the response |
+
+```
+login_path: /system/login
+login_json: {'user': '${username}', 'password': '${password}'}
+token_path: restful_res.token
+```
+
+The `login_json` dict is POSTed verbatim — all key names are preserved as-is. This means devices that use non-standard field names like `user` (instead of `username`) work without any extra configuration.
+
+`token_path` supports nested fields using dot-notation:
+- `access_token` → `response["access_token"]`
+- `restful_res.token` → `response["restful_res"]["token"]`
+- `data.auth.jwt` → `response["data"]["auth"]["jwt"]`
+
+The runner caches the token, injects it into every `api.request` as `Authorization: Bearer <token>`, and automatically re-authenticates on 401 responses.
+
 ## Token Management Features
 
 - **Automatic Expiry Handling**: Tokens are automatically refreshed when expired
 - **Device-Specific Configs**: Different devices can have different auth endpoints
-- **Retry Logic**: Failed authentication automatically retries once
+- **Retry Logic**: Failed authentication automatically retries once on 401
 - **Variable Substitution**: Use `${VARIABLE}` for sensitive credentials
 - **Flexible Response Parsing**: Configure which fields contain tokens and expiry
+- **Dot-notation token extraction**: `token_path` navigates nested response objects
+- **Verbatim login payload**: `login_json` is sent as-is; no field name assumptions
 
 ## Usage in Tests
 

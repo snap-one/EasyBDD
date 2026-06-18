@@ -189,6 +189,9 @@ class AssertionEngine:
 
         elif isinstance(node, ast.Attribute):
             obj = self._eval_node(node.value, context)
+            # Allow dot-notation on dicts: response.data.restful_res.fwConfs
+            if isinstance(obj, dict) and node.attr in obj:
+                return obj[node.attr]
             return getattr(obj, node.attr)
 
         elif isinstance(node, ast.Subscript):
@@ -251,13 +254,28 @@ class AssertionEngine:
                 return any(self._eval_node(value, context) for value in node.values)
 
         elif isinstance(node, ast.Call):
+            # Allow method calls on built-in safe types (dict.get, list.append, str.lower, etc.)
+            if isinstance(node.func, ast.Attribute):
+                obj = self._eval_node(node.func.value, context)
+                if isinstance(obj, (dict, list, str, int, float, bool, tuple, set, bytes)):
+                    func = getattr(obj, node.func.attr)
+                    args = [self._eval_node(arg, context) for arg in node.args]
+                    kwargs = {
+                        kw.arg: self._eval_node(kw.value, context)
+                        for kw in node.keywords
+                    }
+                    return func(*args, **kwargs)
+                raise ValueError(
+                    f"Method calls on {type(obj).__name__} are restricted for security"
+                )
+
             func = self._eval_node(node.func, context)
             args = [self._eval_node(arg, context) for arg in node.args]
             kwargs = {
                 kw.arg: self._eval_node(kw.value, context) for kw in node.keywords
             }
 
-            # Only allow safe functions
+            # Only allow safe free functions
             if func not in self.SAFE_FUNCTIONS.values():
                 raise ValueError("Function calls are restricted for security")
 

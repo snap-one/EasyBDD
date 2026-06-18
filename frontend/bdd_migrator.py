@@ -34,14 +34,18 @@ Key syntax being migrated
   gv.log[-1]['response']      (YAML param context)  → ${last_response}
   gv.log[-1]['response_dict'] (YAML param context)  → ${last_response_dict}
   gv.log[-1]['response_code'] (YAML param context)  → ${last_response_code}
-  gv.message                  (YAML param context)  → ${message}
-  gv.tests['variables']['k']  (YAML param context)  → ${k}
+  gv.<attr>                   (YAML param context)  → ${attr}
+  gv.tests['variables']['k']  (YAML param context)  → ${k}  (k may contain hyphens)
   gv.log[-1]['response_txt']  (Python code context) → str(last_response)
   gv.log[-1]['response']      (Python code context) → str(last_response)
   gv.log[-1]['response_dict'] (Python code context) → last_response_dict
-  gv.tests['variables']['k']  (Python code context) → k  (plain variable name)
-  gv.message                  (Python code context) → message
+  gv.tests['variables']['k']  (Python code context) → k  (identifier) or variables['k'] (hyphenated)
+  gv.<attr>                   (Python code context) → attr  (plain name)
+  str2dict(...)               (Python code context) → json.loads(...)
+  get_text(...)               (Python code context) → str(...)
+  prev_response               (Python/YAML context) → last_response
   gv.tests['variables']['k']=v (Python assignment)  → eval.exec: "k = v" + store_as: k
+  gv.tests['variables']['a-b']=v (Python assignment) → eval.exec: "variables['a-b'] = v" + store_as: a-b
   gv.message = v              (Python assignment)   → eval.exec: "message = v" + store_as: message
   gv.attr = v                 (Python assignment)   → eval.exec: "attr = v" + store_as: attr
   pure boolean Python expression                    → test.assert: expression
@@ -52,6 +56,20 @@ from __future__ import annotations
 import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
+
+
+def _ensure_base_url(url: str) -> str:
+    """Prepend ${url} to relative paths that have no base URL.
+
+    Relative paths start with '/' and contain no existing base variable or
+    scheme.  Absolute URLs (http://, wss://, ...) and paths already using a
+    ${...} variable prefix are left unchanged.
+    """
+    if not url:
+        return url
+    if url.startswith("/") and not url.startswith("//"):
+        return "${url}" + url
+    return url
 
 
 def _int_or_var(value, default=0):
@@ -83,8 +101,8 @@ def _sub_vars(text: str) -> str:
     # gv.log indexed access — response text
     text = re.sub(r"gv\.log\[-1\]\['response_txt'\]",   "${last_response}",      text)
     text = re.sub(r"gv\.log\[-1\]\['response'\]",        "${last_response}",      text)
-    text = re.sub(r"gv\.log\[-2\]\['response_txt'\]",   "${prev_response}",      text)
-    text = re.sub(r"gv\.log\[-2\]\['response'\]",        "${prev_response}",      text)
+    text = re.sub(r"gv\.log\[-2\]\['response_txt'\]",   "${last_response}",      text)
+    text = re.sub(r"gv\.log\[-2\]\['response'\]",        "${last_response}",      text)
     text = re.sub(r"gv\.log\[(-?\d+)\]\['response(?:_txt)?'\]", r"${response_\1}", text)
 
     # gv.log indexed access — response dict
@@ -97,20 +115,23 @@ def _sub_vars(text: str) -> str:
     text = re.sub(r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "${last_response_headers}", text)
 
     # gv.tests['variables']['key'] / gv.tests['variables']['$key'] access
-    text = re.sub(r"gv\.tests\['variables'\]\['\$?(\w+)'\]", r"${\1}", text)
-    text = re.sub(r'gv\.tests\["variables"\]\["\$?(\w+)"\]', r"${\1}", text)
+    # Supports both simple identifiers and hyphenated names like B-900-MOIP-4K-RX_dict
+    text = re.sub(r"gv\.tests\['variables'\]\['\$?([\w][\w\-]*)'\]", r"${\1}", text)
+    text = re.sub(r'gv\.tests\["variables"\]\["\$?([\w][\w\-]*)"\]', r"${\1}", text)
 
-    # gv.message — migrated to a plain ${message} variable
-    text = re.sub(r"\bgv\.message\b", "${message}", text)
+    # gv.<attr> — generalized to ${attr} for any attribute (not log/tests shim objects)
+    text = re.sub(r"\bgv\.(?!log\b|tests\b)(\w+)\b", r"${\1}", text)
 
     # <$varname$> or <${varname}$> or <${varname}> — Gherkin Scenario Outline params
     text = re.sub(r"<\$\{([A-Za-z_][A-Za-z0-9_]*)\}\$?>", r"${\1}", text)
     text = re.sub(r"<\$([A-Za-z_][A-Za-z0-9_]*)\$>",       r"${\1}", text)
 
     # $variable → ${variable}  (dollar-sign variables, not already in ${...})
+    # Allow hyphens inside names (e.g. $unit_id_B-900-MOIP-4K-RX_...) but not
+    # trailing hyphens, so arithmetic like $count-1 is not consumed.
     def dollar_sub(m):
         return "${" + m.group(1) + "}"
-    text = re.sub(r"\$(?!\{)([A-Za-z_][A-Za-z0-9_]*)", dollar_sub, text)
+    text = re.sub(r"\$(?!\{)([A-Za-z_][\w]*(?:-[\w]+)*)", dollar_sub, text)
 
     return text
 
@@ -118,30 +139,38 @@ def _sub_vars(text: str) -> str:
 # ── patterns applied to Python code strings (eval.exec, test.assert, etc.) ──
 # Maps (pattern, replacement) where replacement can be a string or callable.
 _CODE_PATTERNS: List[Tuple[str, Any]] = [
-    # gv.log response text  (old framework used 'response'; Easy BDD uses 'response_txt'
-    # but also exposes last_response as a bare name)
-    (r"gv\.log\[-1\]\['response_txt'\]",    "str(last_response)"),
-    (r"gv\.log\[-1\]\['response'\]",         "str(last_response)"),
-    (r"gv\.log\[-2\]\['response_txt'\]",    "str(prev_response)"),
-    (r"gv\.log\[-2\]\['response'\]",         "str(prev_response)"),
+    # gv.log response text — Easy BDD stores the full response dict under store_as;
+    # the body JSON string lives in last_response["body"].
+    (r"gv\.log\[-1\]\['response_txt'\]",    "last_response["body"]"),
+    (r"gv\.log\[-1\]\['response'\]",         "last_response["body"]"),
+    (r"gv\.log\[-2\]\['response_txt'\]",    "last_response["body"]"),
+    (r"gv\.log\[-2\]\['response'\]",         "last_response["body"]"),
     # gv.log response dict
     (r"gv\.log\[-1\]\['response_dict'\]",   "last_response_dict"),
-    (r"gv\.log\[-2\]\['response_dict'\]",   "prev_response_dict"),
+    (r"gv\.log\[-2\]\['response_dict'\]",   "last_response_dict"),
     # gv.log response code / headers
-    (r"gv\.log\[-1\]\['(?:response_code|status_code)'\]",  "last_response_code"),
-    (r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "last_response_headers"),
+    (r"gv\.log\[-1\]\['(?:response_code|status_code)'\]",  "last_response['status']"),
+    (r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "last_response['headers']"),
     # Numeric-indexed log entries
     (r"gv\.log\[(-?\d+)\]\['response(?:_txt)?'\]",
-        lambda m: "str(last_response)" if m.group(1) in ("-1",)
-                  else f"str(log_response_{m.group(1).lstrip('-')})"),
+        lambda m: "last_response["body"]" if m.group(1) in ("-1",)
+                  else f"log_response_{m.group(1).lstrip('-')}['body']"),
     (r"gv\.log\[(-?\d+)\]\['response_dict'\]",
         lambda m: "last_response_dict" if m.group(1) in ("-1",)
                   else f"log_response_dict_{m.group(1).lstrip('-')}"),
-    # gv.tests['variables']['key'] / ['$key'] reads → plain variable name (strips $ prefix)
-    (r"gv\.tests\['variables'\]\['\$?(\w+)'\]", r"\1"),
-    (r'gv\.tests\["variables"\]\["\$?(\w+)"\]', r"\1"),
+    # gv.tests['variables']['key'] / ['$key'] reads
+    # Simple identifiers (all word chars) → bare name; hyphenated names → variables['name']
+    (r"gv\.tests\['variables'\]\['\$?([\w][\w\-]*)'\]",
+        lambda m: m.group(1) if re.match(r'^\w+$', m.group(1)) else f"variables['{m.group(1)}']"),
+    (r'gv\.tests\["variables"\]\["\$?([\w][\w\-]*)"\]',
+        lambda m: m.group(1) if re.match(r'^\w+$', m.group(1)) else f"variables['{m.group(1)}']"),
     # gv.message / gv.<attr> reads (not log/tests — those are handled above) → plain name
     (r"gv\.(?!log\b|tests\b)(\w+)\b", r"\1"),
+    # mybdd helper functions → Easy BDD / stdlib equivalents
+    (r"\bgv\.str2dict\b", "json.loads"),
+    (r"\bstr2dict\b",     "json.loads"),
+    (r"\bgv\.get_text\b", "str"),
+    (r"\bget_text\b",     "str"),
 ]
 
 
@@ -187,14 +216,17 @@ def _smart_eval_step(code: str) -> Dict:
     raw = code.strip()
 
     # Rule 1 — gv.tests['variables']['key'] = expr  (single or double quotes)
+    # Supports both simple identifiers and hyphenated names like B-900-MOIP-4K-RX_dict.
     m = re.match(
-        r"^gv\.tests\[(?:'variables'|\"variables\")\]\[(?:'\$?(\w+)'|\"\$?(\w+)\")\]\s*=\s*(.+)$",
+        r"^gv\.tests\[(?:'variables'|\"variables\")\]\[(?:'\$?([\w][\w\-]*)'|\"\$?([\w][\w\-]*)\")\]\s*=\s*(.+)$",
         raw, re.DOTALL,
     )
     if m:
         var_name = m.group(1) or m.group(2)
         rhs = _translate_code(m.group(3).strip())
-        return {"action": "eval.exec", "code": f"{var_name} = {rhs}", "store_as": var_name}
+        # Use bare name for valid Python identifiers; dict access for hyphenated names
+        lhs = var_name if re.match(r'^\w+$', var_name) else f"variables['{var_name}']"
+        return {"action": "eval.exec", "code": f"{lhs} = {rhs}", "store_as": var_name}
 
     # Rule 2 — gv.<attr> = expr  (e.g. gv.message = ..., gv.result = ...)
     # Excludes gv.log and gv.tests which are shim objects, not settable scalars.
@@ -560,6 +592,7 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         url     = _sub_vars(str(param_dict.get("url", "")))
         path    = _sub_vars(str(param_dict.get("path", param_dict.get("command", ""))))
         full_url = (url.rstrip("/") + "/" + path.lstrip("/")) if path else url
+        full_url = _ensure_base_url(full_url)
         is_ws = method == "SEND" or full_url.startswith("wss://") or full_url.startswith("ws://")
         if is_ws:
             body_val = _expand_json_payload(data_str) if data_str and data_str not in ("{}", "") else None
@@ -577,7 +610,8 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         method  = param_dict.get("method", "get").upper()
         url     = _sub_vars(str(param_dict.get("url", "")))
         path    = _sub_vars(str(param_dict.get("path", "")))
-        step = {"action": "api.request", "method": method, "url": f"{url}{path}", "store_as": "last_response"}
+        full_url = _ensure_base_url(f"{url}{path}")
+        step = {"action": "api.request", "method": method, "url": full_url, "store_as": "last_response"}
         payload = _expand_json_payload(data_str)
         if payload is not None:
             step["body"] = payload
@@ -602,13 +636,16 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         }
 
     if name == "ssh":
-        return {
-            "action":   "command.ssh",
+        step = {
+            "action":   "ssh.command",
             "host":     _sub_vars(str(param_dict.get("host", ""))),
             "username": _sub_vars(str(param_dict.get("user", param_dict.get("username", "")))),
             "password": _sub_vars(str(param_dict.get("password", ""))),
             "command":  _sub_vars(str(param_dict.get("command", ""))),
         }
+        if param_dict.get("prompt"):
+            step["prompt"] = param_dict["prompt"]
+        return step
 
     if name == "serial":
         return {
@@ -829,6 +866,7 @@ def _parse_step_line(line: str) -> Optional[Dict]:
             full_url = url.rstrip("/") + "/" + path.lstrip("/")
         else:
             full_url = url
+        full_url = _ensure_base_url(full_url)
         is_ws = method == "SEND" or url.startswith("wss://") or url.startswith("ws://")
         if is_ws:
             body_val = _expand_json_payload(data) if data and data not in ("{}", "") else None
@@ -849,7 +887,7 @@ def _parse_step_line(line: str) -> Optional[Dict]:
         path   = _sub_vars(m.group(2).strip())
         method = m.group(3).strip().upper()
         data   = m.group(5).strip()
-        step = {"action": "api.request", "method": method, "url": f"{url}{path}", "store_as": "last_response"}
+        step = {"action": "api.request", "method": method, "url": _ensure_base_url(f"{url}{path}"), "store_as": "last_response"}
         payload = _expand_json_payload(data)
         if payload is not None:
             step["body"] = payload

@@ -29,7 +29,7 @@ class RecorderConverter:
 
             step = self._parse_playwright_line(line)
             if step:
-                steps.append(self._finalise_step(step))
+                steps.extend(self._finalise_step(step))
 
         return {
             "name": "Playwright Native API Test",
@@ -38,10 +38,32 @@ class RecorderConverter:
             "steps": steps,
         }
 
-    def _finalise_step(self, step: Dict[str, Any]) -> Dict[str, Any]:
-        """Upgrade selectors to role-based then convert to browser.xxx format."""
+    def _finalise_step(self, step: Dict[str, Any]) -> list:
+        """Upgrade selectors to role-based then convert to browser.xxx format.
+
+        Returns a list of [test.log entry, browser.xxx step] so callers can
+        extend() rather than append() the result.
+        """
         step = self.upgrade_step_to_role_selector(step)
-        return self._to_browser_step(step)
+        browser_step = self._to_browser_step(step)
+
+        # Build a human-readable log message from the step params
+        action_key = next(iter(browser_step)) if isinstance(browser_step, dict) else None
+        if action_key:
+            params = browser_step.get(action_key) or {}
+            if isinstance(params, dict):
+                detail_parts = []
+                for k in ("name", "label", "role", "selector", "text", "url", "value"):
+                    if k in params:
+                        detail_parts.append(f"{k}={params[k]!r}")
+                detail = ", ".join(detail_parts) if detail_parts else ""
+                msg = f"{action_key}({detail})" if detail else action_key
+            else:
+                msg = action_key
+            log_step = {"test.log": {"message": msg}}
+            return [log_step, browser_step]
+
+        return [browser_step]
 
     def _to_browser_step(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -359,7 +381,7 @@ class RecorderConverter:
         for raw in data.get("steps", []):
             step = self._convert_chrome_devtools_step(raw, variables)
             if step:
-                steps.append(self._finalise_step(step))
+                steps.extend(self._finalise_step(step))
 
         return {
             "name": test_name,
@@ -619,12 +641,12 @@ class RecorderConverter:
             if isinstance(action, dict):
                 step = self._convert_playwright_action(action, variables)
                 if step:
-                    steps.append(self._finalise_step(step))
+                    steps.extend(self._finalise_step(step))
             elif isinstance(action, str):
                 # Handle string-based actions
                 step = self._parse_playwright_code_line(action, variables)
                 if step:
-                    steps.append(self._finalise_step(step))
+                    steps.extend(self._finalise_step(step))
 
         return {
             "name": test_name,
@@ -727,7 +749,7 @@ class RecorderConverter:
         for cmd in commands:
             step = self._convert_selenium_command(cmd)
             if step:
-                steps.append(self._finalise_step(step))
+                steps.extend(self._finalise_step(step))
 
         return {
             "name": test_name,
@@ -858,7 +880,7 @@ class RecorderConverter:
         for cmd in commands:
             step = self._convert_cypress_command(cmd)
             if step:
-                steps.append(self._finalise_step(step))
+                steps.extend(self._finalise_step(step))
 
         return {
             "name": test_name,
@@ -895,7 +917,7 @@ class RecorderConverter:
         for step_data in steps_data:
             step = self._convert_puppeteer_step(step_data)
             if step:
-                steps.append(self._finalise_step(step))
+                steps.extend(self._finalise_step(step))
 
         return {
             "name": test_name,
@@ -934,7 +956,7 @@ class RecorderConverter:
         for cmd in commands:
             step = self._convert_katalon_command(cmd)
             if step:
-                steps.append(self._finalise_step(step))
+                steps.extend(self._finalise_step(step))
 
         return {
             "name": test_name,
