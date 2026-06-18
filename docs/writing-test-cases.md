@@ -399,6 +399,36 @@ Screenshots are saved to `reports/` and attached to the TestRail result automati
 
 ## 8. Common Pitfalls and Fixes
 
+### SSH/Telnet — `command:` or `prompt:` shows as `null` at runtime
+
+**Symptom:** `SSH command requires 'command' — got None` or the step fails with `step returned False` and params show `command: None`.  
+**Cause:** A YAML value that contains `#`, or a key with no value, becomes `null`.
+
+The parser now warns about null parameters when it loads the file — look for `UserWarning: Step '...': parameter(s) [...] are null/None` in the output before the run starts.
+
+```yaml
+# WRONG — '#' after a space is a YAML comment; prompt becomes null
+- ssh.command:
+    prompt: AN-210-SW-16-POE#
+
+# WRONG — standalone '#' value is entirely a comment; prompt becomes null
+- ssh.command:
+    prompt: #
+
+# WRONG — empty key; command becomes null
+- ssh.command:
+    command:
+
+# CORRECT — quote any value that contains or starts with a special character
+- ssh.command:
+    prompt: 'AN-210-SW-16-POE#'
+    command: '?Model'
+```
+
+Characters that must be quoted when they appear in a value: `#` (preceded by space), `?` `!` `*` `&` `|` at the start of a value.
+
+---
+
 ### YAML breaks on expressions with single quotes
 
 **Symptom:** `Could not parse Preconditions as YAML: expected <block end>`  

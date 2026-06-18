@@ -518,6 +518,20 @@ class YAMLParser:
                     # Extract retry if present
                     retry_config = step_data.get("retry")
 
+                # Warn about null parameter values — common cause of runtime
+                # failures (e.g. unquoted '#' starts a YAML comment, empty key
+                # becomes null, or YAML 'None'/'null' used as a literal value).
+                null_params = [k for k, v in parameters.items() if v is None]
+                if null_params:
+                    import warnings
+                    warnings.warn(
+                        f"Step '{action}': parameter(s) {null_params} are null/None. "
+                        "If this is unintentional, check your YAML: "
+                        "unquoted '#' starts a comment (quote the value), "
+                        "and an empty 'key:' line becomes null.",
+                        stacklevel=2,
+                    )
+
                 steps.append(
                     TestStep(
                         action=action, parameters=parameters, retry_config=retry_config

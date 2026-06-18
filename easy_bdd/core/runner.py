@@ -3588,11 +3588,20 @@ class TestRunner:
             # Handle SSH command
             # Support both "command.ssh" and "command ssh" formats
             if "command" in action_lower and "ssh" in action_lower:
-                host = params.get("host", "")
-                command = params.get("command", "")
+                host = params.get("host") or ""
+                command = params.get("command") or ""
                 if not host or not command:
+                    missing = []
+                    if not host:
+                        missing.append("'host'")
+                    if not command:
+                        missing.append(
+                            f"'command' (got {params.get('command')!r} — "
+                            "check YAML: unquoted '#' starts a comment, "
+                            "empty value becomes null)"
+                        )
                     raise ValueError(
-                        "SSH command requires 'host' and 'command' parameters"
+                        f"SSH command requires {' and '.join(missing)}"
                     )
 
                 print(f"      🔐 Executing SSH command on {host}: {command[:50]}...")

@@ -5,53 +5,75 @@ Paramiko-based SSH client with persistent connection pooling. Designed for
 interactive device sessions (routers, switches, WattBox CLI, etc.) where
 multiple commands need to run in the same shell session.
 
-Use ssh.* for stateful multi-command sessions.
-Use command.ssh for one-shot fire-and-forget commands.
+  ssh.*        — stateful multi-command sessions with connection reuse
+  command.ssh  — one-shot subprocess; no prompt support, no session pool
 
 YAML actions:
   ssh.connect    — open an SSH connection (also auto-opened on first command)
   ssh.command    — run a command and capture output
   ssh.disconnect — close the connection
 
-Example (stateful session):
-  steps:
-    - action: ssh.connect
+Shorthand (connect + command in one step):
+
+  - ssh.command:
       host: 192.168.1.1
       username: admin
       password: admin123
-      port: 22
-      timeout: 10
+      command: show version
+      store_as: fw_version
 
-    - action: ssh.command
+Interactive shell (prompt-based, e.g. WattBox, Araknis, Cisco):
+
+  - ssh.command:
+      host: ${ip_address}
+      username: wattbox
+      password: SnapAV704
+      prompt: '>'           # wait for this substring before returning
+      command: '?Model'     # quote commands starting with ? ! * & |
+      store_as: model
+
+  - ssh.command:
+      host: ${ip_address}
+      username: araknis
+      password: SnapAV704!
+      prompt: '#'           # matches 'AN-210-SW-16-POE#' — substring check
+      command: show version
+
+Stateful multi-command session:
+
+  - ssh.connect:
+      host: 192.168.1.1
+      username: admin
+      password: admin123
+
+  - ssh.command:
       host: 192.168.1.1
       command: show version
       store_as: version_output
 
-    - action: ssh.command
+  - ssh.command:
       host: 192.168.1.1
       command: show interfaces
-      prompt: "#"
+      prompt: '#'
       store_as: interfaces
 
-    - action: ssh.disconnect
+  - ssh.disconnect:
       host: 192.168.1.1
 
-Shorthand (connect + command in one step):
-  steps:
-    - ssh.command:
-        host: 192.168.1.1
-        username: admin
-        password: admin123
-        command: cat /etc/version
-        store_as: fw_version
-
 Key auth:
-  steps:
-    - ssh.connect:
-        host: 192.168.1.1
-        username: admin
-        key_filename: /home/jenkins/.ssh/id_rsa
-        passphrase: ""          # omit if key has no passphrase
+
+  - ssh.connect:
+      host: 192.168.1.1
+      username: admin
+      key_filename: /home/jenkins/.ssh/id_rsa
+      passphrase: ''          # omit if key has no passphrase
+
+YAML quoting rules:
+  - Always quote prompt: values that contain '#' (e.g. prompt: 'AN-210-SW-16-POE#')
+    An unquoted '#' preceded by whitespace is treated as a YAML comment → null.
+  - Quote command: values that start with ?, !, *, &, or | (e.g. command: '?Model').
+  - An empty 'command:' or 'prompt:' key is parsed as null, not an empty string.
+  The parser warns about null parameters before the run starts.
 """
 
 import socket
@@ -175,7 +197,9 @@ class _SSHConn:
             try:
                 chunk = sh.recv(4096)
                 if not chunk:
-                    break
+                    # recv returning empty bytes means the server closed the
+                    # connection (EOF). Raise so _command can reconnect.
+                    raise ConnectionError("SSH shell: connection closed by remote host (0 bytes received)")
                 buf += chunk
                 last_recv = time.time()
                 if prompt_bytes in buf:
@@ -185,6 +209,8 @@ class _SSHConn:
                 if (time.time() - last_recv) >= idle_timeout:
                     break
                 continue
+            except ConnectionError:
+                raise
             except Exception:
                 break
 
@@ -245,30 +271,42 @@ class SSHService:
         return True
 
     def _command(self, params: Dict[str, Any]) -> str:
-        host = params.get("host", "")
-        port = int(params.get("port", _DEFAULT_PORT))
-        command = params.get("command", "")
-        timeout = float(params.get("timeout", _SHELL_TIMEOUT))
-        prompt = params.get("prompt", "")  # if set, use interactive shell mode
+        host = params.get("host") or ""
+        port = int(params.get("port") or _DEFAULT_PORT)
+        command = params.get("command") or ""
+        timeout = float(params.get("timeout") or _SHELL_TIMEOUT)
+        prompt = params.get("prompt") or ""  # if set, use interactive shell mode
         use_shell = bool(params.get("use_shell", False)) or bool(prompt)
 
         if not host:
-            raise ValueError("ssh.command requires 'host'")
+            raise ValueError(
+                "ssh.command requires 'host' — got null/empty. "
+                "Check your YAML for a missing or null 'host:' value."
+            )
         if not command:
-            raise ValueError("ssh.command requires 'command'")
+            raise ValueError(
+                f"ssh.command requires 'command' — got {params.get('command')!r}. "
+                "Check your YAML: unquoted '#' starts a comment (use quotes), "
+                "and an empty 'command:' line becomes null."
+            )
 
         key = _pool_key(host, port)
-        conn: _SSHConn = self._pool.acquire(key, lambda: self._make_conn(params, host, port))
 
-        try:
-            if use_shell:
-                result = conn.shell_command(command, prompt or _DEFAULT_PROMPT, timeout)
-            else:
-                result = conn.exec_command(command, timeout)
-            return result
-        except Exception:
-            self._pool.evict(key)
-            raise
+        for attempt in range(2):
+            conn: _SSHConn = self._pool.acquire(key, lambda: self._make_conn(params, host, port))
+            try:
+                if use_shell:
+                    result = conn.shell_command(command, prompt or _DEFAULT_PROMPT, timeout)
+                else:
+                    result = conn.exec_command(command, timeout)
+                return result
+            except Exception as exc:
+                self._pool.evict(key)
+                if attempt == 0:
+                    print(f"           ⚠️  SSH connection lost ({exc!s}) — reconnecting to {host}:{port}...")
+                    continue
+                raise
+        raise RuntimeError("SSH: reconnect loop exhausted")
 
     def _disconnect(self, params: Dict[str, Any]) -> bool:
         host = params.get("host", "")

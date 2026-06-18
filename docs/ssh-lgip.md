@@ -12,6 +12,7 @@ Focused guide for `ssh.*` and `lgip.*` actions — stateful SSH sessions and LG 
 4. [LGIP Examples](#lgip-examples)
 5. [Common Keycode Reference](#common-keycode-reference)
 6. [Troubleshooting](#troubleshooting)
+7. [YAML Pitfalls — Null Parameters and Special Characters](#yaml-pitfalls)
 
 ---
 
@@ -306,67 +307,47 @@ steps:
 If you only need to run one command, pass `username` and `password` directly to `ssh.command`. The service auto-connects, runs the command, and leaves the connection open for reuse.
 
 ```yaml
-- action: ssh.command
-  host: ${ip_address}
-  username: wattbox
-  password: SnapAV704
-  command: '?Model'
-  prompt: '>'
-  store_as: model_response
+- ssh.command:
+    host: ${ip_address}
+    username: wattbox
+    password: SnapAV704
+    command: '?Model'
+    prompt: '>'
+    store_as: model_response
 ```
 
-Note: the connection stays in the pool after this step. Add an explicit `ssh.disconnect` step at the end of the test if you want it closed immediately.
-
----
-
-### YAML — `command:` must be a plain string, not a list
-
-A common YAML mistake is accidentally starting a list under `command:`:
-
-```yaml
-# WRONG — this makes command: null (YAML parses the dash as a list item)
-- action: ssh.command
-  host: ${ip_address}
-  command:
-  - ?Model
-
-# CORRECT — quote the string so YAML treats it as a value
-- action: ssh.command
-  host: ${ip_address}
-  command: '?Model'
-```
-
-Single-quote strings that start with `?`, `!`, `*`, `&`, or `|` — YAML treats these as special characters without quotes.
+The connection stays in the pool after this step. Add `ssh.disconnect` at the end of the test to close it explicitly.
 
 ---
 
 ### Wrong `prompt:` causes the step to hang until timeout
 
-The `prompt:` value must be a substring that actually appears in the device's output after the command. Using the wrong device's prompt is the most common mistake when switching between device types.
+`prompt:` must be a substring that appears in the device's output **after** the command completes. Using the wrong device's prompt is the most common mistake when switching between device types.
 
-| Device | Correct prompt |
-|--------|---------------|
-| WattBox | `>` |
-| Araknis switch (user exec) | `>` |
-| Araknis switch (privileged) | `#` |
-| Cisco (privileged) | `#` |
-| Linux shell | `$` or `#` |
-
-Example of the wrong prompt causing a hang:
+| Device | Correct `prompt:` |
+|--------|------------------|
+| WattBox | `'>'` |
+| Araknis switch (user exec) | `'>'` |
+| Araknis switch (privileged exec) | `'#'` |
+| Cisco (privileged exec) | `'#'` |
+| Linux shell (root) | `'#'` |
+| Linux shell (non-root) | `'$'` |
 
 ```yaml
-# WRONG — uses the Araknis switch prompt for a WattBox device
-- action: ssh.command
-  host: ${wattbox_ip}
-  command: '?Model'
-  prompt: 'AN-210-SW-16-POE#'    # this will never appear in WattBox output
+# WRONG — uses the Araknis switch prompt for a WattBox device; hangs until timeout
+- ssh.command:
+    host: ${wattbox_ip}
+    command: '?Model'
+    prompt: 'AN-210-SW-16-POE#'
 
 # CORRECT
-- action: ssh.command
-  host: ${wattbox_ip}
-  command: '?Model'
-  prompt: '>'
+- ssh.command:
+    host: ${wattbox_ip}
+    command: '?Model'
+    prompt: '>'
 ```
+
+Prompt matching is a **substring check** — `'#'` matches any prompt ending in `#`, including `AN-210-SW-16-POE#`. Use the shortest unique suffix that reliably identifies the prompt.
 
 ---
 
@@ -388,9 +369,7 @@ paramiko>=3.0
 
 ### Host key verification fails / `SSHException: Server '...' not found in known_hosts`
 
-By default, Paramiko rejects hosts not in `~/.ssh/known_hosts`. In automated CI environments where hosts are not pre-registered, set the policy to auto-accept:
-
-This is handled automatically by the service's connection pool using `AutoAddPolicy`. If you still see this error, confirm that the host and port are correct and reachable.
+Handled automatically by the service's connection pool (`AutoAddPolicy`). If you still see this error, confirm that the host and port are correct and reachable.
 
 ---
 
@@ -406,20 +385,131 @@ socket.timeout: timed out
 
 ---
 
-### Wrong prompt string causes `ssh.command` to hang
-
-If you pass a `prompt:` string that never appears in the device output, the step will wait until it times out. Use the exact prompt your device outputs, including trailing characters:
-
-```yaml
-prompt: "Password:"    # Cisco enable password prompt
-prompt: "#"            # Privileged exec prompt
-prompt: ">"            # User exec prompt
-```
-
----
-
 ### LGIP — no response from device
 
 - Confirm the device supports LG IP IR control and that the feature is enabled in its settings.
 - The default port is `9761`; some devices use a different port.
 - Confirm no firewall is blocking TCP to that port.
+
+---
+
+## YAML Pitfalls
+
+These are the most common YAML formatting mistakes that produce `null`/`None` parameter values at runtime. The parser now emits a **warning** listing which parameters are null when it loads a step, so problems appear at parse time rather than mid-run.
+
+### `#` without quotes becomes a YAML comment
+
+In YAML, `#` starts a comment when it is preceded by whitespace (or appears alone after `:`). A value that contains `#` must be quoted.
+
+```yaml
+# WRONG — the '#' starts a comment; prompt becomes null
+- ssh.command:
+    host: ${ip_address}
+    prompt: AN-210-SW-16-POE#
+
+# WRONG — standalone '#' is entirely a comment; prompt becomes null
+- ssh.command:
+    host: ${ip_address}
+    prompt: #
+
+# CORRECT — single or double quotes protect the '#'
+- ssh.command:
+    host: ${ip_address}
+    prompt: 'AN-210-SW-16-POE#'
+```
+
+The same rule applies to any YAML value, not just `prompt:`.
+
+---
+
+### Commands that start with `?`, `!`, `*`, `&`, or `|`
+
+These characters have special meaning at the start of a YAML scalar. Always quote them.
+
+```yaml
+# WRONG — '?' may confuse some YAML parsers or editors
+- ssh.command:
+    command: ?Model
+
+# CORRECT
+- ssh.command:
+    command: '?Model'
+```
+
+---
+
+### Empty `command:` key becomes null
+
+An indented key with no value is parsed as `null`, not an empty string.
+
+```yaml
+# WRONG — command is null
+- ssh.command:
+    host: ${ip_address}
+    command:
+
+# CORRECT
+- ssh.command:
+    host: ${ip_address}
+    command: 'show version'
+```
+
+---
+
+### `command.ssh` vs `ssh.command` — wrong action name
+
+These are **different handlers**:
+
+| Action | Handler | Supports `prompt:` | Connection pool |
+|--------|---------|-------------------|----------------|
+| `ssh.command` | `SSHService` | Yes | Yes — reuses the session |
+| `command.ssh` | `CommandService` | No | No — one-shot subprocess |
+
+Use `ssh.command` when the device needs an interactive shell or when you are running multiple commands in the same session. Use `command.ssh` only for simple one-off Linux/Unix shell commands where no interactive prompt is needed.
+
+```yaml
+# For interactive devices (switches, WattBox, routers) — use ssh.command
+- ssh.command:
+    host: ${ip_address}
+    username: araknis
+    password: SnapAV704!
+    prompt: '#'
+    command: show version
+
+# For a plain Linux command — command.ssh is fine, but prompt: is ignored
+- command.ssh:
+    host: ${linux_host}
+    username: jenkins
+    password: secret
+    command: cat /proc/version
+```
+
+---
+
+### Real-world device examples
+
+**WattBox — query model**
+
+```yaml
+- ssh.command:
+    host: ${ip_address}
+    username: wattbox
+    password: SnapAV704
+    prompt: '>'
+    command: '?Model'
+    store_as: wattbox_model
+```
+
+**Araknis switch — privileged mode**
+
+```yaml
+- ssh.command:
+    host: ${ip_address}
+    username: araknis
+    password: SnapAV704!
+    prompt: '#'
+    command: show version
+    store_as: switch_version
+```
+
+Note: `'#'` works as the prompt here because `AN-210-SW-16-POE#` ends with `#`. You can use the short form unless you have multiple devices with different prompt endings that could collide.
