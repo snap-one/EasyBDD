@@ -248,7 +248,117 @@ class BrowserService:
             print(f"      [HEALED] Consider updating the selector to avoid future healing.")
             return True
 
-        return False
+        # ── Tier 2+: delegate to the advanced SelfHealer (AI + visual) ───────
+        return self._try_advanced_heal(selector, action, value, **kwargs)
+
+    def _try_advanced_heal(
+        self,
+        selector: str,
+        action: str,
+        value: str = None,
+        ranked_selectors: list = None,
+        element_description: str = "",
+        stored_bbox: dict = None,
+        **kwargs,
+    ) -> bool:
+        """
+        Advanced self-healing via the crawler's SelfHealer:
+          - Ranked fallback chain from test metadata
+          - AI re-locate (Claude or Ollama)
+          - Visual similarity (bbox proximity)
+
+        Returns True if a working selector was found and the action succeeded.
+        """
+        try:
+            from ..crawler.self_healer import SelfHealer
+            from ..crawler.ai_client import build_ai_client
+            from ..crawler.models import RankedSelector
+        except ImportError:
+            return False  # Crawler module not available
+
+        import os
+
+        # Build AI client only if provider creds are configured
+        ai = None
+        try:
+            provider = os.getenv("CRAWLER_AI_PROVIDER", "claude")
+            ai = build_ai_client(provider=provider)
+        except Exception:
+            pass
+
+        # Convert raw dicts → RankedSelector objects
+        ranked: list = []
+        if ranked_selectors:
+            for r in ranked_selectors:
+                if isinstance(r, dict):
+                    try:
+                        ranked.append(RankedSelector(**r))
+                    except Exception:
+                        pass
+                elif hasattr(r, "selector"):
+                    ranked.append(r)
+
+        healer = SelfHealer(ai_client=ai)
+        page_html = ""
+        try:
+            if self.playwright_page:
+                page_html = self.playwright_page.content()
+        except Exception:
+            pass
+
+        new_selector = healer.heal(
+            broken_selector=selector,
+            element_description=element_description or f"Element targeted by {selector!r}",
+            page_html=page_html,
+            page=self.playwright_page if self.playwright_page else None,
+            ranked_selectors=ranked or None,
+            stored_bbox=stored_bbox,
+        )
+
+        if not new_selector:
+            return False
+
+        try:
+            if action == "click":
+                self.playwright_page.locator(new_selector).click(timeout=5000, **kwargs)
+            else:
+                self.playwright_page.locator(new_selector).fill(value or "", timeout=5000)
+            print(f"      [HEAL-ADV] Used healed selector: {new_selector!r}")
+            return True
+        except Exception:
+            return False
+
+    def _resolve_iframe_selector(self, selector: str):
+        """
+        Resolve an iframe-prefixed selector (e.g. 'iframe#id >> #button').
+
+        Returns (frame_locator, inner_selector) when an iframe prefix is detected,
+        or (None, original_selector) for plain selectors.
+
+        Usage in click/fill methods:
+            frame_loc, inner = self._resolve_iframe_selector(selector)
+            if frame_loc:
+                frame_loc.locator(inner).click()
+            else:
+                self.playwright_page.locator(inner).click()
+        """
+        if not self.playwright_page:
+            return None, selector
+
+        import re as _re
+        m = _re.match(r'^(iframe[^>]*?)\s*>>\s*(.+)$', selector.strip())
+        if not m:
+            return None, selector
+
+        iframe_sel = m.group(1).strip()
+        inner_sel  = m.group(2).strip()
+
+        try:
+            frame_loc = self.playwright_page.frame_locator(iframe_sel)
+            return frame_loc, inner_sel
+        except Exception as e:
+            print(f"      [IFRAME] Could not get frame_locator for {iframe_sel!r}: {e}")
+            return None, selector
 
     def set_mcp_mode(self, enabled: bool = True):
         """Enable or disable MCP mode for recording"""
@@ -797,10 +907,14 @@ class BrowserService:
                     )
                     return
                 else:
-                    # Try direct CSS selector; fall back to semantic healing on failure
+                    # Resolve iframe prefix first (e.g. "iframe#id >> #btn")
+                    frame_loc, resolved_sel = self._resolve_iframe_selector(selector)
                     try:
-                        self.playwright_page.click(selector, timeout=5000, **click_options)
-                    except Exception as css_err:
+                        if frame_loc:
+                            frame_loc.locator(resolved_sel).click(timeout=5000, **click_options)
+                        else:
+                            self.playwright_page.click(resolved_sel, timeout=5000, **click_options)
+                    except Exception:
                         if not self._try_heal_selector(selector, "click", **click_options):
                             raise
                     return
@@ -973,9 +1087,13 @@ class BrowserService:
             except Exception as e:
                 print(f"      ARIA label failed: {e}")
 
-        # Try direct selector first (for complex selectors like [role="textbox"][name="Name"])
+        # Try direct selector first — with iframe prefix support
+        frame_loc, resolved_field = self._resolve_iframe_selector(field)
         try:
-            self.playwright_page.fill(field, value, timeout=5000, **kwargs)
+            if frame_loc:
+                frame_loc.locator(resolved_field).fill(value, timeout=5000)
+            else:
+                self.playwright_page.fill(resolved_field, value, timeout=5000, **kwargs)
             print(f"      ✓ Filled field using direct selector: {field}")
             return
         except Exception as e:

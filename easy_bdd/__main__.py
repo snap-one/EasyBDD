@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import argparse
+import textwrap
 from pathlib import Path
 
 try:
@@ -464,6 +465,72 @@ Examples:
     )
 
     # Selector audit command
+    # Crawler command
+    crawler_parser = subparsers.add_parser(
+        "crawler",
+        help="Start the Easy BDD Crawler local server (used by the Chrome extension)",
+    )
+    crawler_sub = crawler_parser.add_subparsers(dest="crawler_command")
+    crawler_start = crawler_sub.add_parser("start", help="Start the crawler server (Chrome extension mode)")
+    crawler_start.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    crawler_start.add_argument("--port", type=int, default=8765, help="Bind port (default: 8765)")
+
+    crawler_pw = crawler_sub.add_parser(
+        "playwright",
+        help="Crawl using a headed Playwright browser — no Chrome extension needed",
+    )
+    crawler_pw.add_argument("--url", required=True, help="Starting URL (e.g. https://app.example.com/login)")
+    crawler_pw.add_argument("--project", type=int, required=True, metavar="PROJECT_ID",
+                            help="TestRail project ID")
+    crawler_pw.add_argument("--suite", type=int, default=None, metavar="SUITE_ID",
+                            help="TestRail suite ID (default: create new suite)")
+    crawler_pw.add_argument("--section", default="Auto-generated", metavar="NAME",
+                            help="TestRail section name (default: Auto-generated)")
+    crawler_pw.add_argument("--provider", default="rules",
+                            choices=["rules", "claude", "ollama"],
+                            help="AI provider for test generation (default: rules — no API key needed)")
+    crawler_pw.add_argument("--model", default=None, metavar="MODEL",
+                            help="AI model override (optional)")
+    crawler_pw.add_argument("--output", default="tests/cases/crawled", metavar="DIR",
+                            help="Output directory for generated YAML files (default: tests/cases/crawled)")
+    crawler_pw.add_argument("--no-run", action="store_true",
+                            help="Skip creating a TestRail test run after crawl")
+    crawler_pw.add_argument("--login-timeout", type=int, default=120, metavar="SECONDS",
+                            help="Seconds to wait for manual login (default: 120)")
+
+    crawler_crx = crawler_sub.add_parser(
+        "convert-crx",
+        help="Convert a Playwright CRX / Chrome DevTools Recorder file to Easy BDD YAML",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            Convert Playwright TypeScript/JavaScript recordings or Chrome DevTools
+            Recorder JSON exports to Easy BDD dot-notation YAML test files.
+
+            Supported input formats:
+              .ts / .js  — Playwright TypeScript or JavaScript codegen output
+                           (Chrome DevTools Recorder → "Export as Playwright test")
+              .json      — Chrome DevTools Recorder JSON export
+              .py        — Playwright Python codegen output
+
+            Examples:
+              python -m easy_bdd crawler convert-crx recording.ts
+              python -m easy_bdd crawler convert-crx recording.json --output tests/cases/
+              python -m easy_bdd crawler convert-crx *.ts --output tests/cases/
+        """),
+    )
+    crawler_crx.add_argument(
+        "input_files",
+        nargs="+",
+        metavar="FILE",
+        help="Playwright / Chrome DevTools Recorder file(s) to convert (.ts, .js, .json, .py)",
+    )
+    crawler_crx.add_argument(
+        "--output", "-o",
+        default=None,
+        metavar="DIR",
+        help="Output directory for generated YAML files (default: same directory as input file)",
+    )
+
     audit_parser = subparsers.add_parser(
         "selector-audit",
         help="Scan test YAML files for CSS/XPath selectors that could be role-based",
@@ -551,6 +618,8 @@ Examples:
             return selector_audit(args)
         elif args.command == "record":
             return record_and_upload(args)
+        elif args.command == "crawler":
+            return crawler_serve(args)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -1983,6 +2052,76 @@ def mcp_serve(args) -> int:
         print("Starting Easy BDD MCP server (STDIO) — ready for Claude Desktop")
 
     serve(transport=transport, host=host, port=port)
+    return 0
+
+
+def crawler_serve(args) -> int:
+    """Dispatch crawler subcommands: start (HTTP server), playwright, or convert-crx."""
+    crawler_cmd = getattr(args, "crawler_command", None)
+
+    if crawler_cmd == "playwright":
+        return crawler_playwright(args)
+
+    if crawler_cmd == "convert-crx":
+        from .crawler.crx_converter import cli_convert_crx
+        return cli_convert_crx(args)
+
+    # Default: start the HTTP server for the Chrome extension
+    try:
+        from .crawler.server import run_server
+    except ImportError as e:
+        print(
+            f"Crawler dependencies missing: {e}\n"
+            "Run: pip install fastapi uvicorn --break-system-packages",
+            file=sys.stderr,
+        )
+        return 1
+
+    host = getattr(args, "host", "127.0.0.1")
+    port = getattr(args, "port", 8765)
+    print(f"Starting Easy BDD Crawler server on http://{host}:{port}")
+    print("Load the Chrome extension and click 'Start Crawl' to begin.")
+    print("Press Ctrl+C to stop.\n")
+    run_server(host=host, port=port)
+    return 0
+
+
+def crawler_playwright(args) -> int:
+    """
+    Crawl a web app using a headed Playwright browser.
+    No Chrome extension, no API key (when using --provider rules).
+    """
+    try:
+        from .crawler.playwright_crawler import PlaywrightCrawler
+        from .crawler.models import CrawlSessionConfig
+    except ImportError as e:
+        print(
+            f"Crawler dependencies missing: {e}\n"
+            "Run: pip install playwright && playwright install chromium",
+            file=sys.stderr,
+        )
+        return 1
+
+    config = CrawlSessionConfig(
+        testrail_project_id=args.project,
+        testrail_suite_id=getattr(args, "suite", None),
+        testrail_section_name=getattr(args, "section", "Auto-generated"),
+        create_test_run=not getattr(args, "no_run", False),
+        ai_provider=getattr(args, "provider", "rules"),
+        ai_model=getattr(args, "model", None),
+        output_dir=getattr(args, "output", "tests/cases/crawled"),
+        base_url=args.url,
+    )
+
+    login_timeout = getattr(args, "login_timeout", 120)
+    crawler = PlaywrightCrawler(config, login_timeout_s=login_timeout)
+    crawler.run(start_url=args.url)
+
+    status = crawler.status
+    print(f"\nDone — {status['cases_generated']} case(s) generated, "
+          f"{status['cases_pushed']} pushed to TestRail.")
+    if status.get("test_run_url"):
+        print(f"TestRail run: {status['test_run_url']}")
     return 0
 
 

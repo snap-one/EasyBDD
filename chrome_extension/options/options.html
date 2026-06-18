@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Easy BDD Crawler — Settings</title>
+  <style>
+    :root {
+      --bg: #1e1e2e; --surface: #2a2a3e; --accent: #6c8ebf;
+      --text: #e0e0f0; --muted: #888; --border: #3a3a5a;
+      --green: #27ae60; --radius: 6px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); max-width: 500px; margin: 40px auto; padding: 0 20px; font-size: 14px; }
+    h1 { font-size: 20px; margin-bottom: 24px; }
+    .section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
+    .section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 14px; }
+    .form-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+    .form-row:last-child { margin-bottom: 0; }
+    label { font-size: 12px; color: var(--muted); }
+    input, select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 10px; font-size: 13px; width: 100%; outline: none; }
+    input:focus, select:focus { border-color: var(--accent); }
+    .hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .btn { border: none; border-radius: var(--radius); padding: 8px 18px; font-size: 13px; font-weight: 600; cursor: pointer; background: var(--accent); color: #fff; }
+    .btn:hover { opacity: 0.85; }
+    #save-msg { font-size: 12px; color: var(--green); margin-left: 10px; opacity: 0; transition: opacity 0.3s; }
+    #save-msg.show { opacity: 1; }
+    footer { display: flex; align-items: center; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Easy BDD Crawler Settings</h1>
+
+  <div class="section">
+    <h2>Backend server</h2>
+    <div class="form-row">
+      <label>Server URL</label>
+      <input type="text" id="server-url" placeholder="http://127.0.0.1:8765" />
+      <span class="hint">Where <code>python -m easy_bdd crawler start</code> is running.</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>AI provider</h2>
+    <div class="form-row">
+      <label>Provider</label>
+      <select id="ai-provider">
+        <option value="rules">Rule-based (no API key — free)</option>
+        <option value="claude">Claude (Anthropic API)</option>
+        <option value="ollama">Ollama (local)</option>
+      </select>
+    </div>
+    <div class="form-row" id="row-ai-model">
+      <label>Model override <span style="color:var(--muted)">(optional)</span></label>
+      <input type="text" id="ai-model" placeholder="e.g. claude-haiku-4-5-20251001 or llama3" />
+      <span class="hint">Leave blank to use the server default set via CRAWLER_AI_MODEL in .env</span>
+    </div>
+    <div class="form-row" id="row-ollama-url">
+      <label>Ollama base URL</label>
+      <input type="text" id="ollama-url" placeholder="http://localhost:11434" />
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>TestRail defaults</h2>
+    <div class="form-row">
+      <label>Default section name</label>
+      <input type="text" id="default-section" value="Auto-generated" />
+    </div>
+    <div class="form-row">
+      <label>Output directory (relative to Easy BDD root)</label>
+      <input type="text" id="output-dir" value="tests/cases/crawled" />
+    </div>
+  </div>
+
+  <footer>
+    <button class="btn" id="btn-save">Save settings</button>
+    <span id="save-msg">✓ Saved</span>
+  </footer>
+
+  <script src="options.js"></script>
+</body>
+</html>
