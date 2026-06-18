@@ -91,32 +91,92 @@ class _TelnetConn:
         print(f"         ✅ TCP connected to {host}:{port}")
         self._negotiate()
 
-    def _negotiate(self):
-        """Read and discard initial Telnet negotiation bytes."""
-        print(f"         🤝 Telnet negotiation...")
-        try:
-            self._sock.settimeout(2.0)
-            data = self._sock.recv(256)
-            response = b""
-            i = 0
-            while i < len(data):
-                if data[i:i+1] == self.IAC and i + 2 < len(data):
-                    cmd = data[i+1:i+2]
-                    if cmd == self.WILL:
-                        response += self.IAC + self.DONT + data[i+2:i+3]
-                    elif cmd == self.DO:
-                        response += self.IAC + self.WONT + data[i+2:i+3]
-                    i += 3
-                else:
-                    self._buf += data[i:i+1]
-                    i += 1
-            if response:
-                self._sock.sendall(response)
-                print(f"         🤝 Sent {len(response) // 3} negotiation response(s)")
+    # Single-byte IAC command codes (used for comparisons inside recv'd data)
+    _WILL = b"\xfb"
+    _WONT = b"\xfc"
+    _DO   = b"\xfd"
+    _DONT = b"\xfe"
+    _SB   = b"\xfa"  # sub-negotiation begin
+    _SE   = b"\xf0"  # sub-negotiation end
+
+    def _strip_iac(self, data: bytes) -> bytes:
+        """Remove IAC control sequences from raw recv'd data; send DONT/WONT responses.
+
+        The class WILL/WONT/DO/DONT constants are 2-byte (include the leading 0xFF),
+        so we compare against the single-byte cmd codes (_WILL etc.) here instead.
+        Response sequences use the 2-byte constants (e.g. self.DONT = b'\\xff\\xfe').
+        """
+        result = b""
+        response = b""
+        i = 0
+        while i < len(data):
+            b = data[i:i+1]
+            if b != self.IAC:
+                result += b
+                i += 1
+                continue
+            # IAC byte — need at least one more byte
+            if i + 1 >= len(data):
+                break  # incomplete at end of buffer; discard
+            cmd = data[i + 1:i + 2]
+            if cmd == self.IAC:
+                # Escaped 0xFF literal
+                result += b"\xff"
+                i += 2
+            elif cmd == self._SB:
+                # Sub-negotiation: skip everything until IAC SE
+                end = data.find(self.IAC + self._SE, i + 2)
+                i = end + 2 if end != -1 else len(data)
+            elif cmd in (self._WILL, self._WONT, self._DO, self._DONT):
+                if i + 2 >= len(data):
+                    break  # incomplete option byte
+                option = data[i + 2:i + 3]
+                if cmd == self._WILL:
+                    response += self.DONT + option   # b"\xff\xfe" + option
+                elif cmd == self._DO:
+                    response += self.WONT + option   # b"\xff\xfc" + option
+                elif cmd == self._WONT:
+                    response += self.DONT + option   # acknowledge
+                elif cmd == self._DONT:
+                    response += self.WONT + option   # acknowledge
+                i += 3
             else:
-                print(f"         🤝 No negotiation required")
-        except (socket.timeout, OSError):
-            print(f"         🤝 No negotiation data from device")
+                i += 2  # other 2-byte commands (AYT, IP, DM, …)
+        if response:
+            try:
+                self._sock.sendall(response)
+            except OSError:
+                pass
+        return result
+
+    def _negotiate(self):
+        """Read and respond to initial Telnet IAC negotiation (loops until idle)."""
+        print(f"         🤝 Telnet negotiation...")
+        iac_count = 0
+        try:
+            deadline = time.time() + 3.0
+            self._sock.settimeout(1.0)
+            while time.time() < deadline:
+                try:
+                    data = self._sock.recv(256)
+                except socket.timeout:
+                    break
+                if not data:
+                    break
+                had_iac = self.IAC in data
+                clean = self._strip_iac(data)
+                if had_iac:
+                    iac_count += 1
+                self._buf += clean
+                if clean and not had_iac:
+                    # Pure text arrived (no IAC) — device is already past negotiation
+                    break
+        except OSError as exc:
+            print(f"         🤝 Negotiation socket error: {exc}")
+        if iac_count:
+            print(f"         🤝 Telnet negotiation complete ({iac_count} IAC burst(s))")
+        else:
+            print(f"         🤝 No IAC negotiation")
 
     def _login(
         self,
@@ -234,8 +294,14 @@ class _TelnetConn:
                     conn_error = OSError("Connection closed by remote host")
                     print(f"         ⚠️  EOF — remote closed the connection")
                     break
+                # Filter out any mid-session IAC option negotiations.
+                # received_any is set even for IAC-only chunks so the
+                # idle_timeout clock resets (connection is still alive).
                 received_any = True
                 last_recv = time.time()
+                chunk = self._strip_iac(chunk)
+                if not chunk:
+                    continue  # was all IAC control bytes — nothing to buffer
                 if stream:
                     text = chunk.decode(encoding, errors="replace")
                     # Normalize: \r\n → \n, then drop orphaned \r (avoids blank lines)
