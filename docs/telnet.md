@@ -45,7 +45,7 @@ Opens a Telnet connection and performs login. This step is optional — `telnet.
 | `password` | No | — | Login password |
 | `username_prompt` | No | `"Username:"` | String to wait for before sending username |
 | `password_prompt` | No | `"Password:"` | String to wait for before sending password |
-| `timeout` | No | `55.0` | Connection timeout in seconds |
+| `timeout` | No | `15.0` | Connection timeout in seconds |
 | `encoding` | No | `"utf-8"` | Character encoding |
 
 **Example:**
@@ -80,7 +80,7 @@ Sends one or more commands and waits for the device prompt after each one. Use `
 | `password` | No | — | Password (used for auto-login) |
 | `username_prompt` | No | `"Username:"` | Username prompt to wait for during auto-login |
 | `password_prompt` | No | `"Password:"` | Password prompt to wait for during auto-login |
-| `timeout` | No | `55.0` | Seconds to wait for each prompt |
+| `timeout` | No | `15.0` | Seconds to wait for each prompt |
 | `encoding` | No | `"utf-8"` | Character encoding |
 | `store_as` | No | — | Variable name to store the output of the **last** command |
 
@@ -135,7 +135,7 @@ Reads buffered output from an open connection, optionally waiting until a prompt
 | `host` | Yes | — | Target host |
 | `port` | No | `23` | TCP port |
 | `prompt` | No | `""` | Wait until this string appears; if empty, returns available data |
-| `timeout` | No | `55.0` | Seconds to wait |
+| `timeout` | No | `15.0` | Seconds to wait |
 | `encoding` | No | `"utf-8"` | Character encoding |
 | `store_as` | No | — | Variable to store the received output |
 
@@ -287,4 +287,50 @@ command: "show version\n"
 
 # CORRECT
 command: show version
+```
+
+### `test.assert` must be a sibling step, not nested inside `telnet.send`
+
+A common TestRail YAML mistake is accidentally indenting `test.assert` under the `telnet.send` block. This makes the runner treat `test.assert` as a command to send to the device and `expression` as a stray parameter — neither runs correctly.
+
+```yaml
+# WRONG — test.assert is indented under telnet.send
+- telnet.send:
+    host: ${net_host}
+    prompt: '#'
+    commands:
+      - configure
+      - shutdown
+      - test.assert:         # ← this is sent as a literal command to the device!
+    expression: "'error' not in str(last_response)"
+
+# CORRECT — test.assert is a separate step at the same level
+- telnet.send:
+    host: ${net_host}
+    prompt: '#'
+    commands:
+      - configure
+      - shutdown
+- test.assert:
+    expression: "'error' not in str(last_response)"
+```
+
+### Authenticated devices require credentials in every `telnet.send` step
+
+Devices that require login (e.g. Araknis switches) will not send the `Username:` prompt until the Telnet IAC negotiation handshake is complete. If `username` and `password` are missing from the step, the connection will time out waiting for the login prompt even though TCP is connected.
+
+Always pass credentials (or use variables from the run's variable set):
+
+```yaml
+- telnet.send:
+    host: ${net_host}
+    username: ${net_user}
+    password: ${net_password}
+    prompt: '#'
+    commands:
+      - configure
+      - interface GigabitEthernet ${net_port}
+      - shutdown
+- test.assert:
+    expression: "'error' not in str(last_response)"
 ```
