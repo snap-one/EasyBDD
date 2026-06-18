@@ -470,6 +470,14 @@ class TelnetService:
             else:
                 print(f"         🔌 Opening unauthenticated connection to {host}:{port}")
                 conn = self._pool.acquire(key, lambda: _TelnetConn(host, port, timeout))
+                # Drain the initial device prompt so it is not mistaken for the
+                # response to the first command.  telnetlib did this implicitly;
+                # our raw-socket implementation must do it explicitly.
+                print(f"         🔌 Draining initial prompt {prompt!r}...")
+                try:
+                    conn.read_until(prompt, timeout=5.0, encoding=encoding)
+                except Exception as exc:
+                    print(f"         ⚠️  Initial prompt drain timed out: {exc} — continuing anyway")
         else:
             print(f"         ♻️  Reusing existing connection to {host}:{port}")
             conn = self._pool.acquire(key, lambda: _TelnetConn(host, port, timeout))
