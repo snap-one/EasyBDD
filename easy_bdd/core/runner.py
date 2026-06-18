@@ -4727,11 +4727,11 @@ class TestRunner:
                     print(f"      Stored response as: {store_as}")
 
                 # Check if we should fail on error status codes
-                fail_on_error = step_params.get(
-                    "fail_on_error", True
-                ) or params_dict.get("fail_on_error", True)
-                if isinstance(fail_on_error, str):
-                    fail_on_error = fail_on_error.lower() in ("true", "1", "yes", "on")
+                _foe_raw = step_params.get("fail_on_error", params_dict.get("fail_on_error", True))
+                if isinstance(_foe_raw, str):
+                    fail_on_error = _foe_raw.lower() in ("true", "1", "yes", "on")
+                else:
+                    fail_on_error = bool(_foe_raw)
 
                 if fail_on_error and response.status_code >= 400:
                     import json
