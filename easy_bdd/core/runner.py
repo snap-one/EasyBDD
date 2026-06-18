@@ -1330,11 +1330,10 @@ class TestRunner:
 
             # Sleep / wait action (no browser required)
             if action_lower in ["test.sleep", "sleep", "test.wait", "wait"]:
-                params = self._get_params(step_params)
                 seconds = float(
-                    params.get("seconds")
-                    or params.get("duration")
-                    or params.get("timeout")
+                    self._get_param(step_params, "seconds")
+                    or self._get_param(step_params, "duration")
+                    or self._get_param(step_params, "timeout")
                     or 1
                 )
                 print(f"      ⏳ Sleeping {seconds}s...")
@@ -1346,11 +1345,10 @@ class TestRunner:
             #   - action: test.print / message: "..."   (explicit)
             #   - test.print: "..."                     (shorthand scalar)
             if action_lower in ["test.log", "log", "test.print", "print"]:
-                params = self._get_params(step_params)
                 message = str(
-                    params.get("message")
-                    or params.get("text")
-                    or params.get("value")
+                    self._get_param(step_params, "message")
+                    or self._get_param(step_params, "text")
+                    or self._get_param(step_params, "value")
                     or ""
                 )
                 if hasattr(self.config, "substitute_variables"):
