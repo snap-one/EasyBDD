@@ -485,6 +485,9 @@ class TelnetService:
         result = ""
         try:
             for cmd in commands:
+                if not isinstance(cmd, str):
+                    print(f"         ⚠️  Skipping non-string command item: {cmd!r} (likely a YAML formatting error)")
+                    continue
                 # Strip any trailing whitespace/newlines so we control the line ending.
                 # Use \r\n — the telnet standard — so devices that require CR+LF execute correctly.
                 data = cmd.rstrip("\r\n") + "\r\n"
