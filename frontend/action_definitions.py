@@ -1766,6 +1766,47 @@ ACTION_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
+    # ==================== SSH ACTIONS (stateful Paramiko sessions) ====================
+    "ssh.connect": {
+        "category": "SSH",
+        "label": "SSH Connect",
+        "description": "Open a persistent SSH connection (reused by subsequent ssh.command steps)",
+        "icon": "🔐",
+        "parameters": {
+            "host": {"type": "text", "required": True, "label": "Host", "placeholder": "192.168.1.1", "help": "SSH server hostname or IP"},
+            "username": {"type": "text", "required": True, "label": "Username", "placeholder": "admin"},
+            "password": {"type": "text", "required": False, "label": "Password", "placeholder": "secret"},
+            "key_filename": {"type": "text", "required": False, "label": "Key File", "placeholder": "/home/jenkins/.ssh/id_rsa"},
+            "port": {"type": "number", "required": False, "label": "Port", "default": 22},
+            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "default": 10},
+        },
+    },
+    "ssh.command": {
+        "category": "SSH",
+        "label": "SSH Command",
+        "description": "Send a command over SSH and capture the response. Pass credentials to auto-connect without a separate ssh.connect step.",
+        "icon": "🔐",
+        "parameters": {
+            "host": {"type": "text", "required": True, "label": "Host", "placeholder": "192.168.1.1", "help": "Must match a host opened by ssh.connect (or provide credentials to auto-connect)"},
+            "command": {"type": "text", "required": True, "label": "Command", "placeholder": "?Model", "help": "Command string — do not add \\n"},
+            "prompt": {"type": "text", "required": False, "label": "Prompt", "placeholder": ">", "help": "Substring to wait for after the command (uses interactive shell). Use the device's actual prompt character."},
+            "username": {"type": "text", "required": False, "label": "Username", "placeholder": "admin", "help": "Only needed when auto-connecting (no prior ssh.connect)"},
+            "password": {"type": "text", "required": False, "label": "Password", "placeholder": "secret"},
+            "use_shell": {"type": "boolean", "required": False, "label": "Interactive Shell", "default": False, "help": "Force interactive shell mode even without a prompt"},
+            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "default": 30},
+            "store_as": {"type": "text", "required": False, "label": "Store As", "placeholder": "ssh_output", "help": "Variable to store the command output; also sets last_response"},
+        },
+    },
+    "ssh.disconnect": {
+        "category": "SSH",
+        "label": "SSH Disconnect",
+        "description": "Close and remove the SSH connection from the session pool",
+        "icon": "🔐",
+        "parameters": {
+            "host": {"type": "text", "required": True, "label": "Host", "placeholder": "192.168.1.1"},
+            "port": {"type": "number", "required": False, "label": "Port", "default": 22},
+        },
+    },
     # ==================== COMMAND EXECUTION ACTIONS ====================
     "command.ssh": {
         "category": "Command",

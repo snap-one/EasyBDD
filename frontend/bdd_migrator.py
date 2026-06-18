@@ -636,13 +636,16 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         }
 
     if name == "ssh":
-        return {
-            "action":   "command.ssh",
+        step = {
+            "action":   "ssh.command",
             "host":     _sub_vars(str(param_dict.get("host", ""))),
             "username": _sub_vars(str(param_dict.get("user", param_dict.get("username", "")))),
             "password": _sub_vars(str(param_dict.get("password", ""))),
             "command":  _sub_vars(str(param_dict.get("command", ""))),
         }
+        if param_dict.get("prompt"):
+            step["prompt"] = param_dict["prompt"]
+        return step
 
     if name == "serial":
         return {

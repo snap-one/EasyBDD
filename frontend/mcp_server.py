@@ -1153,7 +1153,11 @@ def create_test_prompt(
     if "telnet" in protocol_list:
         protocol_hints.append("- Use telnet.send with host/port/command; connections are pooled automatically")
     if "ssh" in protocol_list:
-        protocol_hints.append("- Use command.ssh with host/username/password/command")
+        protocol_hints.append(
+            "- For SSH use ssh.command (preferred): host/username/password/command/prompt. "
+            "For multi-step sessions: ssh.connect → ssh.command → ssh.disconnect. "
+            "Use command.ssh only for one-shot Linux commands that return an exit code."
+        )
     if "serial" in protocol_list:
         protocol_hints.append("- Use serial.send with port/baudrate/data")
 

@@ -301,6 +301,75 @@ steps:
 
 ## Troubleshooting
 
+### Login shortcut — `ssh.command` without a prior `ssh.connect`
+
+If you only need to run one command, pass `username` and `password` directly to `ssh.command`. The service auto-connects, runs the command, and leaves the connection open for reuse.
+
+```yaml
+- action: ssh.command
+  host: ${ip_address}
+  username: wattbox
+  password: SnapAV704
+  command: '?Model'
+  prompt: '>'
+  store_as: model_response
+```
+
+Note: the connection stays in the pool after this step. Add an explicit `ssh.disconnect` step at the end of the test if you want it closed immediately.
+
+---
+
+### YAML — `command:` must be a plain string, not a list
+
+A common YAML mistake is accidentally starting a list under `command:`:
+
+```yaml
+# WRONG — this makes command: null (YAML parses the dash as a list item)
+- action: ssh.command
+  host: ${ip_address}
+  command:
+  - ?Model
+
+# CORRECT — quote the string so YAML treats it as a value
+- action: ssh.command
+  host: ${ip_address}
+  command: '?Model'
+```
+
+Single-quote strings that start with `?`, `!`, `*`, `&`, or `|` — YAML treats these as special characters without quotes.
+
+---
+
+### Wrong `prompt:` causes the step to hang until timeout
+
+The `prompt:` value must be a substring that actually appears in the device's output after the command. Using the wrong device's prompt is the most common mistake when switching between device types.
+
+| Device | Correct prompt |
+|--------|---------------|
+| WattBox | `>` |
+| Araknis switch (user exec) | `>` |
+| Araknis switch (privileged) | `#` |
+| Cisco (privileged) | `#` |
+| Linux shell | `$` or `#` |
+
+Example of the wrong prompt causing a hang:
+
+```yaml
+# WRONG — uses the Araknis switch prompt for a WattBox device
+- action: ssh.command
+  host: ${wattbox_ip}
+  command: '?Model'
+  prompt: 'AN-210-SW-16-POE#'    # this will never appear in WattBox output
+
+# CORRECT
+- action: ssh.command
+  host: ${wattbox_ip}
+  command: '?Model'
+  prompt: '>'
+```
+
+---
+
 ### `ModuleNotFoundError: No module named 'paramiko'`
 
 The SSH service requires Paramiko. Install it:

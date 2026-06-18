@@ -168,6 +168,8 @@ class _SSHConn:
         prompt_bytes = prompt.encode("utf-8")
         buf = b""
         deadline = time.time() + timeout
+        last_recv = time.time()
+        idle_timeout = 5.0
         while time.time() < deadline:
             sh.settimeout(min(deadline - time.time(), 0.5))
             try:
@@ -175,10 +177,14 @@ class _SSHConn:
                 if not chunk:
                     break
                 buf += chunk
+                last_recv = time.time()
                 if prompt_bytes in buf:
                     break
             except socket.timeout:
-                break
+                # Keep reading until the prompt arrives OR 5s of silence
+                if (time.time() - last_recv) >= idle_timeout:
+                    break
+                continue
             except Exception:
                 break
 
