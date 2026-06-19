@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from .models import ElementSnapshot, GeneratedStep, GeneratedTestCase, PageSnapshot
-from .selector_ranker import best_selector
+from .selector_ranker import best_selector, rank_selectors
 
 
 # ── Keyword sets ──────────────────────────────────────────────────────────────
@@ -89,6 +89,29 @@ def _is_button(el: ElementSnapshot) -> bool:
 
 def _sel(el: ElementSnapshot) -> str:
     return best_selector(el)
+
+
+def _step(
+    action: str,
+    el: ElementSnapshot,
+    extra_params: Optional[Dict] = None,
+    description: str = "",
+) -> GeneratedStep:
+    """
+    Build a GeneratedStep for *el* and populate ALL ranked selector candidates
+    so the test runner (and TestRail) can cycle through fallbacks automatically.
+    """
+    ranked = rank_selectors(el)
+    primary = _sel(el)   # already handles iframe prefix
+    params: Dict = {"selector": primary}
+    if extra_params:
+        params.update(extra_params)
+    return GeneratedStep(
+        action=action,
+        params=params,
+        description=description,
+        selectors=ranked,
+    )
 
 
 # ── Pattern detectors ─────────────────────────────────────────────────────────
@@ -227,19 +250,11 @@ def _build_login_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTestCa
     # Happy path
     happy_steps = [
         _open_step(url),
-        GeneratedStep(action="browser.fill",
-                      params={"selector": _sel(username_el), "value": "${username}"},
-                      description="Enter username / email"),
-        GeneratedStep(action="browser.fill",
-                      params={"selector": _sel(password_el), "value": "${password}"},
-                      description="Enter password"),
+        _step("browser.fill", username_el, {"value": "${username}"}, "Enter username / email"),
+        _step("browser.fill", password_el, {"value": "${password}"}, "Enter password"),
     ]
     if submit_el:
-        happy_steps.append(
-            GeneratedStep(action="browser.click",
-                          params={"selector": _sel(submit_el)},
-                          description="Click login button")
-        )
+        happy_steps.append(_step("browser.click", submit_el, {}, "Click login button"))
     happy_steps.append(_screenshot_step("after-login"))
     happy_steps.append(
         GeneratedStep(action="browser.assert_text",
@@ -248,14 +263,10 @@ def _build_login_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTestCa
     )
 
     # Empty fields validation
-    empty_steps = [
-        _open_step(url),
-    ]
+    empty_steps = [_open_step(url)]
     if submit_el:
         empty_steps.append(
-            GeneratedStep(action="browser.click",
-                          params={"selector": _sel(submit_el)},
-                          description="Click login without filling fields")
+            _step("browser.click", submit_el, {}, "Click login without filling fields")
         )
     empty_steps.append(_screenshot_step("empty-fields-error"))
 
@@ -286,25 +297,13 @@ def _build_registration_cases(pattern: _PatternMatch, url: str) -> List[Generate
 
     steps = [
         _open_step(url),
-        GeneratedStep(action="browser.fill",
-                      params={"selector": _sel(email_el), "value": "${new_email}"},
-                      description="Enter email address"),
-        GeneratedStep(action="browser.fill",
-                      params={"selector": _sel(password_el), "value": "${new_password}"},
-                      description="Enter password"),
+        _step("browser.fill", email_el, {"value": "${new_email}"}, "Enter email address"),
+        _step("browser.fill", password_el, {"value": "${new_password}"}, "Enter password"),
     ]
     if confirm_el:
-        steps.append(
-            GeneratedStep(action="browser.fill",
-                          params={"selector": _sel(confirm_el), "value": "${new_password}"},
-                          description="Confirm password")
-        )
+        steps.append(_step("browser.fill", confirm_el, {"value": "${new_password}"}, "Confirm password"))
     if submit_el:
-        steps.append(
-            GeneratedStep(action="browser.click",
-                          params={"selector": _sel(submit_el)},
-                          description="Submit registration")
-        )
+        steps.append(_step("browser.click", submit_el, {}, "Submit registration"))
     steps.append(_screenshot_step("after-registration"))
 
     return [
@@ -324,22 +323,12 @@ def _build_search_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTestC
 
     steps = [
         _open_step(url),
-        GeneratedStep(action="browser.fill",
-                      params={"selector": _sel(search_el), "value": "${search_term}"},
-                      description="Enter search term"),
+        _step("browser.fill", search_el, {"value": "${search_term}"}, "Enter search term"),
     ]
     if submit_el:
-        steps.append(
-            GeneratedStep(action="browser.click",
-                          params={"selector": _sel(submit_el)},
-                          description="Submit search")
-        )
+        steps.append(_step("browser.click", submit_el, {}, "Submit search"))
     else:
-        steps.append(
-            GeneratedStep(action="browser.press_key",
-                          params={"key": "Enter", "selector": _sel(search_el)},
-                          description="Submit search via Enter")
-        )
+        steps.append(_step("browser.press_key", search_el, {"key": "Enter"}, "Submit search via Enter"))
     steps.append(_screenshot_step("search-results"))
 
     return [
@@ -359,9 +348,7 @@ def _build_nav_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTestCase
         label = (el.text or el.name or el.aria_label or "unknown").strip()
         steps = [
             _open_step(url),
-            GeneratedStep(action="browser.click",
-                          params={"selector": _sel(el)},
-                          description=f"Click '{label}' navigation link"),
+            _step("browser.click", el, {}, f"Click '{label}' navigation link"),
             GeneratedStep(action="browser.get_title",
                           params={"store_as": "page_title"},
                           description="Capture page title"),
@@ -392,23 +379,11 @@ def _build_settings_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTes
     for i, el in enumerate(input_els):
         var = f"${{field_{i+1}_value}}"
         if (el.type or "text").lower() == "select":
-            fill_steps.append(
-                GeneratedStep(action="browser.select",
-                              params={"selector": _sel(el), "value": var},
-                              description=f"Set field {i+1}")
-            )
+            fill_steps.append(_step("browser.select", el, {"value": var}, f"Set field {i+1}"))
         else:
-            fill_steps.append(
-                GeneratedStep(action="browser.fill",
-                              params={"selector": _sel(el), "value": var},
-                              description=f"Fill field {i+1}")
-            )
+            fill_steps.append(_step("browser.fill", el, {"value": var}, f"Fill field {i+1}"))
     if submit_el:
-        fill_steps.append(
-            GeneratedStep(action="browser.click",
-                          params={"selector": _sel(submit_el)},
-                          description="Save settings")
-        )
+        fill_steps.append(_step("browser.click", submit_el, {}, "Save settings"))
     fill_steps.append(_screenshot_step("settings-saved"))
     cases = [
         GeneratedTestCase(
@@ -426,18 +401,10 @@ def _build_settings_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTes
         el = text_inputs[0]
         ba_steps = [
             _open_step(url),
-            GeneratedStep(action="browser.get_text",
-                          params={"selector": _sel(el), "store_as": "original_value"},
-                          description="Capture current field value before change"),
-            GeneratedStep(action="browser.fill",
-                          params={"selector": _sel(el), "value": "${new_value}"},
-                          description="Enter new value"),
-            GeneratedStep(action="browser.click",
-                          params={"selector": _sel(submit_el)},
-                          description="Save the change"),
-            GeneratedStep(action="browser.assert_text",
-                          params={"selector": _sel(el), "text": "${new_value}"},
-                          description="Verify new value persisted after save"),
+            _step("browser.get_text", el, {"store_as": "original_value"}, "Capture current field value before change"),
+            _step("browser.fill", el, {"value": "${new_value}"}, "Enter new value"),
+            _step("browser.click", submit_el, {}, "Save the change"),
+            _step("browser.assert_text", el, {"text": "${new_value}"}, "Verify new value persisted after save"),
             _screenshot_step("after-config-change"),
         ]
         cases.append(
@@ -456,9 +423,7 @@ def _build_file_upload_cases(pattern: _PatternMatch, url: str) -> List[Generated
     el = pattern.elements[0]
     steps = [
         _open_step(url),
-        GeneratedStep(action="browser.upload",
-                      params={"selector": _sel(el), "file_path": "${upload_file_path}"},
-                      description="Upload a test file"),
+        _step("browser.upload", el, {"file_path": "${upload_file_path}"}, "Upload a test file"),
         _screenshot_step("after-upload"),
     ]
     return [
@@ -507,11 +472,7 @@ def _build_generic_button_cases(pattern: _PatternMatch, url: str) -> List[Genera
         slug = re.sub(r"[^a-z0-9]", "-", label.lower())[:24]
         steps = [
             _open_step(url),
-            GeneratedStep(
-                action="browser.click",
-                params={"selector": _sel(el)},
-                description=f"Click '{label}'",
-            ),
+            _step("browser.click", el, {}, f"Click '{label}'"),
             _screenshot_step(f"after-{slug}"),
         ]
         cases.append(
@@ -534,29 +495,11 @@ def _build_generic_input_cases(pattern: _PatternMatch, url: str) -> List[Generat
         var = f"${{field_{i+1}_value}}"
         tag_type = (el.type or el.tag or "text").lower()
         if tag_type == "select" or el.tag == "select":
-            fill_steps.append(
-                GeneratedStep(
-                    action="browser.select",
-                    params={"selector": _sel(el), "value": var},
-                    description=f"Select value for '{label}'",
-                )
-            )
+            fill_steps.append(_step("browser.select", el, {"value": var}, f"Select value for '{label}'"))
         elif tag_type in ("checkbox", "radio"):
-            fill_steps.append(
-                GeneratedStep(
-                    action="browser.click",
-                    params={"selector": _sel(el)},
-                    description=f"Toggle '{label}'",
-                )
-            )
+            fill_steps.append(_step("browser.click", el, {}, f"Toggle '{label}'"))
         else:
-            fill_steps.append(
-                GeneratedStep(
-                    action="browser.fill",
-                    params={"selector": _sel(el), "value": var},
-                    description=f"Fill '{label}'",
-                )
-            )
+            fill_steps.append(_step("browser.fill", el, {"value": var}, f"Fill '{label}'"))
     fill_steps.append(_screenshot_step("inputs-filled"))
     return [
         GeneratedTestCase(
@@ -575,12 +518,9 @@ def _build_modal_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTestCa
         label = (el.text or el.name or el.aria_label or "unknown").strip()
         steps = [
             _open_step(url),
-            GeneratedStep(action="browser.click",
-                          params={"selector": _sel(el)},
-                          description=f"Open '{label}' dialog"),
+            _step("browser.click", el, {}, f"Open '{label}' dialog"),
             GeneratedStep(action="browser.wait_for_element",
-                          params={"selector": "[role='dialog'], .modal, .dialog",
-                                  "timeout": 5},
+                          params={"selector": "[role='dialog'], .modal, .dialog", "timeout": 5},
                           description="Wait for dialog to appear"),
             _screenshot_step(f"dialog-{re.sub(r'[^a-z0-9]', '-', label.lower())[:20]}"),
         ]

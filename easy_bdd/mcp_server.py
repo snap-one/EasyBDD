@@ -950,6 +950,332 @@ def validate_and_fix(path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Locator debugger tools
+# ---------------------------------------------------------------------------
+
+import asyncio
+import concurrent.futures
+
+
+def _run_async(coro):
+    """Run an async coroutine from a sync context without event-loop conflicts."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+async def _probe_selectors_async(url: str, selectors: List[str], timeout_ms: int) -> List[Dict]:
+    """Navigate to url and test each selector; return per-selector results."""
+    from playwright.async_api import async_playwright
+
+    results = []
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        ctx = await browser.new_context(ignore_https_errors=True)
+        page = await ctx.new_page()
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            await page.wait_for_timeout(1500)
+        except Exception as e:
+            await browser.close()
+            return [{"selector": s, "found": False, "error": f"Navigation failed: {e}"} for s in selectors]
+
+        for sel in selectors:
+            entry: Dict[str, Any] = {"selector": sel}
+            try:
+                loc = page.locator(sel)
+                count = await loc.count()
+                if count == 0:
+                    entry["found"] = False
+                else:
+                    entry["found"] = True
+                    entry["count"] = count
+                    try:
+                        entry["visible"] = await loc.first.is_visible(timeout=2000)
+                    except Exception:
+                        entry["visible"] = False
+                    try:
+                        entry["enabled"] = await loc.first.is_enabled(timeout=2000)
+                    except Exception:
+                        entry["enabled"] = False
+                    try:
+                        bb = await loc.first.bounding_box(timeout=2000)
+                        entry["in_viewport"] = bb is not None
+                    except Exception:
+                        entry["in_viewport"] = False
+            except Exception as e:
+                entry["found"] = False
+                entry["error"] = str(e)
+            results.append(entry)
+
+        await browser.close()
+    return results
+
+
+@mcp.tool()
+def probe_selector(url: str, selector: str, fallback_selectors=None, timeout: int = 20) -> str:
+    """
+    Test whether a CSS/ARIA/text selector (and optional fallbacks) resolve on a
+    live page.  Useful for debugging selectors from failing TestRail tests.
+
+    Parameters
+    ----------
+    url                : Full URL to navigate to (e.g. https://192.168.100.145/network)
+    selector           : Primary selector to test
+    fallback_selectors : Optional list of alternative selectors to try
+    timeout            : Navigation timeout in seconds (default 20)
+    """
+    all_selectors = [selector] + (fallback_selectors or [])
+    try:
+        results = _run_async(_probe_selectors_async(url, all_selectors, timeout * 1000))
+        best = next((r for r in results if r.get("found") and r.get("visible") and r.get("enabled")), None)
+        return json.dumps({
+            "url":     url,
+            "results": results,
+            "best":    best,
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def fix_test_selectors(path: str, timeout: int = 20) -> str:
+    """
+    Open a test YAML file and for every step that has a *selector* +
+    *fallback_selectors*, try each candidate against the live page URL.
+    The first selector that is found AND visible AND enabled becomes the new
+    primary; fallback_selectors is removed.  The file is saved in place.
+
+    The page URL is read from variables.page_url (set by the crawler) or falls
+    back to variables.base_url.
+
+    Parameters
+    ----------
+    path    : Relative path to the test YAML (e.g. tests/cases/crawled/click_apply.yaml)
+    timeout : Per-page navigation timeout in seconds (default 20)
+    """
+    import re as _re
+    import yaml as _yaml
+
+    fpath = _PROJECT_ROOT / path
+    if not fpath.exists():
+        return json.dumps({"error": f"File not found: {path}"})
+
+    try:
+        data = _yaml.safe_load(fpath.read_text(encoding="utf-8"))
+    except Exception as e:
+        return json.dumps({"error": f"Could not parse YAML: {e}"})
+
+    if not isinstance(data, dict):
+        return json.dumps({"error": "Invalid YAML structure."})
+
+    variables = data.get("variables") or {}
+    probe_url = variables.get("page_url") or variables.get("base_url", "")
+    steps = data.get("steps", [])
+    changes: List[Dict] = []
+    unfixed: List[Dict] = []
+
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        for action_key, params in step.items():
+            if not isinstance(params, dict):
+                continue
+            primary = params.get("selector")
+            fallbacks = params.get("fallback_selectors", [])
+            if not primary or not fallbacks:
+                continue
+
+            try:
+                results = _run_async(
+                    _probe_selectors_async(probe_url, [primary] + fallbacks, timeout * 1000)
+                )
+            except Exception as e:
+                unfixed.append({"step": i, "action": action_key, "error": str(e)})
+                continue
+
+            best = (
+                next((r for r in results if r.get("found") and r.get("visible") and r.get("enabled")), None)
+                or next((r for r in results if r.get("found") and r.get("visible")), None)
+                or next((r for r in results if r.get("found")), None)
+            )
+
+            if best and best["selector"] != primary:
+                changes.append({"step": i, "action": action_key, "old": primary, "new": best["selector"]})
+                params["selector"] = best["selector"]
+                del params["fallback_selectors"]
+            elif best and best["selector"] == primary:
+                del params["fallback_selectors"]
+                changes.append({"step": i, "action": action_key, "old": primary, "new": primary, "note": "primary already works"})
+            else:
+                unfixed.append({"step": i, "action": action_key, "selector": primary, "tried": len(results)})
+
+    if changes:
+        fpath.write_text(
+            _yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+
+    return json.dumps({"path": path, "changes": changes, "unfixed": unfixed, "saved": bool(changes)}, indent=2)
+
+
+@mcp.tool()
+def fix_crawled_tests(directory: str = "tests/cases/crawled", limit: int = 50, timeout: int = 20) -> str:
+    """
+    Batch-heal selector issues across multiple crawled test YAML files.
+    For each file, tries all fallback_selectors against the live page and
+    promotes the first working one to primary.
+
+    Parameters
+    ----------
+    directory : Directory of YAML files to fix (default: tests/cases/crawled)
+    limit     : Max number of files to process (default: 50)
+    timeout   : Per-page navigation timeout in seconds (default: 20)
+    """
+    dir_path = _PROJECT_ROOT / directory
+    if not dir_path.is_dir():
+        return json.dumps({"error": f"Directory not found: {directory}"})
+
+    yaml_files = sorted(dir_path.glob("**/*.yaml"))[:limit]
+    if not yaml_files:
+        return json.dumps({"error": "No YAML files found."})
+
+    summary = []
+    for fpath in yaml_files:
+        rel = str(fpath.relative_to(_PROJECT_ROOT)).replace("\\", "/")
+        try:
+            result_str = fix_test_selectors(path=rel, timeout=timeout)
+            result = json.loads(result_str)
+            if "error" not in result:
+                summary.append({
+                    "file":    rel,
+                    "changes": len(result.get("changes", [])),
+                    "unfixed": len(result.get("unfixed", [])),
+                })
+        except Exception as e:
+            summary.append({"file": rel, "error": str(e)})
+
+    return json.dumps({
+        "processed": len(summary),
+        "files": summary,
+    }, indent=2)
+
+
+@mcp.tool()
+def get_testrail_run_failures(run_id: int, status: str = "failed,retest") -> str:
+    """
+    Fetch test cases from a TestRail run filtered by status.
+
+    Returns case titles, section names (which encode the page URL path), and
+    a yaml_hint filename so you can match failures to local YAML files.
+
+    Parameters
+    ----------
+    run_id : TestRail run ID (e.g. 195556)
+    status : Comma-separated status names (default: failed,retest)
+    """
+    import re as _re
+
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(_PROJECT_ROOT))
+        from easy_bdd.services.testrail_service import TestRailService
+
+        tr = TestRailService()
+
+        STATUS_IDS = {
+            "passed":   1,
+            "blocked":  2,
+            "untested": 3,
+            "retest":   4,
+            "failed":   5,
+        }
+        wanted_ids = {STATUS_IDS[s.strip().lower()] for s in status.split(",") if s.strip().lower() in STATUS_IDS}
+
+        tests = tr.get_tests(run_id)
+
+        # Build section_id → name map
+        section_names: Dict[int, str] = {}
+        try:
+            run_info = tr.get_run(run_id)
+            project_id = run_info.get("project_id")
+            suite_id = run_info.get("suite_id")
+            if project_id:
+                for sec in tr.get_sections(project_id, suite_id=suite_id):
+                    section_names[sec["id"]] = sec.get("name", "")
+        except Exception:
+            pass
+
+        def _section_to_path(sec_name: str) -> str:
+            name = _re.sub(r'^[^/]+/\s*', '', sec_name)
+            return name.replace(" > ", "/").strip()
+
+        def _yaml_hint(title: str) -> str:
+            name = _re.sub(r'^Feature:\s*', '', title, flags=_re.I).lower()
+            name = _re.sub(r'[^a-z0-9_\s-]', '', name)
+            name = _re.sub(r'[\s-]+', '_', name).strip('_')
+            return (name[:60] or 'test') + '.yaml'
+
+        failures = []
+        for t in tests:
+            if t.get("status_id") in wanted_ids:
+                sec_id = t.get("section_id")
+                sec_name = section_names.get(sec_id, "") if sec_id else ""
+                failures.append({
+                    "test_id":      t.get("id"),
+                    "case_id":      t.get("case_id"),
+                    "title":        t.get("title", ""),
+                    "status":       t.get("status_id"),
+                    "section_name": sec_name,
+                    "page_path":    _section_to_path(sec_name),
+                    "yaml_hint":    _yaml_hint(t.get("title", "")),
+                })
+
+        return json.dumps({"run_id": run_id, "total": len(tests), "failures": len(failures), "cases": failures}, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def repush_yaml_to_testrail(path: str, case_id=None) -> str:
+    """
+    Re-push a YAML test file's steps to an existing TestRail case's Preconditions
+    field.  Use this after fix_test_selectors has healed selectors.
+
+    Parameters
+    ----------
+    path    : Relative path to the YAML file (e.g. tests/cases/crawled/click_apply.yaml)
+    case_id : TestRail case ID to update. If omitted, reads from variables.testrail_case_id.
+    """
+    import yaml as _yaml
+
+    fpath = _PROJECT_ROOT / path
+    if not fpath.exists():
+        return json.dumps({"error": f"File not found: {path}"})
+
+    try:
+        data = _yaml.safe_load(fpath.read_text(encoding="utf-8"))
+    except Exception as e:
+        return json.dumps({"error": f"Could not parse YAML: {e}"})
+
+    if not case_id:
+        case_id = (data.get("variables") or {}).get("testrail_case_id")
+    if not case_id:
+        return json.dumps({"error": "No case_id provided and none found in variables.testrail_case_id."})
+
+    try:
+        from easy_bdd.services.testrail_service import TestRailService
+        tr = TestRailService()
+        steps_yaml = _yaml.dump(
+            {"steps": data.get("steps", [])},
+            default_flow_style=False, allow_unicode=True, sort_keys=False,
+        )
+        result = tr.update_case(int(case_id), custom_preconds=steps_yaml)
+        return json.dumps({"updated": case_id, "title": result.get("title", ""), "ok": True})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
 # Server entry-point (called from __main__.py)
 # ---------------------------------------------------------------------------
 

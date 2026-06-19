@@ -71,8 +71,21 @@ def _step_to_dict(step: GeneratedStep) -> Dict[str, Any]:
     Convert a GeneratedStep to the Easy BDD dot-notation dict.
 
     e.g.  browser.fill → {"browser.fill": {"selector": "#email", "value": "${username}"}}
+
+    When the step has ranked selector fallbacks, they are appended as
+    `fallback_selectors` so the runner can cycle through them automatically.
     """
     params = {k: v for k, v in step.params.items() if v not in (None, "")}
+
+    # Inject fallback selectors (ranked 2nd onward) when available
+    if step.selectors and len(step.selectors) > 1 and "selector" in params:
+        fallbacks = []
+        for r in step.selectors[1:6]:   # up to 5 fallbacks
+            sel = f"{r.iframe_prefix}{r.selector}" if r.iframe_prefix else r.selector
+            if sel != params["selector"]:  # skip if identical to primary
+                fallbacks.append(sel)
+        if fallbacks:
+            params["fallback_selectors"] = fallbacks
 
     if not params:
         return {step.action: None}
@@ -92,6 +105,10 @@ def _build_yaml_doc(case: GeneratedTestCase, base_url: str = "") -> Dict[str, An
     variables: Dict[str, Any] = {}
     if base_url:
         variables["base_url"] = base_url
+    # Store the specific crawled page URL so the test runner and locator
+    # debugger can navigate directly to the right page rather than root.
+    if case.url:
+        variables["page_url"] = case.url
     variables["username"] = "${USERNAME}"
     variables["password"] = "${PASSWORD}"
     doc["variables"] = variables

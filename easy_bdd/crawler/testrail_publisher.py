@@ -26,8 +26,10 @@ from .models import GeneratedTestCase, GeneratedStep
 
 def _steps_to_testrail(steps: List[GeneratedStep]) -> str:
     """
-    Serialise test steps into the TestRail "Preconditions" body format used
-    by the Easy BDD testrail_runner (Feature: case style, YAML steps block).
+    Serialise test steps into the TestRail "Preconditions" body format.
+
+    Includes fallback_selectors for any step that has ranked alternatives,
+    so the test runner can cycle through them if the primary selector fails.
 
     Output example:
         steps:
@@ -35,15 +37,15 @@ def _steps_to_testrail(steps: List[GeneratedStep]) -> str:
               url: ${base_url}
           - browser.fill:
               selector: "#email"
+              fallback_selectors:
+                - '[aria-label="Email"]'
+                - label="Email address"
               value: ${username}
     """
     import yaml
+    from .yaml_writer import _step_to_dict  # reuse identical logic
 
-    step_list = []
-    for step in steps:
-        params = {k: v for k, v in step.params.items() if v not in (None, "")}
-        step_list.append({step.action: params or None})
-
+    step_list = [_step_to_dict(s) for s in steps]
     doc = {"steps": step_list}
     return yaml.dump(doc, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
