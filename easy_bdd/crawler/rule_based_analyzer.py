@@ -47,6 +47,117 @@ _MODAL_KEYWORDS    = {"new", "add", "create", "edit", "delete", "remove", "confi
                       "settings", "manage", "import", "export"}
 _NAV_KEYWORDS      = {"nav", "navigation", "menu", "sidebar", "tab", "tabs", "header"}
 
+# Common success message patterns seen after form saves
+_SUCCESS_SELECTOR = (
+    "text=/saved|applied|success|updated|complete|enabled|disabled/i, "
+    ".success, .alert-success, .toast, .notification, [role='status'], [role='alert']"
+)
+_ERROR_SELECTOR = (
+    ".error, .alert-danger, .alert-error, [role='alert'], "
+    "text=/error|failed|invalid|required/i"
+)
+
+
+def _infer_test_value(el: ElementSnapshot) -> str:
+    """Return a realistic test value based on the element's label, type, and context."""
+    hint = _el_hint(el)
+    el_type = (el.type or el.tag or "text").lower()
+
+    # Type-driven first
+    if el_type == "email":
+        return "testuser@example.com"
+    if el_type == "password":
+        return "TestPass123!"
+    if el_type == "url":
+        return "https://example.com"
+    if el_type == "tel":
+        return "555-0100"
+    if el_type == "color":
+        return "#336699"
+
+    # Number types — infer from hint
+    if el_type in ("number", "range"):
+        if any(k in hint for k in ("port",)):
+            return "8080"
+        if any(k in hint for k in ("vlan",)):
+            return "100"
+        if any(k in hint for k in ("timeout", "interval", "ttl", "retry", "retries")):
+            return "30"
+        if any(k in hint for k in ("mtu",)):
+            return "1500"
+        if any(k in hint for k in ("channel",)):
+            return "6"
+        return "1"
+
+    # Label/hint-driven for text-like types
+    if any(k in hint for k in ("ssid", "network name", "wifi name", "wlan name")):
+        return "TestNetwork_5G"
+    if any(k in hint for k in ("psk", "pre-shared", "wifi password", "wi-fi password", "passphrase")):
+        return "TestWifi@Pass1"
+    if any(k in hint for k in ("hostname", "host name", "device name", "system name")):
+        return "test-device-01"
+    if any(k in hint for k in ("ip address", "ipv4", "ip addr")):
+        return "192.168.1.100"
+    if any(k in hint for k in ("gateway", "default gateway", "router ip")):
+        return "192.168.1.1"
+    if any(k in hint for k in ("subnet", "netmask", "network mask")):
+        return "255.255.255.0"
+    if any(k in hint for k in ("dns", "nameserver", "name server")):
+        return "8.8.8.8"
+    if any(k in hint for k in ("ntp", "time server")):
+        return "pool.ntp.org"
+    if any(k in hint for k in ("username", "user name", "login name", "account")):
+        return "testuser"
+    if any(k in hint for k in ("password", "pass", "passwd", "secret")):
+        return "TestPass123!"
+    if any(k in hint for k in ("email",)):
+        return "test@example.com"
+    if any(k in hint for k in ("port",)):
+        return "8080"
+    if any(k in hint for k in ("vlan",)):
+        return "100"
+    if any(k in hint for k in ("mtu",)):
+        return "1500"
+    if any(k in hint for k in ("timeout", "interval")):
+        return "30"
+    if any(k in hint for k in ("name", "label", "title", "description")):
+        return "Test Item"
+    if any(k in hint for k in ("path", "directory", "folder")):
+        return "/test/path"
+    if any(k in hint for k in ("url", "endpoint", "address")):
+        return "https://example.com"
+    if any(k in hint for k in ("key", "token", "secret", "api")):
+        return "test_api_key_12345"
+    if any(k in hint for k in ("comment", "note", "description", "message", "body")):
+        return "Automated test comment"
+
+    # Fallback
+    return "test_value"
+
+
+def _infer_invalid_value(el: ElementSnapshot) -> str:
+    """Return a value that should fail validation for this field."""
+    hint = _el_hint(el)
+    el_type = (el.type or el.tag or "text").lower()
+
+    if el_type == "email":
+        return "not-an-email"
+    if el_type == "number":
+        return "abc"
+    if el_type == "url":
+        return "not-a-url"
+
+    if any(k in hint for k in ("ip address", "ipv4", "ip addr")):
+        return "999.999.999.999"
+    if any(k in hint for k in ("port",)):
+        return "99999"
+    if any(k in hint for k in ("subnet", "netmask")):
+        return "999.0.0.0"
+    if any(k in hint for k in ("vlan",)):
+        return "9999"
+
+    return ""  # empty = common invalid value for required fields
+
 
 def _el_hint(el: ElementSnapshot) -> str:
     """Combine all text clues into a lower-case hint string."""
@@ -346,18 +457,26 @@ def _build_nav_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTestCase
     cases = []
     for el in pattern.elements[:5]:  # cap at 5 nav items
         label = (el.text or el.name or el.aria_label or "unknown").strip()
+        slug = re.sub(r"[^a-z0-9]", "-", label.lower())[:20]
         steps = [
             _open_step(url),
             _step("browser.click", el, {}, f"Click '{label}' navigation link"),
-            GeneratedStep(action="browser.get_title",
-                          params={"store_as": "page_title"},
-                          description="Capture page title"),
-            _screenshot_step(f"nav-{re.sub(r'[^a-z0-9]', '-', label.lower())[:20]}"),
+            GeneratedStep(
+                action="browser.wait_for_url_change",
+                params={"timeout": 5000},
+                description="Wait for page navigation to complete",
+            ),
+            GeneratedStep(
+                action="browser.assert_visible",
+                params={"selector": "h1, h2, main, [role='main']"},
+                description="Verify page content loaded after navigation",
+            ),
+            _screenshot_step(f"nav-{slug}"),
         ]
         cases.append(
             GeneratedTestCase(
                 name=f"Navigation — {label}",
-                description=f"Verify '{label}' navigation link loads the correct page",
+                description=f"Verify '{label}' navigation link loads the page without errors",
                 tags=["browser", "navigation"],
                 url=url,
                 steps=steps,
@@ -368,54 +487,171 @@ def _build_nav_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTestCase
 
 def _build_settings_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTestCase]:
     """
-    For settings forms: generate a before/after assertion pattern for each field.
-    Also generates a "save all fields" happy-path test.
+    Generate functional test cases for settings/config forms:
+      1. Per-field test with realistic values + save + success verification
+      2. Full-form save with all fields filled
+      3. Required-field validation (if required fields found)
+      4. Select/dropdown option tests
     """
     input_els = [el for el in pattern.elements if _is_input(el)]
     submit_el = next((el for el in pattern.elements if _is_button(el)), None)
+    cases: List[GeneratedTestCase] = []
 
-    # Happy path — fill all fields + save
-    fill_steps = [_open_step(url)]
-    for i, el in enumerate(input_els):
-        var = f"${{field_{i+1}_value}}"
-        if (el.type or "text").lower() == "select":
-            fill_steps.append(_step("browser.select", el, {"value": var}, f"Set field {i+1}"))
-        else:
-            fill_steps.append(_step("browser.fill", el, {"value": var}, f"Fill field {i+1}"))
-    if submit_el:
-        fill_steps.append(_step("browser.click", submit_el, {}, "Save settings"))
-    fill_steps.append(_screenshot_step("settings-saved"))
-    cases = [
-        GeneratedTestCase(
+    # ── Per-field functional tests ────────────────────────────────────────────
+    text_inputs = [
+        el for el in input_els
+        if (el.type or "text").lower() in ("text", "number", "email", "url", "tel", "password", "search")
+        and el.tag != "select"
+    ]
+    for el in text_inputs[:4]:  # cap at 4 individual field tests
+        label = (el.name or el.label or el.placeholder or el.aria_label or el.id or "field").strip()
+        slug = re.sub(r"[^a-z0-9]", "-", label.lower())[:24]
+        test_val = _infer_test_value(el)
+
+        field_steps = [_open_step(url)]
+        # Clear and fill the field
+        field_steps.append(_step("browser.fill", el, {"value": ""}, f"Clear '{label}' field"))
+        field_steps.append(_step("browser.fill", el, {"value": test_val}, f"Enter test value '{test_val}' into '{label}'"))
+        if submit_el:
+            field_steps.append(_step("browser.click", submit_el, {}, "Click save/apply"))
+            field_steps.append(
+                GeneratedStep(
+                    action="browser.wait_for",
+                    params={"selector": _SUCCESS_SELECTOR, "timeout": 10000},
+                    description="Wait for save confirmation",
+                )
+            )
+        field_steps.append(_screenshot_step(f"save-{slug}"))
+        # Reload and verify value persisted
+        if submit_el and el.type not in ("password",):
+            field_steps.append(
+                GeneratedStep(action="browser.open", params={"url": "${base_url}"}, description="Reload page to verify persistence")
+            )
+            field_steps.append(
+                _step("browser.assert_value", el, {"value": test_val}, f"Verify '{label}' value persisted after save")
+            )
+
+        cases.append(GeneratedTestCase(
+            name=f"Settings — configure {label}",
+            description=f"Verify '{label}' can be set to '{test_val}' and saved successfully",
+            tags=["browser", "settings", "functional"],
+            url=url,
+            steps=field_steps,
+        ))
+
+    # ── Select / dropdown tests ───────────────────────────────────────────────
+    select_els = [el for el in input_els if el.tag == "select" or el.type == "select"]
+    for el in select_els[:3]:
+        label = (el.name or el.label or el.aria_label or el.id or "dropdown").strip()
+        slug = re.sub(r"[^a-z0-9]", "-", label.lower())[:24]
+        opts = el.options or []
+        # Test with each non-default option (up to 3)
+        test_opts = [o for o in opts if o.get("value", "") not in ("", "0", "none", "null")][:3]
+        for opt in test_opts:
+            opt_val = opt.get("value", "")
+            opt_text = opt.get("text", opt_val)
+            opt_slug = re.sub(r"[^a-z0-9]", "-", opt_text.lower())[:20]
+            sel_steps = [
+                _open_step(url),
+                _step("browser.select", el, {"value": opt_val}, f"Select '{opt_text}' from '{label}'"),
+            ]
+            if submit_el:
+                sel_steps.append(_step("browser.click", submit_el, {}, "Save selection"))
+                sel_steps.append(GeneratedStep(
+                    action="browser.wait_for",
+                    params={"selector": _SUCCESS_SELECTOR, "timeout": 10000},
+                    description="Wait for save confirmation",
+                ))
+            sel_steps.append(_screenshot_step(f"select-{slug}-{opt_slug}"))
+            cases.append(GeneratedTestCase(
+                name=f"Settings — set {label} to {opt_text}",
+                description=f"Verify selecting '{opt_text}' for '{label}' can be saved",
+                tags=["browser", "settings", "functional"],
+                url=url,
+                steps=sel_steps,
+            ))
+
+    # ── Full form save (all fields together) ─────────────────────────────────
+    if input_els and submit_el:
+        fill_steps = [_open_step(url)]
+        for el in input_els:
+            label = (el.name or el.label or el.placeholder or el.id or "field").strip()
+            el_type = (el.type or el.tag or "text").lower()
+            if el.tag == "select" or el_type == "select":
+                opts = el.options or []
+                first_opt = next((o["value"] for o in opts if o.get("value", "") not in ("", "0")), None)
+                if first_opt:
+                    fill_steps.append(_step("browser.select", el, {"value": first_opt}, f"Select option for '{label}'"))
+            elif el_type in ("checkbox", "radio"):
+                fill_steps.append(_step("browser.click", el, {}, f"Check '{label}'"))
+            else:
+                val = _infer_test_value(el)
+                fill_steps.append(_step("browser.fill", el, {"value": val}, f"Fill '{label}' with '{val}'"))
+        fill_steps.append(_step("browser.click", submit_el, {}, "Save all settings"))
+        fill_steps.append(GeneratedStep(
+            action="browser.wait_for",
+            params={"selector": _SUCCESS_SELECTOR, "timeout": 10000},
+            description="Verify save was successful",
+        ))
+        fill_steps.append(_screenshot_step("settings-saved-all"))
+        cases.append(GeneratedTestCase(
             name="Settings — save all fields",
-            description="Verify settings form submits successfully with valid values",
+            description="Verify all form fields accept valid values and save without errors",
             tags=["browser", "settings", "smoke"],
             url=url,
             steps=fill_steps,
-        )
-    ]
+        ))
 
-    # Before/after pattern for the first editable text field
-    text_inputs = [el for el in input_els if (el.type or "text").lower() in ("text", "number", "email", "url", "tel")]
-    if text_inputs and submit_el:
-        el = text_inputs[0]
-        ba_steps = [
+    # ── Required field validation ─────────────────────────────────────────────
+    required_els = [el for el in text_inputs if el.required]
+    if required_els and submit_el:
+        val_steps = [_open_step(url)]
+        for el in required_els[:2]:
+            label = (el.name or el.label or el.placeholder or el.id or "field").strip()
+            val_steps.append(_step("browser.fill", el, {"value": ""}, f"Clear required field '{label}'"))
+        val_steps.append(_step("browser.click", submit_el, {}, "Attempt save with empty required fields"))
+        val_steps.append(GeneratedStep(
+            action="browser.wait_for",
+            params={"selector": _ERROR_SELECTOR, "timeout": 5000},
+            description="Verify validation error appears for empty required fields",
+        ))
+        val_steps.append(_screenshot_step("validation-required-empty"))
+        cases.append(GeneratedTestCase(
+            name="Settings — required field validation",
+            description="Verify form shows errors when required fields are left empty",
+            tags=["browser", "settings", "validation"],
+            url=url,
+            steps=val_steps,
+        ))
+
+    # ── Invalid value validation ──────────────────────────────────────────────
+    invalid_candidates = [
+        el for el in text_inputs
+        if _infer_invalid_value(el) not in ("", _infer_test_value(el))
+    ]
+    if invalid_candidates and submit_el:
+        inv_el = invalid_candidates[0]
+        label = (inv_el.name or inv_el.label or inv_el.placeholder or inv_el.id or "field").strip()
+        bad_val = _infer_invalid_value(inv_el)
+        inv_steps = [
             _open_step(url),
-            _step("browser.get_text", el, {"store_as": "original_value"}, "Capture current field value before change"),
-            _step("browser.fill", el, {"value": "${new_value}"}, "Enter new value"),
-            _step("browser.click", submit_el, {}, "Save the change"),
-            _step("browser.assert_text", el, {"text": "${new_value}"}, "Verify new value persisted after save"),
-            _screenshot_step("after-config-change"),
+            _step("browser.fill", inv_el, {"value": bad_val}, f"Enter invalid value '{bad_val}' for '{label}'"),
+            _step("browser.click", submit_el, {}, "Attempt save with invalid value"),
+            GeneratedStep(
+                action="browser.wait_for",
+                params={"selector": _ERROR_SELECTOR, "timeout": 5000},
+                description=f"Verify error shown for invalid '{label}' value",
+            ),
+            _screenshot_step(f"validation-invalid-{re.sub(r'[^a-z0-9]', '-', label.lower())[:20]}"),
         ]
-        cases.append(
-            GeneratedTestCase(
-                name="Settings — before/after config change",
-                description="Verify a config field value updates correctly after save",
-                tags=["browser", "settings", "regression"],
-                url=url,
-                steps=ba_steps,
-            )
-        )
+        cases.append(GeneratedTestCase(
+            name=f"Settings — invalid {label} rejected",
+            description=f"Verify the form rejects invalid value '{bad_val}' for '{label}'",
+            tags=["browser", "settings", "validation"],
+            url=url,
+            steps=inv_steps,
+        ))
+
     return cases
 
 
@@ -470,16 +706,40 @@ def _build_generic_button_cases(pattern: _PatternMatch, url: str) -> List[Genera
     for el in pattern.elements[:4]:
         label = (el.text or el.name or el.aria_label or "button").strip()
         slug = re.sub(r"[^a-z0-9]", "-", label.lower())[:24]
+        hint = _el_hint(el)
+        is_save = any(k in hint for k in ("save", "apply", "update", "submit", "confirm"))
+        is_delete = any(k in hint for k in ("delete", "remove", "reset", "clear"))
+
         steps = [
             _open_step(url),
             _step("browser.click", el, {}, f"Click '{label}'"),
-            _screenshot_step(f"after-{slug}"),
         ]
+        if is_save:
+            steps.append(GeneratedStep(
+                action="browser.wait_for",
+                params={"selector": _SUCCESS_SELECTOR, "timeout": 10000},
+                description="Verify action completed successfully",
+            ))
+        elif is_delete:
+            # Many delete buttons open a confirmation dialog first
+            steps.append(GeneratedStep(
+                action="browser.wait_for",
+                params={"selector": "[role='dialog'], .modal, .confirm-dialog", "timeout": 5000},
+                description="Wait for confirmation dialog",
+            ))
+        else:
+            # Generic: assert page has no JS error banner
+            steps.append(GeneratedStep(
+                action="browser.assert_not_visible",
+                params={"selector": ".error, .alert-danger, [role='alertdialog']"},
+                description="Verify no error appeared after action",
+            ))
+        steps.append(_screenshot_step(f"after-{slug}"))
         cases.append(
             GeneratedTestCase(
-                name=f"Click — {label}",
-                description=f"Verify clicking '{label}' works without errors",
-                tags=["browser", "smoke"],
+                name=f"Button — {label}",
+                description=f"Verify '{label}' button performs its action without errors",
+                tags=["browser", "functional"],
                 url=url,
                 steps=steps,
             )
@@ -488,24 +748,32 @@ def _build_generic_button_cases(pattern: _PatternMatch, url: str) -> List[Genera
 
 
 def _build_generic_input_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTestCase]:
-    """Generate a single 'fill all inputs' interaction test."""
+    """Fill each input with a realistic value and verify no error state appears."""
     fill_steps = [_open_step(url)]
-    for i, el in enumerate(pattern.elements):
-        label = (el.name or el.placeholder or el.label or el.aria_label or f"field {i+1}").strip()
-        var = f"${{field_{i+1}_value}}"
+    for el in pattern.elements:
+        label = (el.name or el.placeholder or el.label or el.aria_label or el.id or "field").strip()
         tag_type = (el.type or el.tag or "text").lower()
         if tag_type == "select" or el.tag == "select":
-            fill_steps.append(_step("browser.select", el, {"value": var}, f"Select value for '{label}'"))
+            opts = el.options or []
+            first_opt = next((o["value"] for o in opts if o.get("value", "") not in ("", "0")), None)
+            if first_opt:
+                fill_steps.append(_step("browser.select", el, {"value": first_opt}, f"Select first option for '{label}'"))
         elif tag_type in ("checkbox", "radio"):
-            fill_steps.append(_step("browser.click", el, {}, f"Toggle '{label}'"))
+            fill_steps.append(_step("browser.click", el, {}, f"Check '{label}'"))
         else:
-            fill_steps.append(_step("browser.fill", el, {"value": var}, f"Fill '{label}'"))
-    fill_steps.append(_screenshot_step("inputs-filled"))
+            val = _infer_test_value(el)
+            fill_steps.append(_step("browser.fill", el, {"value": val}, f"Fill '{label}' with '{val}'"))
+    fill_steps.append(GeneratedStep(
+        action="browser.assert_not_visible",
+        params={"selector": _ERROR_SELECTOR},
+        description="Verify no validation errors appeared after filling fields",
+    ))
+    fill_steps.append(_screenshot_step("form-filled"))
     return [
         GeneratedTestCase(
             name="Form — fill all inputs",
-            description="Verify all form inputs accept values without errors",
-            tags=["browser", "smoke"],
+            description="Verify all form inputs accept valid values without triggering errors",
+            tags=["browser", "functional"],
             url=url,
             steps=fill_steps,
         )

@@ -44,6 +44,8 @@ function broadcastStatus() {
 }
 
 function _statusSnapshot() {
+  const provider = (_state.config && _state.config.aiProvider || "").toLowerCase();
+  const deferred = provider === "intelligent" || provider === "auto" || provider === "automap";
   return {
     crawling: _state.crawling,
     sessionId: _state.sessionId,
@@ -53,6 +55,7 @@ function _statusSnapshot() {
     pendingCount: _state.pendingUrls.length,
     totalDiscovered: _state.totalDiscovered,
     lastStatus: _state.lastStatus,
+    deferredMode: deferred,
   };
 }
 

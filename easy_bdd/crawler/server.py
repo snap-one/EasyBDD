@@ -38,6 +38,9 @@ from .page_analyzer import analyze_snapshot
 from .testrail_publisher import TestRailPublisher
 from .yaml_writer import write_all_cases
 
+# Intelligent mode: deferred 3-phase analysis (map → plan → generate)
+_INTELLIGENT_PROVIDERS = {"intelligent", "auto", "automap"}
+
 
 # ── App factory ────────────────────────────────────────────────────────────────
 
@@ -139,8 +142,22 @@ def create_app() -> FastAPI:
             )
 
         session.mark_visited(snapshot.url)
-        session.state = "generating"
         snapshot.timestamp = time.time()
+
+        # ── Intelligent (deferred) mode ─────────────────────────────────────────
+        provider = (session.config.ai_provider or "").lower()
+        if provider in _INTELLIGENT_PROVIDERS:
+            session.store_snapshot(snapshot)
+            session.state = "crawling"
+            return AnalyzeResponse(
+                session_id=session_id,
+                page_url=snapshot.url,
+                cases=[],
+                status="deferred",
+            )
+
+        # ── Immediate per-page mode ────────────────────────────────────────────
+        session.state = "generating"
 
         try:
             ai = build_ai_client(
@@ -182,11 +199,38 @@ def create_app() -> FastAPI:
         """
         Finalise the crawl: push all generated cases to TestRail
         and optionally create a test run.
+
+        In intelligent mode, runs the 3-phase SitePlanner analysis first
+        (rule-based per page + Ollama workflow planning + workflow generation).
         """
         session = _active_session(session_id)
-        session.state = "pushing"
         cases_pushed = 0
         run_url: Optional[str] = None
+
+        # ── Intelligent mode: run deferred 3-phase analysis ────────────────────
+        provider = (session.config.ai_provider or "").lower()
+        if provider in _INTELLIGENT_PROVIDERS and session.raw_snapshots:
+            session.state = "analyzing"
+            try:
+                from .site_planner import SitePlanner
+
+                ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+                ollama_model = os.getenv("CRAWLER_AI_MODEL", "qwen3-coder:30b-a3b-q4_K_M")
+                planner = SitePlanner(
+                    ollama_base_url=ollama_url,
+                    model=ollama_model,
+                )
+                output_dir = Path(session.config.output_dir)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                all_cases = planner.run(session.raw_snapshots, str(output_dir))
+                session.add_cases(all_cases)
+            except Exception as e:
+                session.state = "error"
+                session.error = f"Intelligent analysis failed: {e}"
+                traceback.print_exc()
+                return session.to_status(cases_pushed=0)
+
+        session.state = "pushing"
 
         try:
             from ..services.testrail_service import TestRailService
@@ -233,7 +277,7 @@ def create_app() -> FastAPI:
             "element_description": "Submit button on login form",
             "page_html": "<html>...",
             "ranked_selectors": [...],   // RankedSelector objects
-            "ai_provider": "claude"
+            "ai_provider": os.getenv("CRAWLER_AI_PROVIDER", "rules")
           }
         """
         from .models import RankedSelector

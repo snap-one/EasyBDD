@@ -20,47 +20,72 @@ import requests
 
 
 _SYSTEM_PROMPT = """\
-You are an expert test automation engineer specialising in the Easy BDD framework.
-Your job is to analyse a web page snapshot and produce automated test cases.
+You are an expert test automation engineer for the Easy BDD framework.
+Analyse the page snapshot and generate test cases for EVERY interactive element found.
 
-Easy BDD YAML format uses dot-notation actions:
-  browser.open, browser.click, browser.fill, browser.assert_text,
-  browser.wait_for_element, browser.select, browser.hover, browser.screenshot
+=== OUTPUT FORMAT ===
+Return ONLY a valid JSON array. No markdown, no explanation. Each item:
+{
+  "name": "Short descriptive name",
+  "description": "What this test verifies",
+  "tags": ["browser", "smoke"],
+  "steps": [
+    {"action": "browser.open",  "params": {"url": "${base_url}"}},
+    {"action": "browser.fill",  "params": {"selector": "#field", "value": "test"}, "description": "Fill the field"},
+    {"action": "browser.click", "params": {"selector": "role=button[name=Save]"}, "description": "Click Save"},
+    {"action": "browser.screenshot", "params": {"name": "after-save"}}
+  ]
+}
 
-For selectors, prefer in this order:
-  1. data-testid / data-cy attributes
-  2. ARIA role + name  (role=button[name="Submit"])
-  3. Stable IDs        (#login-button)
-  4. Label text        (label="Email address")
-  5. Visible text      (text="Sign In")
-  6. CSS selector      (.btn-primary)
+=== SELECTOR PRIORITY (use best available) ===
+1. data-testid / data-cy  →  [data-testid="submit"]
+2. ARIA role + name       →  role=button[name="Save"]
+3. Stable ID              →  #save-btn
+4. Label                  →  label="Email address"
+5. Visible text           →  text="Sign In"
+6. CSS class              →  .btn-primary
 
-For iframes use the prefix: "iframe#frame-id >> <selector>"
+=== RULES — FOLLOW EXACTLY ===
 
-Output ONLY a JSON array of test case objects. Each object has:
-  {
-    "name": "Human-readable test name",
-    "description": "What this test verifies",
-    "tags": ["browser", "smoke"],
-    "steps": [
-      {
-        "action": "browser.fill",
-        "params": {"selector": "#email", "value": "${username}"},
-        "description": "Enter the username"
-      }
-    ]
-  }
+1. TEXT / NUMBER / PASSWORD INPUTS
+   - Create one test per input field
+   - Steps: open page → fill the field with a realistic value → screenshot
+   - Name: "Fill [field label/placeholder]"
 
-Guidelines:
-- Group related UI interactions into meaningful test cases (login, navigation, form submission, etc.)
-- Add browser.screenshot steps after key state changes
-- After config changes, add a before/after assertion pattern:
-    1. browser.get_text to capture initial value (store_as: before_value)
-    2. perform the change
-    3. browser.assert_text to verify the new value
-- For forms, include both happy-path and required-field validation tests
-- Use variables like ${username}, ${password}, ${base_url} for credentials/URLs
-- Keep each test case focused on a single user workflow
+2. DROPDOWNS / SELECTS
+   - Create one test per dropdown
+   - Steps: open page → select an option → screenshot
+   - Use browser.select action
+
+3. CHECKBOXES / TOGGLES
+   - Create one test per checkbox
+   - Steps: open page → click to toggle → screenshot
+
+4. SAVE / APPLY / SUBMIT BUTTONS
+   - This is the most important pattern — always include it when a save button exists
+   - Steps:
+       a. browser.open
+       b. Fill ALL input fields on the form with realistic test values
+       c. browser.get_text on a key field (store_as: value_before)
+       d. browser.click the Save/Apply button
+       e. browser.wait_for — wait for confirmation message or page reload
+       f. browser.screenshot (name: "after-save")
+       g. browser.assert_text — verify success message like "Settings saved" / "Applied" / "Success"
+   - If a confirmation dialog appears (OK/Confirm button), add a step to click it
+
+5. CONFIRMATION DIALOGS (OK / Confirm / Yes buttons)
+   - Create TWO tests: one that confirms, one that cancels
+   - "Confirm [action] — accept": click trigger → click OK/Confirm → verify result
+   - "Confirm [action] — cancel": click trigger → click Cancel → verify nothing changed
+
+6. NAVIGATION LINKS / TABS
+   - Create one test per nav link
+   - Steps: open page → click link → browser.get_title (store_as: page_title) → screenshot
+
+7. EVERY TEST must start with browser.open and end with browser.screenshot
+
+Use variables: ${base_url}, ${username}, ${password}
+Use realistic placeholder values for inputs (e.g. "TestNetwork", "192.168.1.100", "admin").
 """
 
 
@@ -160,17 +185,25 @@ class OllamaClient(AIClient):
         self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
         self.model = model or os.getenv("CRAWLER_AI_MODEL", self.DEFAULT_MODEL)
 
-    def _chat(self, messages: List[Dict], max_tokens: int = 4096) -> str:
+    # CPU-only inference is slow — allow up to 20 minutes per page
+    _TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "1200"))
+    # Max snapshot chars sent to Ollama — keeps prompt small and fast on CPU
+    _MAX_SNAPSHOT_CHARS = int(os.getenv("OLLAMA_MAX_SNAPSHOT_CHARS", "12000"))
+
+    def _chat(self, messages: List[Dict], max_tokens: int = 1024) -> str:
         payload = {
             "model": self.model,
             "messages": [{"role": "system", "content": _SYSTEM_PROMPT}] + messages,
             "stream": False,
-            "options": {"num_predict": max_tokens},
+            "options": {
+                "num_predict": max_tokens,
+                "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "4096")),
+            },
         }
         resp = requests.post(
             f"{self.base_url}/api/chat",
             json=payload,
-            timeout=300,
+            timeout=self._TIMEOUT,
         )
         resp.raise_for_status()
         return resp.json()["message"]["content"]
@@ -180,6 +213,9 @@ class OllamaClient(AIClient):
         snapshot_json: str,
         existing_context: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        # Truncate snapshot to keep prompt within CPU-friendly token budget
+        if len(snapshot_json) > self._MAX_SNAPSHOT_CHARS:
+            snapshot_json = snapshot_json[: self._MAX_SNAPSHOT_CHARS] + "\n... (truncated)"
         user_content = (
             f"Here is the page snapshot to analyse:\n```json\n{snapshot_json}\n```"
         )
@@ -258,11 +294,154 @@ class RuleBasedClient(AIClient):
         return []
 
 
+_WORKFLOW_PROMPT = """\
+You are a test automation engineer. Given a list of EXISTING test cases (already generated by a rule engine) and the interactive elements on a page, your ONLY job is to generate ADDITIONAL workflow tests that the rule engine cannot produce:
+
+1. SAVE FLOWS: fill all inputs → click Save/Apply → wait for confirmation → assert success message
+2. CONFIRMATION DIALOGS: trigger an action → confirm dialog appears → click OK vs Cancel
+3. MULTI-STEP WORKFLOWS: e.g. change a value → save → reload page → verify value persisted
+
+DO NOT reproduce any test that already exists in the existing tests list.
+DO NOT invent element names or selectors — use ONLY selectors from the "elements" list provided.
+DO NOT generate tests if the page has no save/apply button or no confirmation dialogs.
+
+Output ONLY a valid JSON array in the EXACT same format as the existing tests shown.
+If there are no additional workflow tests to add, output an empty array: []
+
+EXISTING TEST FORMAT EXAMPLE (follow this exactly):
+{
+  "name": "Save Wi-Fi settings",
+  "description": "Fills SSID and password then saves and verifies confirmation",
+  "tags": ["browser", "smoke"],
+  "steps": [
+    {"action": "browser.open",       "params": {"url": "${base_url}"}},
+    {"action": "browser.fill",       "params": {"selector": "#ssid", "value": "TestNetwork"}},
+    {"action": "browser.fill",       "params": {"selector": "#password", "value": "TestPass123"}},
+    {"action": "browser.click",      "params": {"selector": "role=button[name=\\"Apply Changes\\"]"}},
+    {"action": "browser.wait_for",   "params": {"selector": "text=\\"Settings saved\\"", "timeout": 5000}},
+    {"action": "browser.screenshot", "params": {"name": "after-save"}}
+  ]
+}
+"""
+
+
+def _filter_ollama_cases(raw_cases: List[Dict], known_selectors: set) -> List[Dict]:
+    """
+    Remove hallucinated or malformed cases from Ollama output.
+    Keeps a case only if:
+      - it has a real name (not 'Unnamed test' or empty)
+      - it has at least 2 steps
+      - at least one step references a selector that exists on the page
+    """
+    good = []
+    bad_names = {"unnamed test", "untitled", "test case", "feature", ""}
+    for case in raw_cases:
+        if not isinstance(case, dict):
+            continue
+        name = (case.get("name") or "").strip()
+        if name.lower() in bad_names or len(name) < 4:
+            continue
+        steps = case.get("steps", [])
+        if len(steps) < 2:
+            continue
+        # At least one step must reference a known selector (or be a browser.open/screenshot)
+        anchored = False
+        for step in steps:
+            params = step.get("params", {})
+            sel = params.get("selector", "")
+            action = step.get("action", "")
+            if action in ("browser.open", "browser.screenshot", "browser.wait_for"):
+                anchored = True
+                break
+            if sel and any(k in sel for k in known_selectors):
+                anchored = True
+                break
+            # Accept if selector looks like a real CSS/ARIA selector (not a placeholder)
+            if sel and not sel.startswith("${") and len(sel) > 3:
+                anchored = True
+                break
+        if anchored:
+            good.append(case)
+    return good
+
+
+class HybridClient(AIClient):
+    """
+    Hybrid provider: rule-based generates all element-level tests with correct
+    Easy BDD syntax, then Ollama adds workflow tests (save flows, confirmations)
+    using the rule output as few-shot examples so it knows the exact format.
+
+    Usage: set CRAWLER_AI_PROVIDER=hybrid
+    """
+
+    def __init__(self, model: Optional[str] = None):
+        self._ollama = OllamaClient(model=model)
+
+    def analyze_page(
+        self,
+        snapshot_json: str,
+        existing_context: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        # Hybrid path is handled directly in page_analyzer.analyze_snapshot()
+        return []
+
+    def suggest_selectors(self, element_description: str, page_html_fragment: str) -> List[str]:
+        return self._ollama.suggest_selectors(element_description, page_html_fragment)
+
+    def analyze_workflows(
+        self,
+        snapshot_json: str,
+        rule_cases_json: str,
+        known_selectors: set,
+    ) -> List[Dict[str, Any]]:
+        """
+        Ask Ollama to generate workflow tests on top of the rule-based cases.
+        Uses the rule cases as few-shot examples so Ollama knows the exact format.
+        """
+        if len(snapshot_json) > self._ollama._MAX_SNAPSHOT_CHARS:
+            snapshot_json = snapshot_json[: self._ollama._MAX_SNAPSHOT_CHARS] + "\n...(truncated)"
+
+        user_content = (
+            f"EXISTING TESTS (already generated — do not duplicate):\n"
+            f"```json\n{rule_cases_json[:3000]}\n```\n\n"
+            f"PAGE ELEMENTS:\n```json\n{snapshot_json}\n```\n\n"
+            f"Generate ONLY additional workflow tests (save flows, confirmation dialogs, multi-step). "
+            f"Output a JSON array or [] if none needed."
+        )
+
+        payload = {
+            "model": self._ollama.model,
+            "messages": [
+                {"role": "system", "content": _WORKFLOW_PROMPT},
+                {"role": "user",   "content": user_content},
+            ],
+            "stream": False,
+            "options": {
+                "num_predict": 1500,
+                "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "4096")),
+            },
+        }
+        try:
+            resp = requests.post(
+                f"{self._ollama.base_url}/api/chat",
+                json=payload,
+                timeout=self._ollama._TIMEOUT,
+            )
+            resp.raise_for_status()
+            raw = resp.json()["message"]["content"]
+            candidates = _parse_json_response(raw)
+            return _filter_ollama_cases(candidates, known_selectors)
+        except Exception:
+            return []  # Ollama failure never blocks rule-based results
+
+
 def build_ai_client(provider: str = "claude", model: Optional[str] = None) -> AIClient:
     """Factory — returns the correct AI client based on provider string."""
     provider = (provider or "claude").lower()
     if provider in ("rules", "none", "rule-based", "rule_based"):
         return RuleBasedClient()
+    if provider == "hybrid":
+        return HybridClient(model=model)
     if provider == "ollama":
         return OllamaClient(model=model)
     return ClaudeClient(model=model)

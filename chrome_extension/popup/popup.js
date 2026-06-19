@@ -228,6 +228,9 @@ function showCrawlingUI(status) {
   $doneSection.classList.add("hidden");
   $btnStart.classList.add("hidden");
   $btnStop.classList.remove("hidden");
+  $btnStop.textContent = status.deferredMode
+    ? "Stop & Generate Tests"
+    : "Stop & Push";
   $btnReset.classList.add("hidden");
   updateStatusUI(status);
 }
@@ -261,12 +264,23 @@ function updateStatusUI(status) {
   const pending = status.pendingCount || 0;
   const total   = visited + pending;
   $statPages.textContent = total > 0 ? `${visited} / ${total}` : visited;
-  $statCases.textContent = status.casesGenerated || 0;
+
+  if (status.deferredMode) {
+    // Auto-map mode: cases are generated at stop time, not per-page
+    $statCases.textContent = `${visited} mapped (generating on stop…)`;
+  } else {
+    $statCases.textContent = status.casesGenerated || 0;
+  }
 
   if (status.crawling) {
     const pct = total > 0 ? Math.round((visited / total) * 100) : 0;
-    $statState.innerHTML =
-      `<span class="spinner"></span>Crawling… ${pct > 0 ? pct + "%" : ""}`;
+    if (status.deferredMode) {
+      $statState.innerHTML =
+        `<span class="spinner"></span>Mapping site… ${pct > 0 ? pct + "%" : ""}`;
+    } else {
+      $statState.innerHTML =
+        `<span class="spinner"></span>Crawling… ${pct > 0 ? pct + "%" : ""}`;
+    }
   } else {
     $statState.textContent = "Done";
   }

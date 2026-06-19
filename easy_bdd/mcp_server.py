@@ -1276,6 +1276,485 @@ def repush_yaml_to_testrail(path: str, case_id=None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Playwright recorder import
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def import_playwright_recording(
+    source: str,
+    test_name: str = "",
+    project_id: int = 0,
+    suite_id: int = 0,
+    section_name: str = "Imported from Playwright",
+    output_dir: str = "tests/cases/imported",
+    push_to_testrail: bool = False,
+) -> str:
+    """
+    Convert a Playwright CRX recording to Easy BDD test cases (YAML) and
+    optionally push them to TestRail.
+
+    Parameters
+    ----------
+    source          : File path to a .js / .ts / .json / .zip trace file,
+                      OR raw JS/TS code pasted directly as a string.
+    test_name       : Override the test case name (used when source is raw code
+                      with no test() wrapper).
+    project_id      : TestRail project ID (required if push_to_testrail=True).
+    suite_id        : TestRail suite ID (0 = default suite).
+    section_name    : TestRail section to create/reuse.
+    output_dir      : Where to write YAML files (relative to project root).
+    push_to_testrail: If True, push cases to TestRail immediately after conversion.
+    """
+    from easy_bdd.crawler.playwright_importer import import_recording
+
+    try:
+        abs_output = str(_PROJECT_ROOT / output_dir)
+        cases = import_recording(
+            source=source,
+            default_name=test_name or "Imported test",
+            output_dir=abs_output,
+        )
+    except Exception as e:
+        return json.dumps({"error": f"Import failed: {e}"})
+
+    result: Dict[str, Any] = {
+        "cases_imported": len(cases),
+        "output_dir": output_dir,
+        "cases": [{"name": c.name, "steps": len(c.steps), "tags": c.tags} for c in cases],
+    }
+
+    if push_to_testrail and cases and project_id:
+        try:
+            from easy_bdd.services.testrail_service import TestRailService
+            from easy_bdd.crawler.testrail_publisher import TestRailPublisher
+
+            tr = TestRailService()
+            publisher = TestRailPublisher(
+                testrail=tr,
+                project_id=project_id,
+                suite_id=suite_id or None,
+                section_name=section_name,
+            )
+            case_ids = publisher.publish_all(cases)
+            result["testrail_case_ids"] = case_ids
+            result["pushed"] = len(case_ids)
+        except Exception as e:
+            result["testrail_error"] = str(e)
+
+    return json.dumps(result, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Ollama direct interface
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def ollama_chat(
+    prompt: str,
+    system: str = "",
+    model: str = "",
+    temperature: float = 0.2,
+    max_tokens: int = 2048,
+) -> str:
+    """
+    Send a prompt directly to the configured Ollama model and return the response.
+
+    Useful for:
+      - Asking Ollama to analyse a test case or page snapshot
+      - Generating test ideas for a specific feature
+      - Reviewing Easy BDD YAML and suggesting improvements
+      - Any freeform LLM task without leaving the MCP context
+
+    Parameters
+    ----------
+    prompt      : The user message to send.
+    system      : Optional system prompt (overrides the default).
+    model       : Ollama model name. Defaults to CRAWLER_AI_MODEL from .env.
+    temperature : Sampling temperature (0 = deterministic, 1 = creative).
+    max_tokens  : Maximum tokens in the response.
+    """
+    import requests as _requests
+
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    model = model or os.getenv("CRAWLER_AI_MODEL", "qwen3-coder:30b-a3b-q4_K_M")
+    timeout = int(os.getenv("OLLAMA_TIMEOUT", "1200"))
+    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "4096"))
+
+    default_system = (
+        "You are an expert QA engineer and test automation specialist. "
+        "You help with Easy BDD test cases, Playwright scripts, and test strategy."
+    )
+
+    messages = []
+    if system or default_system:
+        messages.append({"role": "system", "content": system or default_system})
+    messages.append({"role": "user", "content": prompt})
+
+    try:
+        resp = _requests.post(
+            f"{base_url}/api/chat",
+            json={
+                "model": model,
+                "messages": messages,
+                "stream": False,
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": max_tokens,
+                    "num_ctx": num_ctx,
+                },
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        content = resp.json()["message"]["content"]
+        return json.dumps({"response": content, "model": model})
+    except Exception as e:
+        return json.dumps({"error": str(e), "base_url": base_url, "model": model})
+
+
+@mcp.tool()
+def ollama_analyze_test(path: str = "", case_id: int = 0, question: str = "") -> str:
+    """
+    Ask Ollama to review an Easy BDD test case and suggest improvements.
+    Accepts either a local YAML file path OR a TestRail case ID.
+
+    Parameters
+    ----------
+    path     : Relative path to a YAML file (e.g. tests/cases/crawled/login.yaml).
+    case_id  : TestRail case ID — fetches steps from custom_preconds field.
+    question : Custom question to ask Ollama (optional).
+    """
+    import yaml as _yaml
+    import requests as _requests
+
+    # ── Load content from YAML file OR TestRail case ──────────────────────────
+    test_name = path or f"Case {case_id}"
+    content = ""
+
+    if case_id:
+        try:
+            from easy_bdd.services.testrail_service import TestRailService
+            tr = TestRailService()
+            case = tr.get_case(case_id)
+            test_name = case.get("title", f"Case {case_id}")
+            preconds = case.get("custom_preconds") or ""
+            content = (
+                f"# TestRail case {case_id}: {test_name}\n"
+                f"# Section: {case.get('section_id', '')}\n\n"
+                f"{preconds}"
+            )
+        except Exception as e:
+            return json.dumps({"error": f"Could not fetch TestRail case {case_id}: {e}"})
+    elif path:
+        fpath = _abs(path)
+        if not fpath.exists():
+            return json.dumps({"error": f"File not found: {path}"})
+        try:
+            content = fpath.read_text(encoding="utf-8")
+            data = _yaml.safe_load(content)
+            test_name = data.get("name", path) if isinstance(data, dict) else path
+        except Exception as e:
+            return json.dumps({"error": f"Could not read YAML: {e}"})
+    else:
+        return json.dumps({"error": "Provide either path or case_id."})
+
+    default_q = (
+        "Review this Easy BDD test case. "
+        "1. Identify any missing assertions or verification steps. "
+        "2. Suggest 2-3 additional test cases for this feature. "
+        "3. Note any steps that might be fragile or need better selectors."
+    )
+
+    prompt = f"{question or default_q}\n\nTest case:\n```yaml\n{content}\n```"
+
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    model = os.getenv("CRAWLER_AI_MODEL", "qwen3-coder:30b-a3b-q4_K_M")
+    timeout = int(os.getenv("OLLAMA_TIMEOUT", "1200"))
+
+    try:
+        resp = _requests.post(
+            f"{base_url}/api/chat",
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": "You are an expert QA engineer reviewing Easy BDD test cases."},
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+                "options": {"num_predict": 2048, "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "4096"))},
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        analysis = resp.json()["message"]["content"]
+        return json.dumps({
+            "test_name": test_name,
+            "case_id": case_id or None,
+            "analysis": analysis,
+            "model": model,
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def ollama_generate_tests(
+    feature_description: str,
+    page_url: str = "",
+    existing_selectors: str = "",
+    count: int = 5,
+    push_to_testrail: bool = False,
+    project_id: int = 0,
+    suite_id: int = 0,
+    section_name: str = "Ollama Generated",
+    output_dir: str = "tests/cases/generated",
+) -> str:
+    """
+    Ask Ollama to generate new Easy BDD test cases for a described feature.
+    Optionally writes YAML files and pushes directly to TestRail.
+
+    Parameters
+    ----------
+    feature_description : Plain-English description of the feature to test.
+                          e.g. "Wi-Fi settings page with SSID, password, and Apply button"
+    page_url            : URL of the page (used as browser.open target).
+    existing_selectors  : Optional comma-separated selectors from the page to anchor tests to.
+    count               : How many test cases to generate (default 5).
+    push_to_testrail    : If True, push generated cases to TestRail.
+    project_id          : TestRail project ID (required if push_to_testrail=True).
+    suite_id            : TestRail suite ID (0 = default suite).
+    section_name        : TestRail section to create/reuse.
+    output_dir          : Where to write YAML files (relative to project root).
+    """
+    import requests as _requests
+
+    system = """\
+You are a QA automation engineer. Generate Easy BDD test cases in YAML format.
+
+Easy BDD step syntax:
+  - browser.open:        {url: "${base_url}"}
+  - browser.fill:        {selector: "#field", value: "text"}
+  - browser.click:       {selector: "role=button[name='Save']"}
+  - browser.select:      {selector: "#dropdown", value: "option"}
+  - browser.wait_for:    {selector: "text='Success'", timeout: 5000}
+  - browser.assert_text: {selector: ".status", text: "Settings saved"}
+  - browser.assert_visible: {selector: ".success-banner"}
+  - browser.screenshot:  {name: "descriptive-name"}
+
+Return ONLY valid YAML — a list of test case objects:
+- name: "Test name"
+  description: "What this verifies"
+  tags: [browser, functional]
+  steps:
+    - browser.open: {url: "${base_url}"}
+    - browser.fill: {selector: "#field", value: "value"}
+    - browser.click: {selector: "role=button[name='Save']"}
+    - browser.wait_for: {selector: "text='Saved'", timeout: 5000}
+    - browser.screenshot: {name: "after-save"}
+"""
+
+    selector_hint = f"\n\nKnown selectors on this page: {existing_selectors}" if existing_selectors else ""
+    url_hint = f"\nPage URL: {page_url}" if page_url else ""
+
+    prompt = (
+        f"Generate {count} functional Easy BDD test cases for:\n\n"
+        f"{feature_description}{url_hint}{selector_hint}\n\n"
+        f"Focus on: happy path, validation errors, edge cases, and save/apply workflows. "
+        f"Use realistic test data values, not placeholders like 'value1'."
+    )
+
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    model = os.getenv("CRAWLER_AI_MODEL", "qwen3-coder:30b-a3b-q4_K_M")
+    timeout = int(os.getenv("OLLAMA_TIMEOUT", "1200"))
+
+    try:
+        resp = _requests.post(
+            f"{base_url}/api/chat",
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+                "options": {
+                    "num_predict": 3000,
+                    "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "4096")),
+                    "temperature": 0.3,
+                },
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        yaml_output = resp.json()["message"]["content"]
+
+        # Strip markdown fences if present
+        yaml_clean = yaml_output.strip()
+        for fence in ("```yaml", "```"):
+            if fence in yaml_clean:
+                yaml_clean = yaml_clean.split(fence, 1)[1].split("```")[0].strip()
+                break
+
+        result: Dict[str, Any] = {"yaml": yaml_clean, "model": model}
+
+        # Optionally write YAML files and push to TestRail
+        if push_to_testrail or output_dir:
+            import yaml as _yaml
+            from pathlib import Path as _Path
+            from easy_bdd.crawler.models import GeneratedTestCase, GeneratedStep
+
+            try:
+                raw_cases = _yaml.safe_load(yaml_clean)
+                if not isinstance(raw_cases, list):
+                    raw_cases = [raw_cases]
+
+                cases = []
+                for rc in raw_cases:
+                    if not isinstance(rc, dict):
+                        continue
+                    steps = []
+                    for action, params in (rc.get("steps") or []):
+                        if isinstance(params, dict):
+                            steps.append(GeneratedStep(action=action, params=params))
+                        elif isinstance(params, str):
+                            steps.append(GeneratedStep(action=action, params={"selector": params}))
+                    cases.append(GeneratedTestCase(
+                        name=rc.get("name", "Generated test"),
+                        description=rc.get("description", ""),
+                        tags=rc.get("tags", ["browser", "generated"]),
+                        url=page_url,
+                        steps=steps,
+                    ))
+
+                if output_dir:
+                    from easy_bdd.crawler.yaml_writer import write_test_case
+                    out = _Path(_PROJECT_ROOT / output_dir)
+                    out.mkdir(parents=True, exist_ok=True)
+                    for case in cases:
+                        write_test_case(case, out)
+                    result["files_written"] = len(cases)
+
+                if push_to_testrail and project_id and cases:
+                    from easy_bdd.services.testrail_service import TestRailService
+                    from easy_bdd.crawler.testrail_publisher import TestRailPublisher
+                    tr = TestRailService()
+                    publisher = TestRailPublisher(
+                        testrail=tr,
+                        project_id=project_id,
+                        suite_id=suite_id or None,
+                        section_name=section_name,
+                    )
+                    case_ids = publisher.publish_all(cases)
+                    result["testrail_case_ids"] = case_ids
+                    result["pushed"] = len(case_ids)
+
+            except Exception as e:
+                result["push_error"] = str(e)
+
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def ollama_improve_testrail_case(
+    case_id: int,
+    write_back: bool = False,
+    question: str = "",
+) -> str:
+    """
+    Fetch a TestRail case, send its steps to Ollama for improvement suggestions,
+    and optionally write the improved steps back to TestRail.
+
+    Parameters
+    ----------
+    case_id    : TestRail case ID to fetch and improve.
+    write_back : If True, updates the TestRail case's Preconditions with the
+                 improved YAML that Ollama generates.
+    question   : Custom improvement instruction (optional).
+                 Default: fix missing assertions, add validation steps, improve selectors.
+    """
+    import yaml as _yaml
+    import requests as _requests
+
+    try:
+        from easy_bdd.services.testrail_service import TestRailService
+        tr = TestRailService()
+        case = tr.get_case(case_id)
+    except Exception as e:
+        return json.dumps({"error": f"Could not fetch case {case_id}: {e}"})
+
+    title = case.get("title", f"Case {case_id}")
+    current_steps = case.get("custom_preconds") or ""
+
+    if not current_steps.strip():
+        return json.dumps({"error": f"Case {case_id} has no steps in custom_preconds."})
+
+    default_q = (
+        "Improve this Easy BDD test case. Return ONLY the improved YAML steps — "
+        "no explanation, no markdown, just the YAML.\n\n"
+        "Improvements to make:\n"
+        "1. Add browser.wait_for after any save/apply/submit clicks\n"
+        "2. Add browser.assert_text or browser.assert_visible to verify outcomes\n"
+        "3. Replace generic ${field_N_value} placeholders with realistic test values\n"
+        "4. Add a browser.screenshot at the end if missing\n"
+        "5. Fix any steps that look incomplete or fragile"
+    )
+
+    prompt = f"{question or default_q}\n\nCurrent test case '{title}':\n```yaml\n{current_steps}\n```"
+
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    model = os.getenv("CRAWLER_AI_MODEL", "qwen3-coder:30b-a3b-q4_K_M")
+    timeout = int(os.getenv("OLLAMA_TIMEOUT", "1200"))
+
+    try:
+        resp = _requests.post(
+            f"{base_url}/api/chat",
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": "You are an expert QA engineer improving Easy BDD test cases. Return only valid YAML."},
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+                "options": {"num_predict": 2048, "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "4096"))},
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        improved = resp.json()["message"]["content"].strip()
+
+        # Strip fences
+        for fence in ("```yaml", "```"):
+            if fence in improved:
+                improved = improved.split(fence, 1)[1].split("```")[0].strip()
+                break
+
+        result: Dict[str, Any] = {
+            "case_id": case_id,
+            "title": title,
+            "original": current_steps,
+            "improved": improved,
+            "model": model,
+            "written_back": False,
+        }
+
+        if write_back:
+            try:
+                tr.update_case(case_id, custom_preconds=improved)
+                result["written_back"] = True
+            except Exception as e:
+                result["write_back_error"] = str(e)
+
+        return json.dumps(result, indent=2)
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
 # Server entry-point (called from __main__.py)
 # ---------------------------------------------------------------------------
 

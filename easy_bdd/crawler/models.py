@@ -27,6 +27,10 @@ class ElementSnapshot(BaseModel):
     css_class: Optional[str] = None
     data_testid: Optional[str] = None
     aria_label: Optional[str] = None
+    # Select element options [{value, text}]
+    options: Optional[List[Dict[str, str]]] = None
+    # Whether the field is required
+    required: bool = False
     # Generated selector candidates (ordered best-first by content script)
     selectors: List[str] = Field(default_factory=list)
     # Bounding box for visual similarity self-healing

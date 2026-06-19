@@ -196,6 +196,13 @@
         el.getAttribute("data-qa") ||
         null,
       aria_label: el.getAttribute("aria-label") || null,
+      options: el.tagName === "SELECT"
+        ? Array.from(el.options)
+            .slice(0, 10)
+            .map(o => ({ value: o.value, text: (o.textContent || "").trim() }))
+            .filter(o => o.value !== "" && o.text !== "")
+        : null,
+      required: el.required || el.getAttribute("aria-required") === "true" || false,
       selectors: window.__easybdd_selectors(el),
       bbox:
         rect.width > 0

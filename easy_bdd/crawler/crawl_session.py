@@ -33,6 +33,7 @@ class CrawlSession:
         self._visited_urls: Set[str] = set()
         self._cases: List[GeneratedTestCase] = []
         self._context_summaries: List[str] = []
+        self._raw_snapshots: List[PageSnapshot] = []   # for deferred intelligent analysis
 
     # ── URL tracking ──────────────────────────────────────────────────────────
 
@@ -51,6 +52,14 @@ class CrawlSession:
         return url
 
     # ── Cases ─────────────────────────────────────────────────────────────────
+
+    def store_snapshot(self, snapshot: PageSnapshot) -> None:
+        """Accumulate raw snapshots for deferred intelligent analysis."""
+        self._raw_snapshots.append(snapshot)
+
+    @property
+    def raw_snapshots(self) -> List[PageSnapshot]:
+        return list(self._raw_snapshots)
 
     def add_cases(self, cases: List[GeneratedTestCase]) -> None:
         self._cases.extend(cases)
