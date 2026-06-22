@@ -15,6 +15,8 @@ A TestRail-first test automation framework supporting browser automation, REST A
 - [Shared Steps](#shared-steps)
 - [Connections](#connections)
 - [TestRail Integration](#testrail-integration)
+  - [Case prefix taxonomy](#case-prefix-taxonomy)
+  - [TestRail case templates](#testrail-case-templates)
 - [Migration Tools](#migration-tools)
 - [Test Builder UI (deprecated)](#test-builder-ui-deprecated)
 - [Configuration](#configuration)
@@ -500,6 +502,62 @@ python -m easy_bdd testrail-list
 ```
 
 Results are posted back to TestRail automatically on completion.
+
+### Case prefix taxonomy
+
+Every TestRail case title must begin with one of these prefixes:
+
+| Prefix | Purpose |
+|---|---|
+| `Feature: <name>` | Inline test — steps written in the Preconditions field (dot-notation YAML) |
+| `Test: <name>` | Pointer test — body contains `tag:` or `file:` pointing to local YAML |
+| `Var: <name>` | Variable definitions injected into all cases in the run |
+| `Setup: <name>` | Runs before Feature/Test cases (auth, device setup) |
+| `Teardown: <name>` | Runs after all cases (cleanup, logout) |
+| `Shared: <name>` | Reusable step library referenced by other cases |
+
+### TestRail case templates
+
+Ready-to-use templates are in `examples/testrail/`. Paste the YAML into
+the Preconditions field of a `Feature:` case, then adjust variables for your target.
+
+| Template | File | Use for |
+|---|---|---|
+| API test | `examples/testrail/api_test.yaml` | REST API — auth, GET/PUT, assertion, schema validation |
+| Browser / Web UI | `examples/testrail/browser_test.yaml` | Login flows, form interaction, navigation, screenshot |
+| Firmware resiliency | `examples/testrail/firmware_resiliency_test.yaml` | SSH connect, S3 firmware fetch, flash, post-reboot verify |
+
+**Feature: case format (Preconditions field):**
+
+```yaml
+variables:
+  base_url: https://staging-api.example.com
+  device_id: 1001
+
+steps:
+  - api.post:
+      url: ${base_url}/auth/login
+      body: {username: ${API_USERNAME}, password: ${API_PASSWORD}}
+      store_as: auth_response
+
+  - test.assert:
+      value: ${last_status_code}
+      equals: 200
+
+  - test.extract:
+      from: ${auth_response}
+      path: access_token
+      store_as: token
+
+  - api.get:
+      url: ${base_url}/devices/${device_id}
+      headers: {Authorization: "Bearer ${token}"}
+      store_as: device
+
+  - test.assert:
+      value: ${device.status}
+      equals: online
+```
 
 ---
 

@@ -1,0 +1,104 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TestRail Case Template: API Test
+# ─────────────────────────────────────────────────────────────────────────────
+# HOW TO USE:
+#   1. In TestRail, create a case titled:  Feature: <Your Test Name>
+#   2. Paste this YAML into the Preconditions field (strip these comment lines).
+#   3. Adjust variables and steps for your endpoint.
+#
+# CASE PREFIX TAXONOMY:
+#   Feature:   Inline test — steps written directly in this TestRail field.
+#   Var:       Variable definitions injected into every test in the run.
+#   Setup:     Runs before Feature/Test cases (auth, device prep).
+#   Teardown:  Runs after all cases (cleanup, logout).
+#   Shared:    Reusable step library — referenced by other cases.
+# ─────────────────────────────────────────────────────────────────────────────
+
+variables:
+  base_url: https://staging-api.example.com
+  device_id: 1001
+  # Credentials — prefer ${ENV_VAR} references over hardcoded values.
+  username: ${API_USERNAME}
+  password: ${API_PASSWORD}
+
+steps:
+
+  # ── Authenticate ───────────────────────────────────────────────────────────
+  - api.post:
+      url: ${base_url}/auth/login
+      body:
+        username: ${username}
+        password: ${password}
+      store_as: auth_response
+
+  - test.assert:
+      value: ${last_status_code}
+      equals: 200
+
+  - test.extract:
+      from: ${auth_response}
+      path: access_token
+      store_as: token
+
+  # ── Happy path: GET resource ───────────────────────────────────────────────
+  - api.get:
+      url: ${base_url}/devices/${device_id}
+      headers:
+        Authorization: Bearer ${token}
+      store_as: device_response
+
+  - test.assert:
+      value: ${last_status_code}
+      equals: 200
+
+  - test.assert:
+      value: ${device_response.id}
+      equals: ${device_id}
+
+  - test.assert:
+      value: ${device_response.status}
+      equals: online
+
+  # ── Validate JSON schema ────────────────────────────────────────────────────
+  - test.assert_schema:
+      value: ${device_response}
+      schema:
+        type: object
+        required: [id, status, name]
+        properties:
+          id:     {type: integer}
+          status: {type: string}
+          name:   {type: string}
+
+  # ── Update resource (POST/PUT) ─────────────────────────────────────────────
+  - api.put:
+      url: ${base_url}/devices/${device_id}
+      headers:
+        Authorization: Bearer ${token}
+      body:
+        label: updated-by-automation
+      store_as: update_response
+
+  - test.assert:
+      value: ${last_status_code}
+      in: [200, 204]
+
+  # ── Extract and reuse data between steps ───────────────────────────────────
+  - test.extract:
+      from: ${update_response}
+      path: label
+      store_as: new_label
+
+  - test.assert:
+      value: ${new_label}
+      equals: updated-by-automation
+
+  # ── Negative test: expect 404 for unknown device ───────────────────────────
+  - api.get:
+      url: ${base_url}/devices/999999
+      headers:
+        Authorization: Bearer ${token}
+      expected_status: 404
+
+  - test.log:
+      message: "API test complete — device_id=${device_id} label=${new_label}"

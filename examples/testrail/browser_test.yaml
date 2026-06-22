@@ -1,0 +1,124 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TestRail Case Template: Browser / Web UI Test
+# ─────────────────────────────────────────────────────────────────────────────
+# HOW TO USE:
+#   1. In TestRail, create a case titled:  Feature: <Your Test Name>
+#   2. Paste this YAML into the Preconditions field (strip these comment lines).
+#   3. Replace variables and selectors for your application.
+#
+# SELECTOR FORMATS (CSS by default):
+#   "#login-btn"          ID selector
+#   ".submit-btn"         Class selector
+#   "input[name=email]"   Attribute selector
+#   "text=Submit"         Playwright text selector
+#   "xpath=//button"      XPath selector
+# ─────────────────────────────────────────────────────────────────────────────
+
+variables:
+  base_url: https://staging.example.com
+  username: ${STAGING_USER}
+  password: ${STAGING_PASS}
+  product_name: Test Product
+
+steps:
+
+  # ── Open browser and navigate ──────────────────────────────────────────────
+  - browser.open:
+      url: ${base_url}/login
+      # browser: chromium   # Optional: chromium (default), firefox, webkit
+      # headless: false     # Set false to watch the browser during debugging
+
+  - browser.screenshot:
+      name: initial-page-load
+
+  # ── Login flow ────────────────────────────────────────────────────────────
+  - browser.fill:
+      selector: "input[name=email]"
+      value: ${username}
+
+  - browser.fill:
+      selector: "input[name=password]"
+      value: ${password}
+
+  - browser.click:
+      selector: "button[type=submit]"
+
+  # Wait for redirect / dashboard to appear
+  - browser.wait_for:
+      selector: ".dashboard"
+      timeout: 10
+
+  - browser.verify_text:
+      selector: ".user-greeting"
+      text: Welcome
+
+  - browser.screenshot:
+      name: after-login
+
+  # ── Navigate to a feature page ────────────────────────────────────────────
+  - browser.click:
+      selector: "nav a[href='/products']"
+
+  - browser.wait_for:
+      selector: ".product-list"
+
+  - browser.verify_element:
+      selector: ".product-list"
+      visible: true
+
+  # ── Search and interact ───────────────────────────────────────────────────
+  - browser.fill:
+      selector: "#search-input"
+      value: ${product_name}
+
+  - browser.press_key:
+      selector: "#search-input"
+      key: Enter
+
+  - browser.wait_for:
+      selector: ".search-results"
+
+  - browser.verify_text:
+      selector: ".result-count"
+      contains: result
+
+  # ── Select from dropdown ──────────────────────────────────────────────────
+  - browser.select:
+      selector: "#sort-by"
+      value: price-asc
+
+  # ── Multi-step form ───────────────────────────────────────────────────────
+  - browser.click:
+      selector: ".product-card:first-child .add-to-cart"
+
+  - browser.wait_for:
+      selector: ".cart-notification"
+
+  - browser.verify_text:
+      selector: ".cart-notification"
+      text: Added to cart
+
+  # ── Assert with soft assertions (non-blocking, collected until check) ──────
+  - test.assert:
+      value: ${last_status_code}
+      in: [200, 0]       # 0 = browser navigation (no HTTP response captured)
+
+  - browser.screenshot:
+      name: cart-state
+
+  # ── Logout ────────────────────────────────────────────────────────────────
+  - browser.click:
+      selector: "#user-menu"
+
+  - browser.click:
+      selector: "text=Sign out"
+
+  - browser.wait_for:
+      selector: ".login-form"
+
+  - browser.verify_text:
+      selector: "h1"
+      text: Sign In
+
+  - test.log:
+      message: "Browser test complete — base_url=${base_url}"
