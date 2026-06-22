@@ -516,6 +516,21 @@ class GlobalConfigManager:
         """Get raw configuration data"""
         return self._raw_config
 
+    def get(self, key: str, default: Any = None) -> Any:
+        """Navigate a dot-notation path through the raw config dict.
+
+        Example: config_manager.get("config.testrail.run_prefix") returns
+        self._raw_config["config"]["testrail"]["run_prefix"].
+        """
+        node = self._raw_config
+        for part in key.split("."):
+            if not isinstance(node, dict):
+                return default
+            node = node.get(part)
+            if node is None:
+                return default
+        return node
+
     def load_device_config(self, device_file: Union[str, Path]):
         """Load device-specific configuration from file"""
         device_path = Path(device_file)
