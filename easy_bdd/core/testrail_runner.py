@@ -81,7 +81,6 @@ Variable injection (Var: case body):
   username: testuser
 """
 
-import html as _html_mod
 import json
 import os
 import re as _re_mod
@@ -91,180 +90,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .parser import (
+    fix_step_list_indent as _fix_step_list_indent,
+    parse_yaml_lenient as _yaml_safe_load_lenient,
+    strip_html_to_text as _html_to_text,
+)
 from .runner import TestResult, TestRunner
 from .variable_manager import GlobalConfigManager
 from ..services.testrail_service import RunVariables, TestRailService, TestRailError
 
 
-def _html_to_text(raw: str) -> str:
-    """Strip HTML tags and unescape entities from a TestRail rich-text field.
-
-    TestRail's web UI stores Preconditions/Steps as HTML.  Convert to plain
-    text so YAML parsers can read it cleanly.
-    """
-    text = raw or ""
-    # Block-level closing tags → newline
-    text = _re_mod.sub(r"<br\s*/?>",  "\n", text, flags=_re_mod.IGNORECASE)
-    text = _re_mod.sub(r"</p>",       "\n", text, flags=_re_mod.IGNORECASE)
-    text = _re_mod.sub(r"</div>",     "\n", text, flags=_re_mod.IGNORECASE)
-    text = _re_mod.sub(r"</li>",      "\n", text, flags=_re_mod.IGNORECASE)
-    # Opening block-level tags → nothing (content follows on same line)
-    text = _re_mod.sub(r"<(p|div|li|ul|ol|pre|code)[^>]*>", "", text, flags=_re_mod.IGNORECASE)
-    # Strip any remaining tags
-    text = _re_mod.sub(r"<[^>]+>", "", text)
-    # Unescape HTML entities (&amp; &lt; &gt; &nbsp; etc.)
-    text = _html_mod.unescape(text)
-    # Normalize Unicode spaces (e.g. \xa0 from &nbsp;) to ASCII space so YAML
-    # can recognise ':' as a key-value separator even when typed via a rich-text
-    # editor that inserts a non-breaking space after the colon.
-    text = _re_mod.sub(r"[^\S\n\r]", " ", text)
-    # Trim each line, drop trailing blank lines
-    lines = [ln.rstrip() for ln in text.splitlines()]
-    return "\n".join(lines).strip()
-
-
-def _fix_yaml_indent(text: str) -> str:
-    """Remove spurious continuation-line indentation from flat YAML dicts.
-
-    When a user types key-value pairs in TestRail and accidentally indents
-    all keys after the first (4 spaces, etc.), YAML fails to parse because
-    the extra indentation implies nesting under the previous scalar value.
-
-    This function detects that pattern (first non-empty line has less indent
-    than all subsequent non-empty lines) and strips the extra indent so the
-    result is a valid flat mapping.
-
-    Only called as a fallback when yaml.safe_load already failed, so there
-    is no risk of mis-processing already-valid YAML.
-
-        action: aws.list_files          ← indent 0
-            bucket_name: jpdsauto-wattbox  ← indent 4 (spurious)
-        →
-        action: aws.list_files
-        bucket_name: jpdsauto-wattbox
-    """
-    lines = text.splitlines()
-    non_empty = [(i, ln) for i, ln in enumerate(lines) if ln.strip()]
-    if len(non_empty) < 2:
-        return text
-
-    indents = [len(ln) - len(ln.lstrip()) for _, ln in non_empty]
-    first_indent = indents[0]
-    rest_min = min(indents[1:])
-
-    if rest_min <= first_indent:
-        return text  # no spurious indentation — don't touch it
-
-    extra = rest_min - first_indent
-    result = list(lines)
-    for i, ln in non_empty[1:]:
-        curr_indent = len(ln) - len(ln.lstrip())
-        if curr_indent >= extra:
-            result[i] = ln[extra:]
-        # else: less-indented than expected — leave unchanged
-
-    return "\n".join(result)
-
-
-_BARE_QUOTED_LINE_RE = _re_mod.compile(r'^(\s*)(["\'])([^:]*)\2\s*$')
-# Matches lines where a block-scalar indicator has content on the same line (invalid YAML):
-#   code: | some content here
-_INLINE_BLOCK_SCALAR_RE = _re_mod.compile(r'^(\s*)(\S[^:]*)\s*:\s*\|\s+(.+)$')
-# Matches lines that look like YAML keys or list items (stop collecting block scalar content)
-_YAML_KEY_OR_LIST_RE = _re_mod.compile(r'^\s*(-\s+\S|#|\w[\w.\s]*:)')
-
-
-def _fix_inline_block_scalars(text: str) -> str:
-    """Convert 'key: | content' (invalid YAML) to a proper block scalar.
-
-    TestRail sometimes collapses newlines when saving multi-line field values.
-    Two failure modes are handled:
-
-    Mode A — content on the same line as |:
-        code: | line1 line2
-      →
-        code: |
-          line1 line2
-
-    Mode B — first content line inline, subsequent continuation lines unindented:
-        code: | line1
-        line2
-      →
-        code: |
-          line1
-          line2
-
-    Lines that look like YAML keys (word: ...) or list items (- ...) stop the
-    absorption so they are not accidentally swallowed into the block scalar.
-    """
-    lines = text.splitlines()
-    result = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        m = _INLINE_BLOCK_SCALAR_RE.match(line)
-        if m:
-            indent, key, first_content = m.group(1), m.group(2), m.group(3)
-            result.append(f"{indent}{key}: |")
-            result.append(f"{indent}  {first_content}")
-            i += 1
-            # Absorb following unindented lines that are block-scalar continuations
-            while i < len(lines):
-                nxt = lines[i]
-                stripped = nxt.strip()
-                if not stripped:
-                    break
-                if _YAML_KEY_OR_LIST_RE.match(nxt):
-                    break
-                result.append(f"{indent}  {stripped}")
-                i += 1
-        else:
-            result.append(line)
-            i += 1
-    return "\n".join(result)
-
-
-def _unquote_bare_string_lines(text: str) -> str:
-    """Strip surrounding quotes from lines that are just a quoted string with no colon.
-
-    TestRail editors sometimes wrap variable references in quotes, producing
-    lines like:  "${gv.message}"
-    YAML treats these as mapping keys and fails when no ':' follows.
-    Removing the outer quotes turns them into bare scalars that parse cleanly.
-    Only lines whose quoted content contains no ':' are touched, to avoid
-    accidentally unquoting  "key: value"  strings that are valid YAML values.
-    """
-    result = []
-    for line in text.splitlines():
-        m = _BARE_QUOTED_LINE_RE.match(line)
-        if m:
-            line = m.group(1) + m.group(3)
-        result.append(line)
-    return "\n".join(result)
-
-
-def _yaml_safe_load_lenient(text: str):
-    """Parse YAML, retrying with several fixup passes if the first attempt fails."""
-    import yaml as _yaml
-    try:
-        return _yaml.safe_load(text)
-    except _yaml.YAMLError:
-        pass
-
-    for fixer in (_fix_yaml_indent, _fix_inline_block_scalars, _unquote_bare_string_lines):
-        fixed = fixer(text)
-        if fixed != text:
-            try:
-                return _yaml.safe_load(fixed)
-            except _yaml.YAMLError:
-                text = fixed   # carry forward fixes before trying the next fixer
-
-    return _yaml.safe_load(text)   # final attempt — raises if still broken
-
-
-_STEP_LINE_RE = _re_mod.compile(r'^(\s*)- (\S[^:]*):(.*)$')
-_PARAM_LINE_RE = _re_mod.compile(r'^[A-Za-z_][\w. -]*\s*:')
-_STEP_ANNOTATION_KEYS = frozenset({'description', 'comment', 'note', 'label'})
 _GV_VAR_RE = _re_mod.compile(r"gv\.tests\['variables'\]\['([^']+)'\]")
 
 
@@ -331,178 +166,32 @@ def _normalize_shared_step_refs(steps: List[Any]) -> List[Any]:
     return result
 
 
-def _fix_step_list_indent(text: str) -> str:
-    """Re-indent step parameters that appear at the same level as their '-' marker.
-
-    Users often type step params flush-left in TestRail's plain-text editor:
-
-        - aws.list_files:
-        bucket_name: my-bucket     ← wrong: needs 4-space indent
-        folder_prefix: vps/
-
-    This function indents them under the step key so YAML parses correctly:
-
-        - aws.list_files:
-            bucket_name: my-bucket
-            folder_prefix: vps/
-
-    Also handles sub-list values under a bare key, e.g.:
-
-        - websocket.send:
-        subprotocols:
-        - firmware-protocol     ← indented as list value under subprotocols:
-
-    Bare annotation lines (description:, note:, label:) after a step are dropped.
-    """
-    lines = text.splitlines()
-    result = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        m = _STEP_LINE_RE.match(line)
-        if m:
-            dash_indent = len(m.group(1))
-            result.append(line)
-            i += 1
-            # Steps with an inline value (e.g. "- shared_step: Foo", "- power_fault_time: 70")
-            # cannot have sub-parameters.  Skip the inner collection loop entirely so that
-            # a following structural key like "steps:" is never consumed as a parameter.
-            if m.group(3).strip():
-                continue
-            param_prefix = ' ' * (dash_indent + 4)
-            # Track if last emitted param was a bare key (e.g. "subprotocols:") so
-            # that a following "- item" at flush-level is treated as its list value
-            # rather than as a new step at the same indent.
-            last_bare_key_indent: Optional[str] = None
-            # Stack for nested bare keys (e.g. body: → user:/password:)
-            # Each entry is (source_indent, target_prefix) for a bare key seen at
-            # source_indent that should make its children emit at target_prefix.
-            _bare_key_stack: list = []  # list of (src_indent, tgt_prefix)
-
-            while i < len(lines):
-                nl = lines[i]
-                if not nl.strip():
-                    result.append(nl)
-                    i += 1
-                    last_bare_key_indent = None
-                    _bare_key_stack.clear()
-                    break
-                nl_indent = len(nl) - len(nl.lstrip())
-                stripped = nl.lstrip()
-
-                # A "- item" at the step's indent level is either:
-                #   • a sub-list value under the preceding bare key  → indent it
-                #   • the start of the next step                     → stop
-                if stripped.startswith('- ') and nl_indent <= dash_indent:
-                    if last_bare_key_indent is not None:
-                        result.append(last_bare_key_indent + '  ' + stripped)
-                        i += 1
-                        continue  # more list items may follow
-                    break
-
-                # Any non-list flush-level line:
-                # When dash_indent==0 (step starts at col 0), flush-left params
-                # (indent 0) are ALSO at "same level" — re-indent them rather than
-                # treating them as a new step.
-                if nl_indent <= dash_indent:
-                    if dash_indent == 0 and _PARAM_LINE_RE.match(stripped):
-                        # Pop bare-key stack entries that are no longer parents
-                        # (i.e. same or shallower indent than current line)
-                        while _bare_key_stack and _bare_key_stack[-1][0] >= nl_indent:
-                            _bare_key_stack.pop()
-                        # fall through to the re-indent block below
-                        pass
-                    elif last_bare_key_indent is not None and stripped and not stripped.startswith('- '):
-                        # Value on next line after a bare key (TestRail sometimes
-                        # splits "folder_prefix: ${val}" into two lines). Merge inline.
-                        if result and result[-1].rstrip().endswith(':'):
-                            result[-1] = result[-1].rstrip() + ' ' + stripped
-                        _bare_key_stack.pop()
-                        last_bare_key_indent = None
-                        i += 1
-                        continue
-                    else:
-                        last_bare_key_indent = None
-                        _bare_key_stack.clear()
-
-                # Already correctly indented → keep as-is
-                if nl_indent > dash_indent:
-                    result.append(nl)
-                    i += 1
-                    continue
-                # At wrong indent level: check if it's a key: value line
-                if _PARAM_LINE_RE.match(stripped):
-                    key = stripped.split(':', 1)[0].strip()
-                    if key in _STEP_ANNOTATION_KEYS:
-                        i += 1  # drop bare annotation lines
-                        continue
-                    # Determine the correct output prefix:
-                    # if there's an active bare-key parent, nest under it
-                    if _bare_key_stack:
-                        current_prefix = _bare_key_stack[-1][1] + '  '
-                    else:
-                        current_prefix = param_prefix
-                    result.append(current_prefix + stripped)
-                    i += 1
-                    # Remember if this was a bare key so following list items / child
-                    # params can be nested under it
-                    val_part = stripped.split(':', 1)[1].strip() if ':' in stripped else ''
-                    if not val_part:
-                        last_bare_key_indent = current_prefix
-                        _bare_key_stack.append((nl_indent, current_prefix))
-                    else:
-                        last_bare_key_indent = None
-                else:
-                    result.append(nl)
-                    i += 1
-                    last_bare_key_indent = None
-        else:
-            result.append(line)
-            i += 1
-
-    text = '\n'.join(result)
-
-    # Post-pass: re-indent flush-left list items that follow a bare top-level key.
-    # e.g. "steps:\n- api.request:" → "steps:\n  - api.request:"
-    # YAML requires list items to be indented under their mapping key.
-    import re as _re_post
-    out_lines = text.split('\n')
-    fixed: List[str] = []
-    j = 0
-    while j < len(out_lines):
-        ln = out_lines[j]
-        # Bare key at col 0 with no inline value (e.g. "steps:", "variables:")
-        if _re_post.match(r'^[a-zA-Z_]\w*:\s*$', ln) and j + 1 < len(out_lines) and out_lines[j + 1].startswith('-'):
-            fixed.append(ln)
-            j += 1
-            # Indent the entire following block by 2 spaces until next root bare key
-            while j < len(out_lines):
-                sub = out_lines[j]
-                if sub and _re_post.match(r'^[a-zA-Z_]\w*:\s*$', sub):
-                    break  # next root-level bare key starts a new block
-                fixed.append('  ' + sub if sub else sub)
-                j += 1
-        else:
-            fixed.append(ln)
-            j += 1
-    return '\n'.join(fixed)
-
-
-# Ordered prefix → role mapping (order matters: longest prefix checked first)
-# "Shared:" replaces "Keyword:", "Feature:" replaces "Inline:" — old prefixes kept for back-compat.
+# Canonical case-type prefix → role mapping (longest-prefix-first for correct matching).
 _CASE_ROLES: Dict[str, str] = {
     "Teardown:": "teardown",
     "Shared:":   "keyword",
-    "Keyword:":  "keyword",   # legacy alias
     "Feature:":  "inline",
-    "Inline:":   "inline",    # legacy alias
     "Setup:":    "setup",
     "Test:":     "test",
     "Var:":      "var",
 }
 
+# Legacy prefixes removed in this version. Warn authors to migrate.
+_LEGACY_PREFIXES: Dict[str, str] = {
+    "Keyword:": "Shared:",
+    "Inline:":  "Feature:",
+}
+
 
 def _classify(title: str) -> str:
+    for legacy, replacement in _LEGACY_PREFIXES.items():
+        if title.startswith(legacy):
+            print(
+                f"[TestRail] WARNING: Case prefix '{legacy}' is deprecated — "
+                f"rename to '{replacement}' (case: {title!r})"
+            )
+            # Still classify so the run isn't broken during migration.
+            return _CASE_ROLES[replacement]
     for prefix, role in _CASE_ROLES.items():
         if title.startswith(prefix):
             return role
@@ -510,7 +199,7 @@ def _classify(title: str) -> str:
 
 
 def _strip_prefix(title: str) -> str:
-    for prefix in _CASE_ROLES:
+    for prefix in list(_LEGACY_PREFIXES) + list(_CASE_ROLES):
         if title.startswith(prefix):
             return title[len(prefix):].strip()
     return title.strip()
@@ -743,14 +432,19 @@ class TestRailRunner:
         self._tr = testrail or TestRailService()
         self._tests_dir = Path(tests_dir or "tests/cases")
         self._artifact_dir = Path(artifact_dir or "reports/testrail")
-        self._run_prefix = run_prefix or os.getenv(
-            "TESTRAIL_RUN_PREFIX", self.DEFAULT_PREFIX
+        self._run_prefix = (
+            run_prefix
+            or os.getenv("TESTRAIL_RUN_PREFIX")
+            or config_manager.get("config.testrail.run_prefix", self.DEFAULT_PREFIX)
         )
-        # Custom "Running" status ID — defaults to STATUS_RUNNING (6) if not overridden
+        # Resolve running_status_id from: explicit arg → env var → framework.yaml → class default.
         running_env = os.getenv("TESTRAIL_RUNNING_STATUS_ID")
+        running_yaml = config_manager.get("config.testrail.running_status_id")
         self._running_status_id: int = (
             running_status_id
-            or (int(running_env) if running_env else TestRailService.STATUS_RUNNING)
+            or (int(running_env) if running_env else None)
+            or (int(running_yaml) if running_yaml else None)
+            or TestRailService.STATUS_RUNNING
         )
         # Tracks the test_id currently executing so signal handlers can mark it failed
         self._inflight_test_id: Optional[int] = None

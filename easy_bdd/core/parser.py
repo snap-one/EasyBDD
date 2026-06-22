@@ -1,13 +1,223 @@
 """
-YAML and JSON test definition parser with UI recorder support
+YAML and JSON test definition parser with UI recorder support.
+
+Lenient YAML utilities (strip_html_to_text, parse_yaml_lenient, etc.) live here
+so that both the local runner and the TestRail runner share a single parse path.
 """
 
+import html as _html_mod
+import re as _re_mod
 import yaml
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass
 import re
+
+
+# ---------------------------------------------------------------------------
+# Lenient YAML helpers — used when parsing TestRail rich-text content
+# ---------------------------------------------------------------------------
+
+def strip_html_to_text(raw: str) -> str:
+    """Strip HTML tags and unescape entities from a TestRail rich-text field."""
+    text = raw or ""
+    text = _re_mod.sub(r"<br\s*/?>", "\n", text, flags=_re_mod.IGNORECASE)
+    text = _re_mod.sub(r"</p>",      "\n", text, flags=_re_mod.IGNORECASE)
+    text = _re_mod.sub(r"</div>",    "\n", text, flags=_re_mod.IGNORECASE)
+    text = _re_mod.sub(r"</li>",     "\n", text, flags=_re_mod.IGNORECASE)
+    text = _re_mod.sub(r"<(p|div|li|ul|ol|pre|code)[^>]*>", "", text, flags=_re_mod.IGNORECASE)
+    text = _re_mod.sub(r"<[^>]+>", "", text)
+    text = _html_mod.unescape(text)
+    # Normalize Unicode spaces (\xa0 etc.) to ASCII so YAML separators are recognised.
+    text = _re_mod.sub(r"[^\S\n\r]", " ", text)
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    return "\n".join(lines).strip()
+
+
+def _fix_yaml_indent(text: str) -> str:
+    """Remove spurious continuation-line indentation from flat YAML dicts."""
+    lines = text.splitlines()
+    non_empty = [(i, ln) for i, ln in enumerate(lines) if ln.strip()]
+    if len(non_empty) < 2:
+        return text
+    indents = [len(ln) - len(ln.lstrip()) for _, ln in non_empty]
+    first_indent = indents[0]
+    rest_min = min(indents[1:])
+    if rest_min <= first_indent:
+        return text
+    extra = rest_min - first_indent
+    result = list(lines)
+    for i, ln in non_empty[1:]:
+        curr_indent = len(ln) - len(ln.lstrip())
+        if curr_indent >= extra:
+            result[i] = ln[extra:]
+    return "\n".join(result)
+
+
+_BARE_QUOTED_LINE_RE     = _re_mod.compile(r'^(\s*)(["\'])([^:]*)\2\s*$')
+_INLINE_BLOCK_SCALAR_RE  = _re_mod.compile(r'^(\s*)(\S[^:]*)\s*:\s*\|\s+(.+)$')
+_YAML_KEY_OR_LIST_RE     = _re_mod.compile(r'^\s*(-\s+\S|#|\w[\w.\s]*:)')
+_STEP_LINE_RE            = _re_mod.compile(r'^(\s*)- (\S[^:]*):(.*)$')
+_PARAM_LINE_RE           = _re_mod.compile(r'^[A-Za-z_][\w. -]*\s*:')
+_STEP_ANNOTATION_KEYS    = frozenset({'description', 'comment', 'note', 'label'})
+
+
+def _fix_inline_block_scalars(text: str) -> str:
+    """Convert 'key: | content' (invalid YAML) to a proper block scalar."""
+    lines = text.splitlines()
+    result = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = _INLINE_BLOCK_SCALAR_RE.match(line)
+        if m:
+            indent, key, first_content = m.group(1), m.group(2), m.group(3)
+            result.append(f"{indent}{key}: |")
+            result.append(f"{indent}  {first_content}")
+            i += 1
+            while i < len(lines):
+                nxt = lines[i]
+                stripped = nxt.strip()
+                if not stripped:
+                    break
+                if _YAML_KEY_OR_LIST_RE.match(nxt):
+                    break
+                result.append(f"{indent}  {stripped}")
+                i += 1
+        else:
+            result.append(line)
+            i += 1
+    return "\n".join(result)
+
+
+def _unquote_bare_string_lines(text: str) -> str:
+    """Strip surrounding quotes from lines that are just a quoted string with no colon."""
+    result = []
+    for line in text.splitlines():
+        m = _BARE_QUOTED_LINE_RE.match(line)
+        if m:
+            line = m.group(1) + m.group(3)
+        result.append(line)
+    return "\n".join(result)
+
+
+def fix_step_list_indent(text: str) -> str:
+    """Re-indent step parameters that appear at the same level as their '-' marker."""
+    lines = text.splitlines()
+    result = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = _STEP_LINE_RE.match(line)
+        if m:
+            dash_indent = len(m.group(1))
+            result.append(line)
+            i += 1
+            if m.group(3).strip():
+                continue
+            param_prefix = ' ' * (dash_indent + 4)
+            last_bare_key_indent: Optional[str] = None
+            _bare_key_stack: list = []
+            while i < len(lines):
+                nl = lines[i]
+                if not nl.strip():
+                    result.append(nl)
+                    i += 1
+                    last_bare_key_indent = None
+                    _bare_key_stack.clear()
+                    break
+                nl_indent = len(nl) - len(nl.lstrip())
+                stripped = nl.lstrip()
+                if stripped.startswith('- ') and nl_indent <= dash_indent:
+                    if last_bare_key_indent is not None:
+                        result.append(last_bare_key_indent + '  ' + stripped)
+                        i += 1
+                        continue
+                    break
+                if nl_indent <= dash_indent:
+                    if dash_indent == 0 and _PARAM_LINE_RE.match(stripped):
+                        while _bare_key_stack and _bare_key_stack[-1][0] >= nl_indent:
+                            _bare_key_stack.pop()
+                    elif last_bare_key_indent is not None and stripped and not stripped.startswith('- '):
+                        if result and result[-1].rstrip().endswith(':'):
+                            result[-1] = result[-1].rstrip() + ' ' + stripped
+                        _bare_key_stack.pop()
+                        last_bare_key_indent = None
+                        i += 1
+                        continue
+                    else:
+                        last_bare_key_indent = None
+                        _bare_key_stack.clear()
+                if nl_indent > dash_indent:
+                    result.append(nl)
+                    i += 1
+                    continue
+                if _PARAM_LINE_RE.match(stripped):
+                    key = stripped.split(':', 1)[0].strip()
+                    if key in _STEP_ANNOTATION_KEYS:
+                        i += 1
+                        continue
+                    if _bare_key_stack:
+                        current_prefix = _bare_key_stack[-1][1] + '  '
+                    else:
+                        current_prefix = param_prefix
+                    result.append(current_prefix + stripped)
+                    i += 1
+                    val_part = stripped.split(':', 1)[1].strip() if ':' in stripped else ''
+                    if not val_part:
+                        last_bare_key_indent = current_prefix
+                        _bare_key_stack.append((nl_indent, current_prefix))
+                    else:
+                        last_bare_key_indent = None
+                else:
+                    result.append(nl)
+                    i += 1
+                    last_bare_key_indent = None
+        else:
+            result.append(line)
+            i += 1
+
+    text = '\n'.join(result)
+    out_lines = text.split('\n')
+    fixed: List[str] = []
+    j = 0
+    while j < len(out_lines):
+        ln = out_lines[j]
+        if re.match(r'^[a-zA-Z_]\w*:\s*$', ln) and j + 1 < len(out_lines) and out_lines[j + 1].startswith('-'):
+            fixed.append(ln)
+            j += 1
+            while j < len(out_lines):
+                sub = out_lines[j]
+                if sub and re.match(r'^[a-zA-Z_]\w*:\s*$', sub):
+                    break
+                fixed.append('  ' + sub if sub else sub)
+                j += 1
+        else:
+            fixed.append(ln)
+            j += 1
+    return '\n'.join(fixed)
+
+
+def parse_yaml_lenient(text: str) -> Any:
+    """Parse YAML text, retrying with repair passes if the first attempt fails.
+
+    Use this for content from TestRail or any source where indentation or
+    quoting may be imperfect. The local runner should use yaml.safe_load
+    directly (strict mode).
+    """
+    try:
+        return yaml.safe_load(text)
+    except yaml.YAMLError:
+        pass
+    for fixer in (_fix_yaml_indent, _fix_inline_block_scalars, _unquote_bare_string_lines):
+        fixed = fixer(text)
+        if fixed != text:
+            try:
+                return yaml.safe_load(fixed)
+            except yaml.YAMLError:
+                text = fixed
+    return yaml.safe_load(text)  # final attempt — raises if still broken
 
 
 @dataclass

@@ -271,6 +271,15 @@ def _resolve_schema(action: str) -> Optional[Dict]:
     return schema
 
 
+def _is_deprecated_alias(action: str) -> Optional[str]:
+    """Return the canonical dot-notation name if action is a deprecated space-separated alias, else None."""
+    key = action.lower().strip()
+    schema = ACTION_SCHEMA.get(key)
+    if schema and "alias_of" in schema and "." not in key:
+        return schema["alias_of"]
+    return None
+
+
 def _collect_var_refs(value: Any) -> Set[str]:
     """Recursively collect all ${var} references from any nested value."""
     refs: Set[str] = set()
@@ -1087,6 +1096,16 @@ class EasyBDDValidator:
             else:
                 # Scalar shorthand — e.g. test.print: "hello"
                 params = {"value": raw_params}
+
+        # Deprecation check: warn before schema validation so the warning is always emitted.
+        canonical = _is_deprecated_alias(action)
+        if canonical:
+            issues.append(Issue(
+                "WARNING", path,
+                f"'{action}' is a deprecated action name — use '{canonical}' instead",
+                "Space-separated action names are deprecated. Dot-notation is the standard.",
+                f"Replace '{action}:' with '{canonical}:'.",
+            ))
 
         self._check_action_schema(action, params, path, avail, issues)
 

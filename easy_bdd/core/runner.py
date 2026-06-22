@@ -40,6 +40,42 @@ class _ContinueSignal(Exception):
     """Raised by a 'continue' step to skip to the next loop iteration."""
 
 
+# Maps legacy space-separated action names to their canonical dot-notation equivalents.
+# Used to emit deprecation warnings at runtime. Remove once space-separated aliases
+# are fully purged from existing TestRail suites.
+_DEPRECATED_ACTION_MAP: dict = {
+    "open browser":         "browser.open",
+    "click element":        "browser.click",
+    "fill field":           "browser.fill",
+    "fill form field":      "browser.fill",
+    "take screenshot":      "browser.screenshot",
+    "wait for element":     "browser.wait_for",
+    "verify text":          "browser.verify_text",
+    "verify element":       "browser.verify_element",
+    "select option":        "browser.select",
+    "hover element":        "browser.hover",
+    "press key":            "browser.press_key",
+    "refresh browser":      "browser.refresh",
+    "navigate back":        "browser.back",
+    "navigate forward":     "browser.forward",
+    "double click element": "browser.double_click",
+    "upload file":          "browser.upload",
+    "assert":               "test.assert",
+    "assert json schema":   "test.assert_schema",
+    "assert response":      "test.assert_response",
+    "extract":              "test.extract",
+    "log":                  "test.log",
+    "print":                "test.print",
+    "sleep":                "test.sleep",
+    "wait":                 "test.sleep",
+    "run test":             "test.run",
+    "execute test":         "test.run",
+    "check soft assertions": "test.check_assertions",
+    "aws list firmware files": "aws.list_files",
+    "aws get latest firmware": "aws.get_latest",
+}
+
+
 @dataclass
 class TestResult:
     """Test execution result"""
@@ -1241,35 +1277,7 @@ class TestRunner:
             }
             return service_map.get(service_prefix, "browser")
 
-        # Legacy format support (backward compatibility)
-        if any(
-            keyword in action_lower
-            for keyword in ["browser", "click", "fill", "open", "screenshot"]
-        ):
-            return "browser"
-        elif any(
-            keyword in action_lower for keyword in ["api", "request", "post", "get"]
-        ):
-            return "api"
-        elif any(keyword in action_lower for keyword in ["websocket", "ws"]):
-            return "websocket"
-        elif "ovrc" in action_lower:
-            return "ovrc"
-        elif any(
-            keyword in action_lower
-            for keyword in [
-                "command",
-                "ssh",
-                "bash",
-                "shell",
-                "powershell",
-                "batch",
-                "python",
-            ]
-        ):
-            return "command"
-        else:
-            return "browser"  # Default to browser
+        return "browser"  # Default for unrecognized or space-separated actions
 
     def _create_service(self, service_type: str):
         """Create a service instance"""
@@ -4378,8 +4386,17 @@ class TestRunner:
             step_params = self._resolve_step_params(step, variables)
 
             action = step_params.get("action", "").lower()
-            # Normalize action (convert dot notation to legacy format)
-            action = self._normalize_action(action)
+            # Warn when authors use deprecated space-separated action names.
+            if action and "." not in action and action not in (
+                "data", "data_loop",  # these have no dot-notation equivalent yet
+            ):
+                _canonical = _DEPRECATED_ACTION_MAP.get(action)
+                if _canonical:
+                    print(
+                        f"    [DEPRECATED] Action '{action}' is deprecated — "
+                        f"use '{_canonical}' instead. Space-separated action names "
+                        f"will be removed in a future release."
+                    )
 
             # Check for custom actions first
             if self._execute_custom_action(

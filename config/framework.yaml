@@ -116,6 +116,13 @@ config:
     screenshots: true
     html_report: true
   
+  # TestRail integration settings
+  testrail:
+    run_prefix: "EASY_BDD:"            # Run name prefix scanned for active runs
+    # running_status_id is instance-specific — check your TestRail's custom statuses.
+    # Set TESTRAIL_RUNNING_STATUS_ID in .env or override here.
+    running_status_id: 7               # ID of the "Running" custom status in your TestRail instance
+
   # Datalake logging configuration
   datalake:
     enabled: true  # Set to false to disable all datalake logging
