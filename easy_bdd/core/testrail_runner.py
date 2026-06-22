@@ -1221,14 +1221,20 @@ class TestRailRunner:
                 if isinstance(parsed, list):
                     steps = [s for s in parsed if isinstance(s, dict)]
                 elif isinstance(parsed, dict) and "steps" in parsed:
-                    steps = [s for s in (parsed.get("steps") or []) if isinstance(s, dict)]
-                    variables = {
-                        str(k).lstrip("$"): v
-                        for k, v in (parsed.get("variables") or {}).items()
-                    }
-                    # Support full YAML format: data: + steps: (mirrors local YAML files)
-                    if parsed.get("data") and isinstance(parsed["data"], list):
-                        data_sets = parsed["data"]
+                    _CONTROL_FLOW_KEYS = frozenset({'for_each', 'while', 'condition', 'if', 'try'})
+                    if any(k in parsed for k in _CONTROL_FLOW_KEYS):
+                        # Control-flow step (for_each/while/etc.) with an inline steps body —
+                        # treat the entire dict as a single loop step, not a case container.
+                        steps = [parsed]
+                    else:
+                        steps = [s for s in (parsed.get("steps") or []) if isinstance(s, dict)]
+                        variables = {
+                            str(k).lstrip("$"): v
+                            for k, v in (parsed.get("variables") or {}).items()
+                        }
+                        # Support full YAML format: data: + steps: (mirrors local YAML files)
+                        if parsed.get("data") and isinstance(parsed["data"], list):
+                            data_sets = parsed["data"]
                 elif isinstance(parsed, dict):
                     # Any dict in preconds → single step (covers both `action:` and short-key formats)
                     steps = [parsed]

@@ -61,6 +61,19 @@ _YAML_KEY_OR_LIST_RE     = _re_mod.compile(r'^\s*(-\s+\S|#|\w[\w.\s]*:)')
 _STEP_LINE_RE            = _re_mod.compile(r'^(\s*)- (\S[^:]*):(.*)$')
 _PARAM_LINE_RE           = _re_mod.compile(r'^[A-Za-z_][\w. -]*\s*:')
 _STEP_ANNOTATION_KEYS    = frozenset({'description', 'comment', 'note', 'label'})
+# Control-flow keys that can legally appear as a root mapping dict that owns
+# a subsequent bare sequence (the sequence becomes its 'steps:' value).
+_LOOP_CONTROL_KEYS       = frozenset({'for_each', 'while', 'condition', 'if', 'try'})
+_ROOT_MAPPING_KEY_RE     = _re_mod.compile(r'^([A-Za-z_][\w.\s-]*)\s*:')
+# Root-level keys that must always appear at 0 indent in case YAML (never nested).
+# MULTILINE so ^ / $ match at every line boundary in multi-line text.
+_ROOT_KEYS_RE            = _re_mod.compile(r'^( +)(steps|variables|data)\s*:\s*$', _re_mod.MULTILINE)
+# First line of a YAML block: a list item OR a mapping key (possibly indented).
+_YAML_BLOCK_START_RE     = _re_mod.compile(r'^\s*(-\s+\S|[A-Za-z_][\w.\s-]*\s*:)')
+# Bare list item — no colon after the leading '- ', so not an action mapping.
+_BARE_SEQ_ITEM_RE        = _re_mod.compile(r'^- [^:\n]+$', _re_mod.MULTILINE)
+# Root-level 'steps:' after de-indenting.
+_ROOT_STEPS_ONLY_RE      = _re_mod.compile(r'^steps:\s*$', _re_mod.MULTILINE)
 
 
 def _fix_inline_block_scalars(text: str) -> str:
@@ -100,6 +113,87 @@ def _unquote_bare_string_lines(text: str) -> str:
             line = m.group(1) + m.group(3)
         result.append(line)
     return "\n".join(result)
+
+
+def _fix_plaintext_preamble(text: str) -> str:
+    """Strip leading plain-text description lines that precede a YAML block.
+
+    TestRail Preconditions sometimes start with a human-readable description
+    (no YAML structure) followed by an indented YAML block, e.g.::
+
+        Network Fault Insertion
+        Device resiliency test
+          steps:
+            - ssh.connect: ...
+
+    The plain-text lines cause the YAML parser to choke on ``steps:`` at a
+    non-zero column.  Stripping those lines and de-indenting the remainder
+    recovers valid YAML.
+    """
+    lines = text.splitlines()
+    if not lines or _YAML_BLOCK_START_RE.match(lines[0]):
+        return text  # first line already looks like YAML — nothing to strip
+
+    yaml_start: Optional[int] = None
+    for i, line in enumerate(lines):
+        if line.strip() and _YAML_BLOCK_START_RE.match(line):
+            yaml_start = i
+            break
+
+    if yaml_start is None:
+        return text  # no YAML structure found at all
+
+    yaml_lines = lines[yaml_start:]
+    non_empty = [ln for ln in yaml_lines if ln.strip()]
+    if not non_empty:
+        return text
+
+    min_indent = min(len(ln) - len(ln.lstrip()) for ln in non_empty)
+    if min_indent > 0:
+        yaml_lines = [ln[min_indent:] if len(ln) > min_indent else ln.lstrip()
+                      for ln in yaml_lines]
+    return "\n".join(yaml_lines)
+
+
+def _dedent_root_keys(text: str) -> str:
+    """De-indent accidentally-indented root-level keys (steps, variables, data).
+
+    TestRail rich-text conversion sometimes produces content where ``steps:``
+    (or ``variables:`` / ``data:``) is indented by a few spaces, typically
+    causing the YAML error: *mapping values are not allowed here*.  These keys
+    are ONLY ever root-level in Easy-BDD case YAML, so normalising them to
+    column 0 is always safe.
+    """
+    if not _ROOT_KEYS_RE.search(text):
+        return text
+    result = []
+    for line in text.splitlines():
+        m = _ROOT_KEYS_RE.match(line)
+        result.append(line.lstrip() if m else line)
+    return "\n".join(result)
+
+
+def _extract_steps_block(text: str) -> str:
+    """Extract the 'steps:' block when bare sequence items precede it at root level.
+
+    After ``_dedent_root_keys`` runs, content like::
+
+        - bare_description_1
+        - bare_description_2
+        steps:
+          - ssh.command: ...
+
+    is still invalid YAML (sequence then mapping at root).  When bare list items
+    (no colon → not a valid action) appear before a root-level ``steps:`` key,
+    the bare items are description text; return just the ``steps:`` block.
+    """
+    if not (_BARE_SEQ_ITEM_RE.search(text) and _ROOT_STEPS_ONLY_RE.search(text)):
+        return text
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if _re_mod.match(r'^steps:\s*$', line):
+            return '\n'.join(lines[i:])
+    return text
 
 
 def fix_step_list_indent(text: str) -> str:
@@ -199,6 +293,95 @@ def fix_step_list_indent(text: str) -> str:
     return '\n'.join(fixed)
 
 
+def _fix_mapping_then_sequence(text: str) -> str:
+    """Fix content where a control-flow mapping dict has sequence items at column 0.
+
+    TestRail authors sometimes write a for_each (or while/if/try) block as
+    root-level mapping keys and then list the loop body as bare sequence items,
+    either with or without a ``steps:`` key, e.g.::
+
+        for_each: "[1, 10]"
+        loop_var: item
+        steps:
+        - test.sleep:
+        seconds: 120
+
+    This is also common when TestRail stores content as HTML ``<p>`` paragraphs
+    which HTML-to-text conversion turns into blank-line-separated lines —
+    the blank line after ``steps:`` breaks the YAML indentation fixers.
+
+    The fix strips blank lines (normalising HTML paragraph artifacts), then
+    wraps everything as a single list item with sequence items under ``steps:``
+    at 4-space indent.  The sibling parameter fixer (``fix_step_list_indent``)
+    will run afterward and lift flat params to their correct indent level::
+
+        - for_each: "[1, 10]"
+          loop_var: item
+          steps:
+            - test.sleep:
+                seconds: 120
+    """
+    lines = text.splitlines()
+    if not lines:
+        return text
+
+    # First non-blank, non-comment line must be a root-level control-flow key.
+    first_content = next(
+        (l for l in lines if l.strip() and not l.strip().startswith('#')), None
+    )
+    if first_content is None or first_content.startswith(' ') or first_content.startswith('-'):
+        return text
+    m = _ROOT_MAPPING_KEY_RE.match(first_content)
+    if not m or m.group(1).strip() not in _LOOP_CONTROL_KEYS:
+        return text
+
+    # Collapse blank lines — TestRail HTML-to-text conversion often inserts one
+    # blank line between every content line (<p>…</p> per line).  Stripping
+    # blank lines lets the subsequent fixers work on clean, contiguous content.
+    non_blank = [l for l in lines if l.strip()]
+    if not non_blank:
+        return text
+
+    # Locate the first root-level sequence item in the blank-stripped content.
+    seq_start = None
+    for i, line in enumerate(non_blank):
+        if line.startswith('- '):
+            seq_start = i
+            break
+
+    if seq_start is None:
+        return text
+
+    # Detect whether 'steps:' is already a key in the mapping portion.
+    has_steps_key = any(
+        _re_mod.match(r'^steps\s*:', line.strip())
+        for line in non_blank[:seq_start]
+    )
+
+    # Build the corrected structure:
+    #   - <first mapping key>
+    #     <other mapping keys, including steps: if present>
+    #     steps:           ← inserted only when not already present
+    #       <sequence items, each prefixed with 4 extra spaces>
+    result: List[str] = []
+    first = True
+    for i, line in enumerate(non_blank):
+        if i < seq_start:
+            if first:
+                result.append(f"- {line.strip()}")
+                first = False
+            else:
+                result.append(f"  {line.strip()}")
+        elif i == seq_start:
+            if not has_steps_key:
+                result.append("  steps:")
+            result.append(f"    {line}")
+        else:
+            result.append(f"    {line}" if line.strip() else "")
+
+    return "\n".join(result)
+
+
 def parse_yaml_lenient(text: str) -> Any:
     """Parse YAML text, retrying with repair passes if the first attempt fails.
 
@@ -210,7 +393,16 @@ def parse_yaml_lenient(text: str) -> Any:
         return yaml.safe_load(text)
     except yaml.YAMLError:
         pass
-    for fixer in (_fix_yaml_indent, _fix_inline_block_scalars, _unquote_bare_string_lines):
+    for fixer in (
+        _fix_yaml_indent,
+        _fix_inline_block_scalars,
+        _unquote_bare_string_lines,
+        _fix_plaintext_preamble,
+        _dedent_root_keys,
+        _extract_steps_block,
+        _fix_mapping_then_sequence,
+        fix_step_list_indent,
+    ):
         fixed = fixer(text)
         if fixed != text:
             try:
