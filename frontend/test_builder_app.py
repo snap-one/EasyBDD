@@ -1,7 +1,19 @@
 """
-Modern Test Builder Web Application
-FastAPI backend for visual test creation and editing
+DEPRECATED — The local web builder is no longer the primary authoring surface.
+
+Test cases are now authored directly in TestRail using the Easy BDD case prefix
+taxonomy (Feature:, Test:, Var:, Setup:, Teardown:, Shared:) and dot-notation
+step syntax. Run tests via `python -m easy_bdd testrail-run --project-id <id>`.
+
+This file is kept for reference only and is not actively maintained.
 """
+
+import warnings as _warnings
+_warnings.warn(
+    "The Easy BDD web builder is deprecated. Author test cases in TestRail instead.",
+    DeprecationWarning,
+    stacklevel=1,
+)
 
 import asyncio
 import json

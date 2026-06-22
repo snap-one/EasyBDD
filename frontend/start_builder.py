@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
 """
-Start the Test Builder Web Application
+DEPRECATED — Start the Test Builder Web Application
+
+The web builder is no longer the primary authoring surface.
+Author test cases in TestRail instead and run them via:
+    python -m easy_bdd testrail-run --project-id <id>
 """
 
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+print(
+    "\n[DEPRECATED] The Easy BDD web builder is deprecated.\n"
+    "  Author test cases in TestRail and run via:\n"
+    "    python -m easy_bdd testrail-run --project-id <id>\n",
+    file=sys.stderr,
+)
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))

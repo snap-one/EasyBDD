@@ -1,6 +1,6 @@
 # Easy BDD Testing Framework
 
-A YAML-based test automation framework supporting browser automation, REST APIs, WebSockets, serial/telnet connections, AWS S3, and more. Tests are written in plain YAML and run from the command line or a web-based test builder — no programming required.
+A TestRail-first test automation framework supporting browser automation, REST APIs, WebSockets, serial/telnet connections, AWS S3, and more. Test cases are authored directly in TestRail and executed via the command line — no programming required.
 
 ---
 
@@ -16,7 +16,7 @@ A YAML-based test automation framework supporting browser automation, REST APIs,
 - [Connections](#connections)
 - [TestRail Integration](#testrail-integration)
 - [Migration Tools](#migration-tools)
-- [Test Builder UI](#test-builder-ui)
+- [Test Builder UI (deprecated)](#test-builder-ui-deprecated)
 - [Configuration](#configuration)
 - [Project Structure](#project-structure)
 - [CLI Reference](#cli-reference)
@@ -38,12 +38,6 @@ pip install -e .
 playwright install chromium
 ```
 
-Install Test Builder dependencies (required for the web UI):
-
-```bash
-pip install -r frontend/requirements_builder.txt
-```
-
 Configure credentials via `.env` in the project root:
 
 ```
@@ -58,13 +52,6 @@ AWS_DEFAULT_REGION=us-east-1
 ---
 
 ## Quick Start
-
-**Start the web UI:**
-
-```bash
-python frontend/start_builder.py
-# Open http://localhost:8000
-```
 
 **Run a test from the command line:**
 
@@ -572,41 +559,17 @@ See `_tr_migrate.py` in the project root for a script that fetches an entire Tes
 
 ---
 
-## Test Builder UI
+## Test Builder UI (deprecated)
 
-Start the server:
-
-```bash
-python frontend/start_builder.py
-```
-
-Open `http://localhost:8000`.
-
-### Views
-
-| View | Description |
-|---|---|
-| Tests | Create, edit, run, and copy YAML test files |
-| Test Suites | Group tests into suites with ordered execution |
-| Results | View execution history, download reports, rerun tests |
-| Metrics | Test health, failure trends, coverage by workspace |
-| Shared Steps | Manage global and workspace-local shared steps |
-| Environments | Manage named variable sets (staging, production, etc.) |
-| Queue | Monitor and control the continuous execution queue |
-
-### Creating a test
-
-1. Click **New Test** in the sidebar.
-2. Enter a name, description, and optional tags.
-3. Click **Add Step**, choose an action from the library, and fill in the parameters.
-4. Click **Save**. The test is written to `tests/cases/{workspace}/`.
-5. Click **Run** to execute immediately.
-
-### Running tests from the UI
-
-- Individual tests: **Run** button on the test card.
-- Suites: **Run Suite** in the Test Suites view.
-- Queued execution: add tests to the Queue for continuous or scheduled runs.
+> **The local web builder is deprecated.** TestRail is now the primary authoring
+> surface for all test cases. Create and manage test cases directly in TestRail
+> using the case prefix taxonomy (`Feature:`, `Test:`, `Var:`, `Setup:`, `Teardown:`,
+> `Shared:`) and dot-notation step syntax. See [TestRail Integration](#testrail-integration).
+>
+> The files in `frontend/test_builder_app.py` and `frontend/action_definitions.py`
+> are kept for reference but are not maintained. The MCP server
+> (`frontend/mcp_server.py`) and migration tools (`frontend/bdd_migrator.py`,
+> `frontend/robot_migrator.py`) remain active.
 
 ---
 
