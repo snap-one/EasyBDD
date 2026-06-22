@@ -96,6 +96,7 @@ from .parser import (
     strip_html_to_text as _html_to_text,
 )
 from .runner import TestResult, TestRunner
+from .testrail_reporter import TestRailReporter
 from .variable_manager import GlobalConfigManager
 from ..services.testrail_service import RunVariables, TestRailService, TestRailError
 
@@ -448,6 +449,7 @@ class TestRailRunner:
         )
         # Tracks the test_id currently executing so signal handlers can mark it failed
         self._inflight_test_id: Optional[int] = None
+        self._reporter = TestRailReporter()
 
     def list_runs(self, project_id: int) -> List[Dict]:
         """Return all runs in a project that match the configured prefix."""
@@ -602,10 +604,32 @@ class TestRailRunner:
 
         # Single datalake post for the entire run (skipped if --no-datalake)
         if not no_datalake:
-            self._post_run_to_datalake(
+            # Pre-extract product metadata from the first Feature/Test case
+            _product = "Unknown"
+            _product_category = "Test"
+            _mac_address = "00:00:00:00:00:00"
+            _time_savings = 5.0
+            for _case in classified:
+                if _case.get("role") in ("inline", "test"):
+                    _body = _get_case_body(_case)
+                    try:
+                        _parsed = _yaml_safe_load_lenient(_body) if _body else None
+                        if isinstance(_parsed, dict):
+                            _v = _parsed.get("variables") or {}
+                            _product = _v.get("product", _product)
+                            _product_category = _v.get("product_category", _product_category)
+                            _mac_address = _v.get("mac_address") or _v.get("mac") or _mac_address
+                            _time_savings = float(_v.get("time_savings", _time_savings))
+                    except Exception:
+                        pass
+                    break
+            self._reporter.post_datalake(
                 run_title=run["name"],
                 run_id=run_id,
-                classified=classified,
+                product=_product,
+                product_category=_product_category,
+                mac_address=_mac_address,
+                time_savings=_time_savings,
                 success=total_failed == 0,
                 start_time=run_start_time,
                 verbose=verbose,
@@ -618,7 +642,7 @@ class TestRailRunner:
         if isinstance(_no_teams, str):
             _no_teams = _no_teams.strip().lower() in ("true", "1", "yes")
         if _tests_ran and not _no_teams:
-            self._post_run_to_teams(
+            self._reporter.post_teams(
                 run_title=run["name"],
                 run_id=run_id,
                 total_passed=total_passed,
@@ -639,163 +663,6 @@ class TestRailRunner:
             "skipped": total_skipped,
             "success": total_failed == 0,
         }
-
-    def _post_run_to_datalake(
-        self,
-        run_title: str,
-        run_id: int,
-        classified: List[Dict],
-        success: bool,
-        start_time: datetime,
-        verbose: bool,
-    ) -> None:
-        """Post one datalake entry for the entire TestRail run."""
-        try:
-            from .datalake_logger import DatalakeLogger
-            dl = DatalakeLogger(artifact_path="reports", post_results=True)
-
-            # Pull representative metadata from the first Feature/test case
-            product = "Unknown"
-            product_category = "Test"
-            mac_address = "00:00:00:00:00:00"
-            time_savings = 5.0
-            for case in classified:
-                if case.get("role") in ("inline", "test"):
-                    body = _get_case_body(case)
-                    try:
-                        import yaml as _yaml
-                        parsed = _yaml_safe_load_lenient(body) if body else None
-                        if isinstance(parsed, dict):
-                            v = parsed.get("variables") or {}
-                            product = v.get("product", product)
-                            product_category = v.get("product_category", product_category)
-                            mac_address = v.get("mac_address") or v.get("mac") or mac_address
-                            time_savings = float(v.get("time_savings", time_savings))
-                    except Exception:
-                        pass
-                    break
-
-            run_url = f"{os.getenv('TESTRAIL_URL', '').rstrip('/')}/index.php?/runs/view/{run_id}"
-
-            dl.datalake_post(
-                test_name=run_title,
-                product=product,
-                product_category=product_category,
-                mac_address=mac_address,
-                time_savings=time_savings,
-                start_time=start_time,
-                console="",
-                run_url=run_url,
-                success=success,
-                type="testrail",
-                run_title=run_title,
-            )
-            if verbose:
-                print(f"\n[TestRail] Datalake posted for run: {run_title!r}")
-        except Exception as exc:
-            if verbose:
-                print(f"\n[TestRail] Datalake post failed: {exc}")
-
-    def _post_run_to_teams(
-        self,
-        run_title: str,
-        run_id: int,
-        total_passed: int,
-        total_failed: int,
-        total_skipped: int,
-        success: bool,
-        start_time: datetime,
-        verbose: bool,
-    ) -> None:
-        """Send a Teams Adaptive Card with TestRail run results + Jenkins build link."""
-        webhook_url = os.getenv("TEAMS_WEBHOOK_URL", "")
-        if not webhook_url:
-            return  # No webhook configured — silently skip
-
-        try:
-            import requests as _requests
-        except ImportError:
-            return
-
-        testrail_base = os.getenv("TESTRAIL_URL", "").rstrip("/")
-        testrail_url = f"{testrail_base}/index.php?/runs/view/{run_id}"
-        jenkins_url = os.getenv("BUILD_URL", "")  # Jenkins sets this automatically
-
-        status_emoji = "✅" if success else "❌"
-        status_text = "PASSED" if success else "FAILED"
-        color = "Good" if success else "Attention"
-
-        duration_secs = int((datetime.now() - start_time).total_seconds())
-        duration_str = f"{duration_secs // 60}m {duration_secs % 60}s"
-
-        facts = [
-            {"title": "Status", "value": f"{status_emoji} {status_text}"},
-            {"title": "Passed", "value": str(total_passed)},
-            {"title": "Failed", "value": str(total_failed)},
-            {"title": "Skipped", "value": str(total_skipped)},
-            {"title": "Duration", "value": duration_str},
-        ]
-
-        body = [
-            {
-                "type": "TextBlock",
-                "text": f"{status_emoji} **{run_title}**",
-                "size": "Medium",
-                "weight": "Bolder",
-                "wrap": True,
-            },
-            {
-                "type": "FactSet",
-                "facts": facts,
-            },
-        ]
-
-        actions = [
-            {
-                "type": "Action.OpenUrl",
-                "title": "View TestRail Run",
-                "url": testrail_url,
-            },
-        ]
-        if jenkins_url:
-            actions.append({
-                "type": "Action.OpenUrl",
-                "title": "View Jenkins Log",
-                "url": jenkins_url,
-            })
-
-        payload = {
-            "type": "message",
-            "attachments": [
-                {
-                    "contentType": "application/vnd.microsoft.card.adaptive",
-                    "content": {
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                        "type": "AdaptiveCard",
-                        "version": "1.4",
-                        "msteams": {"width": "Full"},
-                        "body": body,
-                        "actions": actions,
-                    },
-                }
-            ],
-        }
-
-        try:
-            resp = _requests.post(
-                webhook_url,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=10,
-            )
-            if verbose:
-                if resp.status_code in (200, 202):
-                    print(f"\n[TestRail] Teams notification sent for run: {run_title!r}")
-                else:
-                    print(f"\n[TestRail] Teams notification failed ({resp.status_code}): {resp.text[:200]}")
-        except Exception as exc:
-            if verbose:
-                print(f"\n[TestRail] Teams notification error: {exc}")
 
     # ------------------------------------------------------------------ #
     # Phase helpers                                                        #
