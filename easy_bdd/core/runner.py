@@ -76,6 +76,90 @@ _DEPRECATED_ACTION_MAP: dict = {
 }
 
 
+# ── ActionRegistry ────────────────────────────────────────────────────────────
+# To add a new service: register its exact names / prefixes here, then write
+# a _dispatch_<name>(self, action, step_params, variables, sam) method.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_EXACT_ACTIONS: dict = {
+    # Soft assertions
+    "test.check_assertions":  "_dispatch_check_assertions",
+    "check soft assertions":  "_dispatch_check_assertions",
+    # Sleep / wait
+    "test.sleep":             "_dispatch_sleep",
+    "test.wait":              "_dispatch_sleep",
+    "sleep":                  "_dispatch_sleep",
+    "wait":                   "_dispatch_sleep",
+    # Log / print
+    "test.log":               "_dispatch_log",
+    "test.print":             "_dispatch_log",
+    "log":                    "_dispatch_log",
+    "print":                  "_dispatch_log",
+    # Assertions
+    "test.assert":            "_dispatch_assert",
+    "assert":                 "_dispatch_assert",
+    "test.assert_schema":     "_dispatch_assert_schema",
+    "assert json schema":     "_dispatch_assert_schema",
+    "test.assert_response":   "_dispatch_assert_response",
+    "assert response":        "_dispatch_assert_response",
+    # Extract
+    "test.extract":           "_dispatch_extract",
+    "extract":                "_dispatch_extract",
+    # Test runner
+    "test.run":               "_dispatch_test_run",
+    "run test":               "_dispatch_test_run",
+    "execute test":           "_dispatch_test_run",
+    # Inline data loop
+    "data":                   "_dispatch_data",
+    "test.data":              "_dispatch_data",
+    "data_loop":              "_dispatch_data",
+}
+
+# Prefix entries are checked in order; first match wins.
+# More-specific prefixes (e.g. "jsonrpc.") must precede their stem (e.g. "jsonrpc").
+_PREFIX_ACTIONS: list = [
+    ("jsonrpc.",    "_dispatch_ovrc"),
+    ("jsonrpc",     "_dispatch_ovrc"),
+    ("ovrc.",       "_dispatch_ovrc"),
+    ("ovrc",        "_dispatch_ovrc"),
+    ("aws.",        "_dispatch_aws"),
+    ("aws",         "_dispatch_aws"),
+    ("s3.",         "_dispatch_aws"),
+    ("pagerduty.",  "_dispatch_pagerduty"),
+    ("pagerduty",   "_dispatch_pagerduty"),
+    ("pd.",         "_dispatch_pagerduty"),
+    ("command.",    "_dispatch_command"),
+    ("command",     "_dispatch_command"),
+    ("wol.",        "_dispatch_wol"),
+    ("wol",         "_dispatch_wol"),
+    ("serial.",     "_dispatch_serial"),
+    ("serial",      "_dispatch_serial"),
+    ("telnet.",     "_dispatch_telnet"),
+    ("telnet",      "_dispatch_telnet"),
+    ("ssh.",        "_dispatch_ssh"),
+    ("lgip.",       "_dispatch_lgip"),
+    ("lgip",        "_dispatch_lgip"),
+    ("websocket.",  "_dispatch_websocket"),
+    ("websocket",   "_dispatch_websocket"),
+    ("ws.",         "_dispatch_websocket"),
+    ("eval.",       "_dispatch_eval"),
+    ("eval",        "_dispatch_eval"),
+]
+
+# Actions that must re-raise exceptions rather than falling through to the
+# browser handler (which would report a confusing "Unknown action" error).
+_RERAISE_PREFIXES: tuple = (
+    "jsonrpc", "ovrc", "command", "eval",
+    "websocket", "ws.", "telnet", "serial", "wol",
+)
+_RERAISE_EXACT: frozenset = frozenset({
+    "assert", "test.assert",
+    "assert json schema", "test.assert_schema",
+    "assert response", "test.assert_response",
+    "test.extract", "extract",
+})
+
+
 @dataclass
 class TestResult:
     """Test execution result"""
@@ -1317,6 +1401,101 @@ class TestRunner:
             # For now, return a mock service for other types
             return MockService(service_type)
 
+    # ── ActionRegistry dispatch methods ──────────────────────────────────────
+    # Uniform signature: (self, action, step_params, variables, sam) -> bool
+    # Each method is a thin wrapper that calls the appropriate _handle_* method
+    # with its specific argument set. Adding a new service = new _dispatch_*
+    # method + a line in _EXACT_ACTIONS / _PREFIX_ACTIONS above.
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _dispatch_check_assertions(self, action, step_params, variables, sam=None):
+        if sam and sam.has_failures():
+            sam.raise_if_failures()
+        else:
+            print("      ✓ No soft assertion failures")
+        return True
+
+    def _dispatch_sleep(self, action, step_params, variables, sam=None):
+        seconds = float(
+            self._get_param(step_params, "seconds")
+            or self._get_param(step_params, "duration")
+            or self._get_param(step_params, "timeout")
+            or 1
+        )
+        print(f"      ⏳ Sleeping {seconds}s...")
+        time.sleep(seconds)
+        return True
+
+    def _dispatch_log(self, action, step_params, variables, sam=None):
+        message = str(
+            self._get_param(step_params, "message")
+            or self._get_param(step_params, "text")
+            or self._get_param(step_params, "value")
+            or ""
+        )
+        if hasattr(self.config, "substitute_variables"):
+            message = self.config.substitute_variables(message, variables)
+        print(f"      📝 {message}")
+        return True
+
+    def _dispatch_assert(self, action, step_params, variables, sam=None):
+        return self._handle_assert_action(step_params, variables)
+
+    def _dispatch_assert_schema(self, action, step_params, variables, sam=None):
+        return self._handle_json_schema_action(step_params, variables)
+
+    def _dispatch_assert_response(self, action, step_params, variables, sam=None):
+        return self._handle_response_assertion(step_params, variables)
+
+    def _dispatch_extract(self, action, step_params, variables, sam=None):
+        return self._handle_extract_action(step_params, variables)
+
+    def _dispatch_ovrc(self, action, step_params, variables, sam=None):
+        return self._handle_ovrc_action(action, step_params, variables)
+
+    def _dispatch_aws(self, action, step_params, variables, sam=None):
+        return self._handle_aws_action(action, step_params, variables)
+
+    def _dispatch_pagerduty(self, action, step_params, variables, sam=None):
+        return self._handle_pagerduty_action(action, step_params, variables)
+
+    def _dispatch_test_run(self, action, step_params, variables, sam=None):
+        return self._handle_test_run_action(step_params, variables, sam)
+
+    def _dispatch_data(self, action, step_params, variables, sam=None):
+        return self._handle_data_action(step_params, variables, sam)
+
+    def _dispatch_command(self, action, step_params, variables, sam=None):
+        _COMMAND_TYPES = (
+            "ssh", "shell", "bash", "sh", "zsh", "fish",
+            "tcsh", "csh", "dash", "ksh", "powershell", "pwsh",
+            "cmd", "batch", "python",
+        )
+        if any(ct in action.lower() for ct in _COMMAND_TYPES):
+            return self._handle_command_action(action, step_params, variables)
+        return False
+
+    def _dispatch_wol(self, action, step_params, variables, sam=None):
+        return self._handle_wol_action(action, step_params, variables)
+
+    def _dispatch_serial(self, action, step_params, variables, sam=None):
+        return self._handle_serial_action(action, step_params, variables)
+
+    def _dispatch_telnet(self, action, step_params, variables, sam=None):
+        return self._handle_telnet_action(action, step_params, variables)
+
+    def _dispatch_ssh(self, action, step_params, variables, sam=None):
+        return self._handle_ssh_action(action, step_params, variables)
+
+    def _dispatch_lgip(self, action, step_params, variables, sam=None):
+        return self._handle_lgip_action(action, step_params, variables)
+
+    def _dispatch_websocket(self, action, step_params, variables, sam=None):
+        return self._handle_websocket_action(action, step_params, variables)
+
+    def _dispatch_eval(self, action, step_params, variables, sam=None):
+        return self._handle_eval_action(action, step_params, variables)
+
     def _execute_custom_action(
         self,
         action: str,
@@ -1324,181 +1503,40 @@ class TestRunner:
         variables: dict,
         soft_assert_manager: SoftAssertionManager = None,
     ) -> bool:
-        """Execute custom actions if available"""
+        """Dispatch a custom action via the ActionRegistry.
+
+        Lookup order:
+          1. Exact match in _EXACT_ACTIONS
+          2. Prefix match in _PREFIX_ACTIONS (first entry wins)
+          3. Plugin hook via config.get_custom_action()
+        """
         try:
             action_lower = action.lower()
 
-            # Check soft assertions action
-            if action_lower in ["check soft assertions", "test.check_assertions"]:
-                if soft_assert_manager and soft_assert_manager.has_failures():
-                    soft_assert_manager.raise_if_failures()
-                else:
-                    print("      ✓ No soft assertion failures")
-                return True
+            # 1. Exact match
+            method_name = _EXACT_ACTIONS.get(action_lower)
+            if method_name:
+                return getattr(self, method_name)(action, step_params, variables, soft_assert_manager)
 
-            # Sleep / wait action (no browser required)
-            if action_lower in ["test.sleep", "sleep", "test.wait", "wait"]:
-                seconds = float(
-                    self._get_param(step_params, "seconds")
-                    or self._get_param(step_params, "duration")
-                    or self._get_param(step_params, "timeout")
-                    or 1
-                )
-                print(f"      ⏳ Sleeping {seconds}s...")
-                time.sleep(seconds)
-                return True
+            # 2. Prefix match (ordered list — first match wins)
+            for prefix, method_name in _PREFIX_ACTIONS:
+                if action_lower.startswith(prefix):
+                    return getattr(self, method_name)(action, step_params, variables, soft_assert_manager)
 
-            # Log / print action (no service required — just prints a message)
-            # Supports:
-            #   - action: test.print / message: "..."   (explicit)
-            #   - test.print: "..."                     (shorthand scalar)
-            if action_lower in ["test.log", "log", "test.print", "print"]:
-                message = str(
-                    self._get_param(step_params, "message")
-                    or self._get_param(step_params, "text")
-                    or self._get_param(step_params, "value")
-                    or ""
-                )
-                if hasattr(self.config, "substitute_variables"):
-                    message = self.config.substitute_variables(message, variables)
-                print(f"      📝 {message}")
-                return True
-
-            # Custom assertion actions (support both formats)
-            if action_lower in ["assert", "test.assert"]:
-                return self._handle_assert_action(step_params, variables)
-            elif action_lower in ["assert json schema", "test.assert_schema"]:
-                return self._handle_json_schema_action(step_params, variables)
-            elif action_lower in ["assert response", "test.assert_response"]:
-                return self._handle_response_assertion(step_params, variables)
-            elif action_lower in ["test.extract", "extract"]:
-                return self._handle_extract_action(step_params, variables)
-
-            # JSON-RPC WebSocket actions (support both formats)
-            if (
-                action_lower.startswith("jsonrpc")
-                or action_lower.startswith("jsonrpc.")
-                or action_lower.startswith("ovrc")
-                or action_lower.startswith("ovrc.")
-            ):
-                return self._handle_ovrc_action(action, step_params, variables)
-
-            # AWS S3 actions (support both formats)
-            if (
-                action_lower.startswith("aws")
-                or action_lower.startswith("s3.")
-                or "s3" in action_lower
-            ):
-                return self._handle_aws_action(action, step_params, variables)
-
-            # PagerDuty actions (support both formats)
-            if (
-                action_lower.startswith("pagerduty")
-                or action_lower.startswith("pd.")
-                or action_lower.startswith("pagerduty.")
-            ):
-                return self._handle_pagerduty_action(action, step_params, variables)
-
-            # Test execution action (run another test as a step)
-            if action_lower in ["test.run", "run test", "execute test"]:
-                return self._handle_test_run_action(
-                    step_params, variables, soft_assert_manager
-                )
-
-            # Inline data loop — supports both:
-            #   - data:             (dot/new notation)
-            #       - Loop: 1
-            #       - Loop: 2
-            #         steps: [...]
-            #   - action: data      (legacy notation)
-            #     value:
-            #       - Loop: 1
-            if action_lower in ["data", "test.data", "data_loop"]:
-                return self._handle_data_action(
-                    step_params, variables, soft_assert_manager
-                )
-
-            # Command execution actions
-            # Handle both dot notation (command.ssh) and normalized format (command ssh)
-            # Check if action starts with "command" and contains a command type
-            command_types = ["ssh", "shell", "bash", "sh", "zsh", "fish", "tcsh", "csh", "dash", "ksh", "powershell", "pwsh", "cmd", "batch", "python"]
-            if action_lower.startswith("command") and any(
-                cmd_type in action_lower for cmd_type in command_types
-            ):
-                return self._handle_command_action(action, step_params, variables)
-
-            # Wake-on-LAN
-            if action_lower.startswith("wol"):
-                return self._handle_wol_action(action, step_params, variables)
-
-            # Serial port actions
-            if action_lower.startswith("serial"):
-                return self._handle_serial_action(action, step_params, variables)
-
-            # Telnet actions
-            if action_lower.startswith("telnet"):
-                return self._handle_telnet_action(action, step_params, variables)
-
-            # SSH actions (stateful Paramiko sessions — distinct from command.ssh)
-            if action_lower.startswith("ssh."):
-                return self._handle_ssh_action(action, step_params, variables)
-
-            # LGIP IR control actions
-            if action_lower.startswith("lgip"):
-                return self._handle_lgip_action(action, step_params, variables)
-
-            # WebSocket actions
-            if action_lower.startswith("websocket") or action_lower.startswith("ws."):
-                return self._handle_websocket_action(action, step_params, variables)
-
-            # Eval actions (session-stateful Python execution)
-            if action_lower.startswith("eval"):
-                return self._handle_eval_action(action, step_params, variables)
-
-            # Check if we have custom actions defined
+            # 3. Plugin hook
             if hasattr(self.config, "get_custom_action"):
                 custom_action = self.config.get_custom_action(action)
                 if custom_action:
                     print(f"      Executing custom action: {action}")
-                    # Execute custom action logic here
-                    # This would integrate with custom action modules
                     return True
 
-            # Check for device-specific actions
-            device_actions = ["power_cycle", "network_port", "stress_test"]
-            if any(device_action in action for device_action in device_actions):
-                print(
-                    f"      Custom action '{action}' detected but not " f"implemented"
-                )
-                # For now, just log and continue
-                return False
-
             return False
+
         except Exception as e:
-            # Don't catch JSON-RPC, OvrC, or Command failures - let them propagate
-            # to avoid "Unknown action" fallthrough
             action_lower_check = action.lower()
             if (
-                action_lower_check.startswith("jsonrpc")
-                or action_lower_check.startswith("ovrc")
-                or action_lower_check.startswith("command")
-            ):
-                raise
-            # Re-raise eval failures — they should not silently fall through to
-            # the browser handler which would report a confusing "Unknown action" error.
-            if action_lower_check.startswith("eval"):
-                raise
-            # Re-raise assert/websocket/telnet/serial failures so they propagate
-            # as proper step failures rather than "Unknown action" browser fallthrough.
-            if (
-                action_lower_check in ("assert", "test.assert", "assert json schema",
-                                       "test.assert_schema", "assert response",
-                                       "test.assert_response", "test.extract", "extract")
-                or action_lower_check.startswith("websocket")
-                or action_lower_check.startswith("ws.")
-                or action_lower_check.startswith("telnet")
-                or action_lower_check.startswith("serial")
-                or action_lower_check.startswith("wol")
+                any(action_lower_check.startswith(p) for p in _RERAISE_PREFIXES)
+                or action_lower_check in _RERAISE_EXACT
             ):
                 raise
             print(f"      Warning: Custom action '{action}' failed: {e}")
