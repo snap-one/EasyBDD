@@ -1397,6 +1397,19 @@ class TestRunner:
                     step_params, variables, soft_assert_manager
                 )
 
+            # Inline data loop — supports both:
+            #   - data:             (dot/new notation)
+            #       - Loop: 1
+            #       - Loop: 2
+            #         steps: [...]
+            #   - action: data      (legacy notation)
+            #     value:
+            #       - Loop: 1
+            if action_lower in ["data", "test.data", "data_loop"]:
+                return self._handle_data_action(
+                    step_params, variables, soft_assert_manager
+                )
+
             # Command execution actions
             # Handle both dot notation (command.ssh) and normalized format (command ssh)
             # Check if action starts with "command" and contains a command type
@@ -3167,6 +3180,76 @@ class TestRunner:
                 return True
             else:
                 raise
+
+    def _handle_data_action(
+        self,
+        step_params: dict,
+        variables: dict,
+        soft_assert_manager,
+    ) -> bool:
+        """Inline data-driven loop.
+
+        Accepts both old and new notation:
+
+          # new (dot-notation)
+          - data:
+              - Loop: 1
+              - Loop: 2
+                steps:
+                  - shared_step: dxGetAbout
+
+          # old (action: key)
+          - action: data
+            value:
+              - Loop: 1
+              - Loop: 2
+
+        Each list item's keys (except 'steps') are injected into variables.
+        If an item has a 'steps' key, those steps are executed for that row.
+        If no item has 'steps', the loop simply sets variables (useful for
+        driving later assertions).
+        """
+        params = self._get_params(step_params)
+
+        # Value can come from the nested params dict (new notation, where the
+        # list was the direct value of the action key) or from a 'value' param
+        # (old notation: action: data / value: [...]).
+        rows = params.get("value") or step_params.get("value") or []
+
+        # If the params dict itself IS a list (parser stored the list directly
+        # as the value in some edge cases) handle that too.
+        if not rows and isinstance(params, list):
+            rows = params
+
+        if not isinstance(rows, list):
+            raise ValueError(
+                f"'data' action expects a list of rows, got {type(rows).__name__}. "
+                "Check your YAML indentation."
+            )
+
+        for idx, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+
+            # Extract steps before injecting variables
+            row_steps_raw = row.get("steps", [])
+            row_vars = {k: v for k, v in row.items() if k != "steps"}
+
+            variables.update(row_vars)
+
+            if row_steps_raw:
+                parser = YAMLParser()
+                parsed_steps = parser._parse_steps(
+                    row_steps_raw if isinstance(row_steps_raw, list) else []
+                )
+                ok = self._run_loop_body(
+                    parsed_steps, variables, soft_assert_manager, 0
+                )
+                if not ok:
+                    print(f"    ❌ DATA row {idx + 1} failed")
+                    return False
+
+        return True
 
     def _handle_wol_action(
         self, action: str, step_params: dict, variables: dict
