@@ -1764,17 +1764,17 @@ def serve(transport: str = "stdio", host: str = "0.0.0.0", port: int = 8080) -> 
 
     Parameters
     ----------
-    transport : "stdio" (default, for Claude Desktop) or "sse" (HTTP).
-    host      : bind address for SSE transport.
-    port      : port for SSE transport.
+    transport : "stdio" (default), "sse", or "streamable-http".
+    host      : bind address for SSE/streamable-http transport.
+    port      : port for SSE/streamable-http transport.
     """
-    if transport == "sse":
+    if transport in ("sse", "streamable-http"):
         from mcp.server.transport_security import TransportSecuritySettings
         mcp.settings.host = host
         mcp.settings.port = port
         mcp.settings.transport_security = TransportSecuritySettings(
             enable_dns_rebinding_protection=False
         )
-        mcp.run(transport="sse")
+        mcp.run(transport=transport)
     else:
         mcp.run(transport="stdio")

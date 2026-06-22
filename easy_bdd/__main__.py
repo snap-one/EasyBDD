@@ -774,15 +774,21 @@ Examples:
         help="Use SSE (HTTP) transport instead of STDIO (default)",
     )
     mcp_parser.add_argument(
+        "--streamable-http",
+        action="store_true",
+        dest="streamable_http",
+        help="Use Streamable HTTP transport (required for Claude Desktop 1.14+)",
+    )
+    mcp_parser.add_argument(
         "--host",
         default="0.0.0.0",
-        help="Bind address for SSE transport (default: 0.0.0.0)",
+        help="Bind address for SSE/streamable-http transport (default: 0.0.0.0)",
     )
     mcp_parser.add_argument(
         "--port",
         type=int,
         default=8080,
-        help="Port for SSE transport (default: 8080)",
+        help="Port for SSE/streamable-http transport (default: 8080)",
     )
 
     # TestRail list command
@@ -2482,12 +2488,19 @@ def mcp_serve(args) -> int:
     """Start the Easy BDD MCP server."""
     from .mcp_server import serve
 
-    transport = "sse" if getattr(args, "sse", False) else "stdio"
+    if getattr(args, "streamable_http", False):
+        transport = "streamable-http"
+    elif getattr(args, "sse", False):
+        transport = "sse"
+    else:
+        transport = "stdio"
     host = getattr(args, "host", "0.0.0.0")
     port = getattr(args, "port", 8080)
 
-    if transport == "sse":
-        print(f"Starting Easy BDD MCP server (SSE) on {host}:{port}")
+    if transport == "streamable-http":
+        print(f"Starting Easy BDD MCP server (Streamable HTTP) on {host}:{port}/mcp")
+    elif transport == "sse":
+        print(f"Starting Easy BDD MCP server (SSE) on {host}:{port}/sse")
     else:
         print("Starting Easy BDD MCP server (STDIO) — ready for Claude Desktop")
 

@@ -13,8 +13,8 @@ Once connected, the AI can list, read, validate, and run your tests directly fro
 | **Framework server** (`easy_bdd` package) | `easy_bdd/mcp_server.py` | Full framework access — validate, run, fix, TestRail integration |
 | **Frontend server** | `frontend/mcp_server.py` | Test authoring — create/update tests, browse actions, workspace management |
 
-Both speak standard MCP over **STDIO** (default) or **SSE** (HTTP).  
-STDIO is the right choice for desktop AI clients; SSE is for web-based or remote clients.
+Both speak standard MCP over **STDIO** (default), **Streamable HTTP** (recommended for remote access), or **SSE** (deprecated).  
+STDIO is the right choice when the AI client runs on the same machine. Streamable HTTP is for remote servers accessed over a network.
 
 ---
 
@@ -155,20 +155,113 @@ Add to `.vscode/mcp.json` in your workspace (VS Code 1.99+):
 
 ---
 
-## SSE transport (web clients / remote access)
+## Remote access — Streamable HTTP (recommended)
 
-Start the server in SSE mode:
+Use this when the MCP server runs on a separate machine (e.g. a Linux CI server)
+and your AI client (Claude Desktop, Cursor) runs on a different machine.
+
+### Start the server
+
+```bash
+# Foreground
+python -m easy_bdd mcp-serve --streamable-http --host 0.0.0.0 --port 8090
+
+# Background (daemon)
+nohup python -m easy_bdd mcp-serve --streamable-http --host 0.0.0.0 --port 8090 \
+  >> mcp_server.log 2>&1 &
+```
+
+The server exposes `http://<host>:8090/mcp`.
+
+### Run as a systemd service (Linux)
+
+Create `/etc/systemd/system/easy-bdd-mcp.service`:
+
+```ini
+[Unit]
+Description=Easy BDD MCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=jenkins
+WorkingDirectory=/home/jenkins/Easy_BDD
+ExecStart=/home/jenkins/Easy_BDD/env/bin/python -m easy_bdd mcp-serve --streamable-http --host 0.0.0.0 --port 8090
+EnvironmentFile=/home/jenkins/Easy_BDD/.env
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now easy-bdd-mcp.service
+sudo systemctl status easy-bdd-mcp.service
+```
+
+### Connect Claude Desktop to a remote server
+
+Claude Desktop's config file only accepts stdio (command-based) servers — it cannot
+connect to a remote HTTP URL directly. Use **`mcp-remote`** as a bridge.
+
+**Requirements:** Node.js must be installed on the Windows/Mac machine running
+Claude Desktop (`winget install OpenJS.NodeJS` on Windows).
+
+Edit `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or
+`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
+
+```json
+{
+  "mcpServers": {
+    "easy-bdd": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://192.168.100.191:8090/mcp",
+        "--transport", "http-only",
+        "--allow-http"
+      ]
+    }
+  }
+}
+```
+
+> `--allow-http` is required for plain `http://` URLs. If your server is on
+> `localhost` or `127.0.0.1`, you can omit it. For production, put the server
+> behind a reverse proxy with TLS and drop both flags.
+
+Restart Claude Desktop after saving. The `easy-bdd` tools will appear in the
+tool picker once the connection is established.
+
+### Verify the endpoint is reachable
+
+```bash
+# From the server itself
+curl -s http://localhost:8090/mcp
+# Expect: 406 Not Acceptable (correct — needs proper MCP client headers)
+
+# From another machine on the network
+curl -s http://192.168.100.191:8090/mcp
+```
+
+A `404` means the server isn't running or is using the old `--sse` transport.
+A `406` confirms the `/mcp` endpoint is live and ready.
+
+---
+
+## SSE transport (deprecated)
+
+SSE transport is deprecated in the MCP specification. Use `--streamable-http`
+instead. The `--sse` flag is kept for backwards compatibility only.
 
 ```bash
 python -m easy_bdd mcp-serve --sse --port 8080
-# or bind to a specific interface:
-python -m easy_bdd mcp-serve --sse --host 127.0.0.1 --port 8080
 ```
 
-Then configure your client to connect to `http://localhost:8080/sse`.
-
-> SSE mode has no built-in authentication — run it behind a firewall or proxy
-> if the port is not loopback-only.
+Clients connect to `http://localhost:8080/sse`.
 
 ---
 
