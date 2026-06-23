@@ -122,61 +122,51 @@ Teardown: Logout         ← cleanup, runs last
 
 Write dot-notation YAML directly in the **Preconditions** field of a `Feature:` case. No local files needed.
 
-**Step format (shorthand — preferred):**
+**Step format — dot-notation, flush-left params (paste directly into TestRail Preconditions):**
 
-```yaml
-- action.verb:
-    param1: value1
-    param2: value2
+```
+- service.verb:
+param1: value1
+param2: value2
 ```
 
-**Step format (explicit `action:` key — also accepted):**
+The runner re-indents parameters automatically — no manual alignment needed in TestRail.
 
-```yaml
-- action: action.verb
-  param1: value1
-  param2: value2
+**Flow-style (single-line — preferred for complex params in TestRail):**
+
+```
+- service.verb: {param1: value1, param2: value2}
 ```
 
 **Complete example — API test (Preconditions field):**
 
-```yaml
+```
 variables:
-  base_url: https://staging-api.example.com
-  device_id: 1001
+base_url: https://staging-api.example.com
+device_id: 1001
 
 steps:
-  - api.post:
-      url: ${base_url}/auth/login
-      body:
-        username: ${API_USERNAME}
-        password: ${API_PASSWORD}
-      store_as: auth_response
-
-  - test.assert:
-      value: ${last_status_code}
-      equals: 200
-
-  - test.extract:
-      from: ${auth_response}
-      path: access_token
-      store_as: token
-
-  - api.get:
-      url: ${base_url}/devices/${device_id}
-      headers:
-        Authorization: Bearer ${token}
-      store_as: device
-
-  - test.assert:
-      value: ${device.status}
-      equals: online
-
-  - test.log:
-      message: "Device ${device_id} is ${device.status}"
+- api.post:
+url: ${base_url}/auth/login
+body: {username: "${API_USERNAME}", password: "${API_PASSWORD}"}
+store_as: auth_response
+- test.assert:
+value: ${last_status_code}
+equals: 200
+- test.extract:
+from: ${auth_response}
+path: access_token
+store_as: token
+- api.get:
+url: ${base_url}/devices/${device_id}
+headers: {Authorization: "Bearer ${token}"}
+store_as: device
+- test.assert:
+value: ${device.status}
+equals: online
+- test.log:
+message: "Device ${device_id} is ${device.status}"
 ```
-
-**Step indentation note:** If parameters are flush-left (no indent), the runner re-indents them automatically — paste-friendly for TestRail's rich-text editor.
 
 ### Variables in TestRail
 
@@ -191,14 +181,14 @@ These key-value pairs are injected as variables into every Feature/Test case in 
 
 **Inline variables block** — within a Feature: case's Preconditions field:
 
-```yaml
+```
 variables:
-  timeout: 30
-  product: WB-800
+timeout: 30
+product: WB-800
 
 steps:
-  - test.log:
-      message: "Testing ${product} at ${device_ip}"
+- test.log:
+message: "Testing ${product} at ${device_ip}"
 ```
 
 Variables defined inline are scoped to that case. Variables from `Var:` cases are available across all cases.
@@ -213,21 +203,21 @@ variables:
 
 **Parameterized cases** — run the same steps against multiple data rows:
 
-```yaml
+```
 data:
-  - mac: D4:6A:91:29:0F:5A
-    product: WB-800
-  - mac: A8:3B:76:11:CC:22
-    product: WB-250
+- mac: D4:6A:91:29:0F:5A
+  product: WB-800
+- mac: A8:3B:76:11:CC:22
+  product: WB-250
 
 steps:
-  - ssh.connect:
-      host: ${mac}
-      username: ${device_user}
-      password: ${device_pass}
-  - test.log:
-      message: "Testing ${product} at ${mac}"
-  - ssh.disconnect: {}
+- ssh.connect:
+host: ${mac}
+username: ${device_user}
+password: ${device_pass}
+- test.log:
+message: "Testing ${product} at ${mac}"
+- ssh.disconnect: {}
 ```
 
 ### Running from the CLI
@@ -269,9 +259,9 @@ Paste the YAML into the Preconditions field of a `Feature:` case and adjust the 
 
 All actions use `service.verb` dot-notation. In a TestRail `Feature:` case, write them as:
 
-```yaml
+```
 - service.verb:
-    param: value
+param: value
 ```
 
 ### Browser / Web UI
@@ -299,38 +289,31 @@ All actions use `service.verb` dot-notation. In a TestRail `Feature:` case, writ
 
 **Examples:**
 
-```yaml
+```
 - browser.open:
-    url: ${base_url}/login
-
+url: ${base_url}/login
 - browser.fill:
-    selector: "input[name=email]"
-    value: ${username}
-
+selector: "input[name=email]"
+value: ${username}
 - browser.click:
-    selector: "button[type=submit]"
-
+selector: "button[type=submit]"
 # Role-based selector (preferred — more resilient than CSS)
 - browser.click:
-    role: button
-    name: Apply
-
+role: button
+name: Apply
 # Wait for element before interacting
 - browser.wait_for:
-    selector: ".dashboard"
-    timeout: 15
-
+selector: ".dashboard"
+timeout: 15
 - browser.verify_text:
-    selector: ".page-title"
-    text: Dashboard
-
+selector: ".page-title"
+text: Dashboard
 - browser.screenshot:
-    name: after-login
-
+name: after-login
 # Target elements inside iframes
 - browser.upload:
-    selector: "iframe >> #firmware-input"
-    file_path: Firmware/update.bin
+selector: "iframe >> #firmware-input"
+file_path: Firmware/update.bin
 ```
 
 ### API
@@ -346,38 +329,30 @@ All actions use `service.verb` dot-notation. In a TestRail `Feature:` case, writ
 
 **Examples:**
 
-```yaml
+```
 # POST with JSON body
 - api.post:
-    url: ${base_url}/auth/login
-    body:
-      username: ${username}
-      password: ${password}
-    store_as: login_response
-
+url: ${base_url}/auth/login
+body: {username: "${username}", password: "${password}"}
+store_as: login_response
 - test.assert:
-    value: ${last_status_code}
-    equals: 200
-
+value: ${last_status_code}
+equals: 200
 # GET with auth header
 - api.get:
-    url: ${base_url}/devices/${device_id}
-    headers:
-      Authorization: Bearer ${token}
-    store_as: device
-
+url: ${base_url}/devices/${device_id}
+headers: {Authorization: "Bearer ${token}"}
+store_as: device
 # Extract a value from the response
 - test.extract:
-    from: ${login_response}
-    path: access_token
-    store_as: token
-
+from: ${login_response}
+path: access_token
+store_as: token
 # Expect a specific status (assertion built-in)
 - api.delete:
-    url: ${base_url}/sessions/${session_id}
-    headers:
-      Authorization: Bearer ${token}
-    expected_status: 204
+url: ${base_url}/sessions/${session_id}
+headers: {Authorization: "Bearer ${token}"}
+expected_status: 204
 ```
 
 After any API step: `${last_status_code}` holds the HTTP status, `${last_response}` the raw body text, and `${last_response_dict}` the parsed JSON.
@@ -394,35 +369,32 @@ Stateful SSH sessions persist across steps within the same test. Use `ssh.*` for
 
 **Example:**
 
-```yaml
+```
 - ssh.connect:
-    host: ${device_ip}
-    username: ${device_user}
-    password: ${device_pass}
-    timeout: 30
-    retry: 3
-    retry_delay: 10
-
+host: ${device_ip}
+username: ${device_user}
+password: ${device_pass}
+timeout: 30
+retry: 3
+retry_delay: 10
 - ssh.command:
-    command: cat /etc/firmware_version
-    store_as: fw_version
-
+command: cat /etc/firmware_version
+store_as: fw_version
 - test.assert:
-    value: ${fw_version}
-    contains: "2."
-
+value: ${fw_version}
+contains: "2."
 - ssh.disconnect: {}
 ```
 
 For one-shot commands without session state, use `command.ssh`:
 
-```yaml
+```
 - command.ssh:
-    host: ${device_ip}
-    username: ${device_user}
-    password: ${device_pass}
-    command: "uptime"
-    store_as: uptime
+host: ${device_ip}
+username: ${device_user}
+password: ${device_pass}
+command: "uptime"
+store_as: uptime
 ```
 
 ### Telnet
@@ -436,21 +408,18 @@ For one-shot commands without session state, use `command.ssh`:
 
 **Example:**
 
-```yaml
+```
 - telnet.connect:
-    host: ${device_ip}
-    port: 23
-    username: ${device_user}
-    password: ${device_pass}
-
+host: ${device_ip}
+port: 23
+username: ${device_user}
+password: ${device_pass}
 - telnet.command:
-    command: "show version"
-    store_as: version_output
-
+command: "show version"
+store_as: version_output
 - test.assert:
-    value: ${version_output}
-    contains: ${expected_version}
-
+value: ${version_output}
+contains: ${expected_version}
 - telnet.disconnect: {}
 ```
 
@@ -464,18 +433,16 @@ For one-shot commands without session state, use `command.ssh`:
 
 **Example:**
 
-```yaml
+```
 - serial.connect:
-    port: COM3
-    baudrate: 115200
-
+port: COM3
+baudrate: 115200
 - serial.send:
-    data: "?status\r\n"
-    store_as: serial_response
-
+data: "?status\r\n"
+store_as: serial_response
 - test.assert:
-    value: ${serial_response}
-    contains: OK
+value: ${serial_response}
+contains: OK
 ```
 
 ### WebSocket / OVRC / JSON-RPC
@@ -491,17 +458,14 @@ For one-shot commands without session state, use `command.ssh`:
 
 **Example:**
 
-```yaml
+```
 - websocket.send:
-    url: ${ws_url}
-    data:
-      deviceId: ${mac}
-      version: 0
-    store_as: ws_response
-
+url: ${ws_url}
+data: {deviceId: "${mac}", version: 0}
+store_as: ws_response
 - test.assert:
-    value: ${ws_response}
-    not_contains: error
+value: ${ws_response}
+not_contains: error
 ```
 
 ### AWS S3
@@ -514,19 +478,17 @@ For one-shot commands without session state, use `command.ssh`:
 
 **Example:**
 
-```yaml
+```
 - aws.list_files:
-    bucket_name: firmware-releases
-    folder_prefix: product-x/stable
-    file_extension: .bin
-    store_as: firmware_files
-
+bucket_name: firmware-releases
+folder_prefix: product-x/stable
+file_extension: .bin
+store_as: firmware_files
 - aws.get_latest:
-    files: ${firmware_files}
-    store_as: latest_firmware
-
+files: ${firmware_files}
+store_as: latest_firmware
 - test.log:
-    message: "Latest firmware: ${latest_firmware.version} at ${latest_firmware.url}"
+message: "Latest firmware: ${latest_firmware.version} at ${latest_firmware.url}"
 ```
 
 ### Assertions and extraction
@@ -541,62 +503,47 @@ For one-shot commands without session state, use `command.ssh`:
 
 **Examples:**
 
-```yaml
+```
 # Equality
 - test.assert:
-    value: ${last_status_code}
-    equals: 200
-
+value: ${last_status_code}
+equals: 200
 # Contains substring
 - test.assert:
-    value: ${response_body}
-    contains: "access_token"
-
+value: ${response_body}
+contains: "access_token"
 # Does not contain
 - test.assert:
-    value: ${device.status}
-    not_contains: error
-
+value: ${device.status}
+not_contains: error
 # Non-empty
 - test.assert:
-    value: ${fw_version}
-    not_empty: true
-
+value: ${fw_version}
+not_empty: true
 # Membership in a list
 - test.assert:
-    value: ${last_status_code}
-    in: [200, 201, 204]
-
+value: ${last_status_code}
+in: [200, 201, 204]
 # Greater than
 - test.assert:
-    value: ${process_count}
-    greater_than: 0
-
+value: ${process_count}
+greater_than: 0
 # JSON schema validation
 - test.assert_schema:
-    value: ${device}
-    schema:
-      type: object
-      required: [id, status, name]
-      properties:
-        id:     {type: integer}
-        status: {type: string}
-        name:   {type: string}
-
+value: ${device}
+schema: {type: object, required: [id, status, name], properties: {id: {type: integer}, status: {type: string}, name: {type: string}}}
 # Soft assertion — test continues; failures reported at end
 - test.assert:
-    value: ${metric}
-    greater_than: 0
-    soft: true
-
+value: ${metric}
+greater_than: 0
+soft: true
 # Flush soft assertions (fail the test if any soft assertion failed)
 - test.check_assertions: {}
-
 # Extract a nested value from a response dict
 - test.extract:
-    from: ${login_response}
-    path: data.user.id
-    store_as: user_id
+from: ${login_response}
+path: data.user.id
+store_as: user_id
 ```
 
 ### Test utilities
@@ -611,16 +558,14 @@ For one-shot commands without session state, use `command.ssh`:
 
 **Examples:**
 
-```yaml
+```
 - test.sleep:
-    seconds: 30
-
+seconds: 30
 - test.log:
-    message: "Waiting for device ${device_ip} to reboot..."
-
+message: "Waiting for device ${device_ip} to reboot..."
 # Run a shared local YAML test as a sub-step
 - test.run:
-    path: tests/cases/shared/login.yaml
+path: tests/cases/shared/login.yaml
 ```
 
 ### Eval
@@ -634,17 +579,16 @@ Execute Python expressions in the test context. Use for complex data transformat
 
 **Examples:**
 
-```yaml
+```
 # Extract nested value with Python
 - eval.exec:
-    code: |
-      token = last_response_dict['data']['access_token']
-      expiry = last_response_dict['data']['expires_in']
-
+code: |
+  token = last_response_dict['data']['access_token']
+  expiry = last_response_dict['data']['expires_in']
 # Evaluate an expression and store the result
 - eval.run:
-    expression: "last_response_dict.get('firmware_version', 'unknown')"
-    store_as: fw_version
+expression: "last_response_dict.get('firmware_version', 'unknown')"
+store_as: fw_version
 ```
 
 ---
@@ -655,100 +599,98 @@ Control flow constructs work in both TestRail `Feature:` cases and local YAML fi
 
 ### For each (loop over a list)
 
-```yaml
+```
 - for_each: [1, 10, 30, 60]
-  loop_var: wait_seconds
-  steps:
-    - test.sleep:
-        seconds: ${wait_seconds}
-    - test.assert:
-        value: ${device.status}
-        equals: online
+loop_var: wait_seconds
+steps:
+- test.sleep:
+  seconds: ${wait_seconds}
+- test.assert:
+  value: ${device.status}
+  equals: online
 ```
 
 Loop over a list of dicts:
 
-```yaml
-- for_each:
-    - {mac: D4:6A:91:29:0F:5A, product: WB-800}
-    - {mac: A8:3B:76:11:CC:22, product: WB-250}
-  loop_var: device
-  steps:
-    - ssh.connect:
-        host: ${device.mac}
-        username: ${device_user}
-        password: ${device_pass}
-    - test.log:
-        message: "Connected to ${device.product}"
-    - ssh.disconnect: {}
+```
+- for_each: [{mac: "D4:6A:91:29:0F:5A", product: "WB-800"}, {mac: "A8:3B:76:11:CC:22", product: "WB-250"}]
+loop_var: device
+steps:
+- ssh.connect:
+  host: ${device.mac}
+  username: ${device_user}
+  password: ${device_pass}
+- test.log:
+  message: "Connected to ${device.product}"
+- ssh.disconnect: {}
 ```
 
 ### While loop
 
-```yaml
+```
 - while: "device_state != 'ready'"
-  loop_limit: 30
-  steps:
-    - api.get:
-        url: ${base_url}/api/status
-        store_as: device_state
-    - test.sleep:
-        seconds: 5
+loop_limit: 30
+steps:
+- api.get:
+  url: ${base_url}/api/status
+  store_as: device_state
+- test.sleep:
+  seconds: 5
 ```
 
 ### Conditional (if / then / else)
 
-```yaml
+```
 - condition: "current_version != target_version"
-  then:
-    - browser.upload:
-        selector: "#firmware-input"
-        file_path: Firmware/${firmware_file}
-    - browser.click:
-        role: button
-        name: Upgrade
-  else:
-    - test.log:
-        message: "Firmware already at target version — skipping"
+then:
+- browser.upload:
+  selector: "#firmware-input"
+  file_path: Firmware/${firmware_file}
+- browser.click:
+  role: button
+  name: Upgrade
+else:
+- test.log:
+  message: "Firmware already at target version — skipping"
 ```
 
 ### Try / Except / Finally
 
-```yaml
+```
 - try:
-    - api.post:
-        url: ${base_url}/api/reboot
-  except:
-    - test.log:
-        message: "Reboot request failed — device may already be rebooting"
-  finally:
-    - test.sleep:
-        seconds: 30
+- api.post:
+  url: ${base_url}/api/reboot
+except:
+- test.log:
+  message: "Reboot request failed — device may already be rebooting"
+finally:
+- test.sleep:
+  seconds: 30
 ```
 
 ### Inline data loop (test.data)
 
 Run the same step block against multiple data rows within a single Feature: case:
 
-```yaml
+```
 - test.data:
-    rows:
-      - mac: D4:6A:91:29:0F:5A
-        product: WB-800
-      - mac: A8:3B:76:11:CC:22
-        product: WB-250
-    steps:
-      - ssh.connect:
-          host: ${mac}
-          username: admin
-          password: ${DEVICE_PASSWORD}
-      - ssh.command:
-          command: cat /etc/firmware_version
-          store_as: fw
-      - test.assert:
-          value: ${fw}
-          not_empty: true
-      - ssh.disconnect: {}
+rows:
+- mac: D4:6A:91:29:0F:5A
+  product: WB-800
+- mac: A8:3B:76:11:CC:22
+  product: WB-250
+steps:
+- ssh.connect:
+  host: ${mac}
+  username: admin
+  password: ${DEVICE_PASSWORD}
+- ssh.command:
+  command: cat /etc/firmware_version
+  store_as: fw
+- test.assert:
+  value: ${fw}
+  not_empty: true
+- ssh.disconnect: {}
 ```
 
 ---
@@ -759,40 +701,33 @@ Create a case titled `Shared: <step_name>` and write the reusable steps in its P
 
 **Defining a shared step (`Shared: authenticate` in TestRail):**
 
-```yaml
+```
 steps:
-  - api.post:
-      url: ${base_url}/auth/login
-      body:
-        username: ${API_USERNAME}
-        password: ${API_PASSWORD}
-      store_as: auth_response
-
-  - test.assert:
-      value: ${last_status_code}
-      equals: 200
-
-  - test.extract:
-      from: ${auth_response}
-      path: access_token
-      store_as: token
+- api.post:
+url: ${base_url}/auth/login
+body: {username: "${API_USERNAME}", password: "${API_PASSWORD}"}
+store_as: auth_response
+- test.assert:
+value: ${last_status_code}
+equals: 200
+- test.extract:
+from: ${auth_response}
+path: access_token
+store_as: token
 ```
 
 **Calling it from a `Feature:` case:**
 
-```yaml
+```
 steps:
-  - shared_step: authenticate
-
-  - api.get:
-      url: ${base_url}/devices
-      headers:
-        Authorization: Bearer ${token}
-      store_as: devices
-
-  - test.assert:
-      value: ${last_status_code}
-      equals: 200
+- shared_step: authenticate
+- api.get:
+url: ${base_url}/devices
+headers: {Authorization: "Bearer ${token}"}
+store_as: devices
+- test.assert:
+value: ${last_status_code}
+equals: 200
 ```
 
 The runner automatically syncs all `Shared:` cases in the run before executing `Feature:` cases.
@@ -855,50 +790,45 @@ Environment variables override `framework.yaml` for sensitive values — see `.e
 
 ### File format
 
-```yaml
+```
 name: Login and verify dashboard
 description: Verifies a user can log in and reach the dashboard
 tags: [smoke, browser]
 
 variables:
-  base_url: https://staging.example.com
-  username: ${STAGING_USER}
-  password: ${STAGING_PASS}
+base_url: https://staging.example.com
+username: ${STAGING_USER}
+password: ${STAGING_PASS}
 
 steps:
-  - browser.open:
-      url: ${base_url}/login
-
-  - browser.fill:
-      selector: "#username"
-      value: ${username}
-
-  - browser.fill:
-      selector: "#password"
-      value: ${password}
-
-  - browser.click:
-      role: button
-      name: Sign In
-
-  - browser.wait_for:
-      selector: ".dashboard"
-
-  - browser.verify_text:
-      selector: "h1"
-      text: Dashboard
+- browser.open:
+url: ${base_url}/login
+- browser.fill:
+selector: "#username"
+value: ${username}
+- browser.fill:
+selector: "#password"
+value: ${password}
+- browser.click:
+role: button
+name: Sign In
+- browser.wait_for:
+selector: ".dashboard"
+- browser.verify_text:
+selector: "h1"
+text: Dashboard
 ```
 
 Optional `setup` and `cleanup` sections run before/after `steps` regardless of pass/fail:
 
-```yaml
+```
 setup:
-  - browser.open:
-      url: ${base_url}
+- browser.open:
+url: ${base_url}
 
 cleanup:
-  - browser.screenshot:
-      name: final-state
+- browser.screenshot:
+name: final-state
 ```
 
 ### Running local YAML
@@ -925,29 +855,27 @@ python -m easy_bdd run --env staging
 
 Global shared steps — `shared_steps.yaml` at the project root:
 
-```yaml
+```
 authenticate:
-  description: Log in and store auth token
-  steps:
-    - api.post:
-        url: ${base_url}/auth/login
-        body:
-          username: ${username}
-          password: ${password}
-        store_as: auth_response
-    - test.extract:
-        from: ${auth_response}
-        path: access_token
-        store_as: token
+description: Log in and store auth token
+steps:
+- api.post:
+  url: ${base_url}/auth/login
+  body: {username: "${username}", password: "${password}"}
+  store_as: auth_response
+- test.extract:
+  from: ${auth_response}
+  path: access_token
+  store_as: token
 ```
 
 Workspace-local — `tests/cases/{workspace}/shared_steps.yaml` (overrides global on name collision).
 
 Call with:
 
-```yaml
+```
 steps:
-  - shared_step: authenticate
+- shared_step: authenticate
 ```
 
 ### Variable scope (local YAML)
@@ -1110,13 +1038,13 @@ python -m easy_bdd run tests/cases/my_test.yaml --headed
 
 Use `retry` and `retry_delay` on `ssh.connect` to wait for the device to come back:
 
-```yaml
+```
 - ssh.connect:
-    host: ${device_ip}
-    username: ${device_user}
-    password: ${device_pass}
-    retry: 5
-    retry_delay: 15
+host: ${device_ip}
+username: ${device_user}
+password: ${device_pass}
+retry: 5
+retry_delay: 15
 ```
 
 **TestRail `running_status_id` error**

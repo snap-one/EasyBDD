@@ -67,7 +67,7 @@ Quick validation snippet:
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
 - eval.run: {expression: "last_json.restful_res.token", store_as: token}
 - api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}"}}
-- assert: {expression: "last_status == 200"}
+- test.assert: {expression: "last_status == 200"}
 ```
 
 ---
@@ -204,7 +204,7 @@ TestRail text fields can flatten indentation, merge lines, or replace spaces wit
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
 - eval.run: {expression: "last_json.restful_res.token", store_as: token}
 - api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}", Accept: application/json}}
-- assert: {expression: "'systemInfo' in last_json"}
+- test.assert: {expression: "'systemInfo' in last_json"}
 ```
 
 ### Why this format is safer in TestRail
@@ -246,23 +246,23 @@ The runner accepts Python-style single-quoted strings inside `data:` values and 
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
 - eval.run: {expression: "last_json.restful_res.token", store_as: token}
-- assert: {expression: "token is not None and len(token) > 10"}
+- test.assert: {expression: "token is not None and len(token) > 10"}
 ```
 
 ### Recipe 2: Authenticated status call
 
 ```yaml
 - api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}", Accept: application/json}}
-- assert: {expression: "last_status == 200"}
-- assert: {expression: "'systemInfo' in last_json"}
+- test.assert: {expression: "last_status == 200"}
+- test.assert: {expression: "'systemInfo' in last_json"}
 ```
 
 ### Recipe 3: Validate key/value pairs
 
 ```yaml
-- assert: {expression: "last_json.restful_res.errCode == 0"}
-- assert: {expression: "last_json.restful_res.message == 'OK'"}
-- assert: {expression: "'token' in last_json.restful_res"}
+- test.assert: {expression: "last_json.restful_res.errCode == 0"}
+- test.assert: {expression: "last_json.restful_res.message == 'OK'"}
+- test.assert: {expression: "'token' in last_json.restful_res"}
 ```
 
 ### Recipe 4: Reuse login via shared step
@@ -270,7 +270,7 @@ The runner accepts Python-style single-quoted strings inside `data:` values and 
 ```yaml
 - shared_step: Token
 - api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}"}}
-- assert: {expression: "last_status == 200"}
+- test.assert: {expression: "last_status == 200"}
 ```
 
 ### Auto-Authentication via Suite Variables
@@ -336,20 +336,20 @@ When you use `store_as: my_response`, the runner wraps the response in an envelo
 ```yaml
 # last_json — JSON is at the top level, no .data needed
 - eval.run: {expression: "last_json.restful_res.token", store_as: token}
-- assert: {expression: "last_json.restful_res.errCode == 0"}
-- assert: {expression: "'systemInfo' in last_json"}
+- test.assert: {expression: "last_json.restful_res.errCode == 0"}
+- test.assert: {expression: "'systemInfo' in last_json"}
 
 # store_as — JSON is under .data
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}, store_as: login_response}
-- assert: {expression: "login_response.data.restful_res.errCode == 0"}
-- assert: {expression: "'token' in login_response.data.restful_res"}
+- test.assert: {expression: "login_response.data.restful_res.errCode == 0"}
+- test.assert: {expression: "'token' in login_response.data.restful_res"}
 ```
 
 ### Bracket-access also works but is verbose
 
 ```yaml
 # Also valid, but prefer dot-notation
-- assert: {expression: "last_json['restful_res']['errCode'] == 0"}
+- test.assert: {expression: "last_json['restful_res']['errCode'] == 0"}
 ```
 
 ---
@@ -362,7 +362,7 @@ Copy/paste these patterns into a Feature case Preconditions field.
 
 ```yaml
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
-- assert: {expression: "last_status == 200"}
+- test.assert: {expression: "last_status == 200"}
 - eval.run: {expression: "last_json.restful_res.token", store_as: token}
 ```
 
@@ -371,7 +371,7 @@ Copy/paste these patterns into a Feature case Preconditions field.
 ```yaml
 - shared_step: Token
 - api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}", Accept: application/json}}
-- assert: {expression: "last_status == 200"}
+- test.assert: {expression: "last_status == 200"}
 ```
 
 ### 3) JSON schema validation
@@ -412,7 +412,7 @@ Optional version extraction from selected item:
 - shared_step: Token
 - shared_step: Device Precheck
 - api.request: {method: GET, url: "${url}/system/info", headers: {Authorization: "Bearer ${token}"}}
-- assert: {expression: "'systemInfo' in last_json"}
+- test.assert: {expression: "'systemInfo' in last_json"}
 ```
 
 Template notes:
@@ -452,7 +452,7 @@ steps:
       headers:
         Authorization: Bearer ${token}
 
-  - assert:
+  - test.assert:
       expression: "'systemInfo' in last_json"
 ```
 
@@ -462,7 +462,7 @@ steps:
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
 - eval.run: {expression: "last_json.restful_res.token", store_as: token}
 - api.request: {method: GET, url: "${url}/system/status", headers: {Authorization: "Bearer ${token}"}}
-- assert: {expression: "'systemInfo' in last_json"}
+- test.assert: {expression: "'systemInfo' in last_json"}
 ```
 
 ### Common parse/runtime pitfalls
