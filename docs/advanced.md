@@ -399,7 +399,7 @@ variables:
 ```bash
 # Load environment-specific config
 export TEST_ENV=staging
-python -m easy_bdd run tests/cases/test.yaml
+python -m easybdd run tests/cases/test.yaml
 
 # Framework automatically loads:
 # config/environments/${TEST_ENV}.yaml
@@ -409,7 +409,7 @@ python -m easy_bdd run tests/cases/test.yaml
 
 ```bash
 # Override config at runtime
-python -m easy_bdd run tests/cases/test.yaml \
+python -m easybdd run tests/cases/test.yaml \
   --config browser.headless=false \
   --config execution.default_timeout=30000
 ```

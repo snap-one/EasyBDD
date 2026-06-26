@@ -90,7 +90,7 @@ pipeline {
                         set -a && . .env && set +a
                         . env/bin/activate
 
-                        python -m easy_bdd testrail-sync ${projectId} \\
+                        python -m easybdd testrail-sync ${projectId} \\
                             ${sourceArg} \\
                             ${outputArg} \\
                             ${tagArg} \\

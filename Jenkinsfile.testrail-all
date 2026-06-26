@@ -41,7 +41,7 @@ pipeline {
                             cd ${WORKSPACE}
                             set -a && . .env && set +a
                             . env/bin/activate
-                            python -m easy_bdd testrail-run ${projectId} --find-only || true
+                            python -m easybdd testrail-run ${projectId} --find-only || true
                         """
                     }
                 }

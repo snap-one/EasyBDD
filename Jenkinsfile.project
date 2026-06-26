@@ -26,7 +26,7 @@ pipeline {
                     rm -f reports/run_${params.PROJECT_ID}.properties
                     set -a && . .env && set +a
                     . env/bin/activate
-                    python -m easy_bdd testrail-run ${params.PROJECT_ID} || true
+                    python -m easybdd testrail-run ${params.PROJECT_ID} || true
                 """
             }
         }

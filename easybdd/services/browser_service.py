@@ -69,7 +69,7 @@ class PlaywrightMCPBridge:
         """Get all recorded actions"""
         return self.recording_actions.copy()
 
-    def export_to_easy_bdd(self) -> Dict[str, Any]:
+    def export_to_easybdd(self) -> Dict[str, Any]:
         """Export recorded actions to Easy BDD format"""
         steps = []
 
@@ -379,7 +379,7 @@ class BrowserService:
 
     def get_mcp_recording(self) -> Dict[str, Any]:
         """Get MCP recording in Easy BDD format"""
-        return self.mcp_bridge.export_to_easy_bdd()
+        return self.mcp_bridge.export_to_easybdd()
 
     def save_mcp_recording(self, file_path: Union[str, Path]):
         """Save MCP recording to file"""

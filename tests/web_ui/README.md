@@ -41,18 +41,18 @@ environments:
 
 ```bash
 # Run all web UI tests
-python -m easy_bdd run tests/web_ui/
+python -m easybdd run tests/web_ui/
 
 # Run specific test categories
-python -m easy_bdd run tests/web_ui/ --tags="smoke"
-python -m easy_bdd run tests/web_ui/ --tags="accessibility"
-python -m easy_bdd run tests/web_ui/ --tags="performance"
+python -m easybdd run tests/web_ui/ --tags="smoke"
+python -m easybdd run tests/web_ui/ --tags="accessibility"
+python -m easybdd run tests/web_ui/ --tags="performance"
 
 # Run tests against specific environment
-python -m easy_bdd run tests/web_ui/ --env="staging"
+python -m easybdd run tests/web_ui/ --env="staging"
 
 # Cross-browser testing
-python -m easy_bdd run tests/web_ui/ --browser="chrome,firefox,webkit"
+python -m easybdd run tests/web_ui/ --browser="chrome,firefox,webkit"
 ```
 
 ## 🎯 Test Categories
@@ -326,7 +326,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run UI tests
-        run: python -m easy_bdd run tests/web_ui/ --tags="smoke"
+        run: python -m easybdd run tests/web_ui/ --tags="smoke"
       - name: Upload test reports
         uses: actions/upload-artifact@v3
         with:
@@ -395,13 +395,13 @@ browser_specific:
 ### Debug Mode
 ```bash
 # Run with debugging enabled
-python -m easy_bdd run tests/web_ui/ --debug
+python -m easybdd run tests/web_ui/ --debug
 
 # Keep browser open after test
-python -m easy_bdd run tests/web_ui/ --debug --keep-open
+python -m easybdd run tests/web_ui/ --debug --keep-open
 
 # Verbose logging
-python -m easy_bdd run tests/web_ui/ --verbose
+python -m easybdd run tests/web_ui/ --verbose
 ```
 
 ## 📚 Best Practices

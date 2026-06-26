@@ -49,7 +49,7 @@ pipeline {
                 dir("${PROJECT_DIR}") {
                     sh '''
                         if [ -d tests/cases ]; then
-                            ${PYTHON} -m easy_bdd validate tests/cases/
+                            ${PYTHON} -m easybdd validate tests/cases/
                         else
                             echo "No tests/cases directory found — skipping validation"
                         fi

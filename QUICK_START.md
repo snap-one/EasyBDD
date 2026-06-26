@@ -8,7 +8,7 @@ Get up and running with Easy BDD Framework in 5 minutes!
 
 ```bash
 git clone <repository-url>
-cd easy_bdd
+cd easybdd
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install --upgrade pip

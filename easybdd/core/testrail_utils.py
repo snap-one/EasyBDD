@@ -33,7 +33,7 @@ def _flatten_steps(steps: list) -> list:
 
 
 def build_testrail_preconditions(steps: list) -> str:
-    """Build a TestRail preconditions string from a list of easy_bdd step dicts.
+    """Build a TestRail preconditions string from a list of easybdd step dicts.
 
     Each step gets a numbered YAML comment (# N. action) so steps are easy to
     identify in TestRail without affecting parsing or execution.  Params are

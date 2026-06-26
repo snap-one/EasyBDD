@@ -57,10 +57,10 @@ playwright install chromium
 ### Step 5: Verify Installation
 ```bash
 # Test framework installation
-python -m easy_bdd --help
+python -m easybdd --help
 
 # Run example test
-python -m easy_bdd run tests/cases/simple_test.yaml --headed
+python -m easybdd run tests/cases/simple_test.yaml --headed
 ```
 
 ## ⚙️ Configuration
@@ -191,13 +191,13 @@ steps:
 ### Run First Test
 ```bash
 # Run with visible browser
-python -m easy_bdd run tests/cases/hello_world.yaml --headed
+python -m easybdd run tests/cases/hello_world.yaml --headed
 
 # Run in headless mode
-python -m easy_bdd run tests/cases/hello_world.yaml
+python -m easybdd run tests/cases/hello_world.yaml
 
 # Generate Gherkin only
-python -m easy_bdd generate tests/cases/hello_world.yaml
+python -m easybdd generate tests/cases/hello_world.yaml
 ```
 
 ## 🔧 IDE Setup
@@ -256,7 +256,7 @@ COPY . .
 RUN pip install -e .
 
 # Set entrypoint
-ENTRYPOINT ["python", "-m", "easy_bdd"]
+ENTRYPOINT ["python", "-m", "easybdd"]
 ```
 
 Build and run:
@@ -297,7 +297,7 @@ jobs:
         
     - name: Run tests
       run: |
-        python -m easy_bdd run tests/cases/ --tags smoke
+        python -m easybdd run tests/cases/ --tags smoke
         
     - name: Upload test results
       uses: actions/upload-artifact@v3
@@ -325,7 +325,7 @@ pipeline {
         
         stage('Test') {
             steps {
-                sh 'source venv/bin/activate && python -m easy_bdd run tests/cases/'
+                sh 'source venv/bin/activate && python -m easybdd run tests/cases/'
             }
         }
         
@@ -390,7 +390,7 @@ find . -name "*.pyc" -delete
 ### Verification Commands
 ```bash
 # Test Python import
-python -c "import easy_bdd; print('Framework imported successfully')"
+python -c "import easybdd; print('Framework imported successfully')"
 
 # Test Playwright
 python -c "from playwright.sync_api import sync_playwright; print('Playwright working')"
@@ -409,7 +409,7 @@ with sync_playwright() as p:
 
 1. **Check logs**: `reports/logs/test.log`
 2. **Enable debug mode**: Set `logging.level: DEBUG` in config
-3. **Run with verbose output**: `python -m easy_bdd run --verbose`
+3. **Run with verbose output**: `python -m easybdd run --verbose`
 4. **Check documentation**: See other guides in `docs/`
 
 ---

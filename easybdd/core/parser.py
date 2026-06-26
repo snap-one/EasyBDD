@@ -668,7 +668,7 @@ class YAMLParser:
         
         if error_info['can_edit']:
             print(f"\n✏️  To edit this file, run:")
-            print(f"   python -m easy_bdd edit-test \"{error_info['file_path']}\"")
+            print(f"   python -m easybdd edit-test \"{error_info['file_path']}\"")
             print(f"   Or manually open: {error_info['absolute_path']}")
             
             # Try to detect and suggest editor commands

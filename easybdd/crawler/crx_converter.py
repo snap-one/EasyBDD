@@ -17,15 +17,15 @@ Supports two input formats:
      expect() assertions.
 
 CLI usage:
-    python -m easy_bdd crawler convert-crx path/to/recording.ts
-    python -m easy_bdd crawler convert-crx path/to/recording.json
-    python -m easy_bdd crawler convert-crx recording.ts --output tests/cases/
+    python -m easybdd crawler convert-crx path/to/recording.ts
+    python -m easybdd crawler convert-crx path/to/recording.json
+    python -m easybdd crawler convert-crx recording.ts --output tests/cases/
 
 Programmatic usage:
-    from easy_bdd.crawler.crx_converter import convert_crx_file
+    from easybdd.crawler.crx_converter import convert_crx_file
     yaml_text = convert_crx_file("recording.ts")
     # or get the dict directly:
-    from easy_bdd.crawler.crx_converter import PlaywrightTsConverter
+    from easybdd.crawler.crx_converter import PlaywrightTsConverter
     data = PlaywrightTsConverter().convert(ts_code, filename="my_test")
 """
 
@@ -688,7 +688,7 @@ def _to_yaml(data: Dict[str, Any]) -> str:
 
 def cli_convert_crx(args) -> int:
     """
-    Implements `python -m easy_bdd crawler convert-crx <file>`.
+    Implements `python -m easybdd crawler convert-crx <file>`.
     """
     import sys
 

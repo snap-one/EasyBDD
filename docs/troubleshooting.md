@@ -83,7 +83,7 @@ ERROR: Could not start browser process
 **Solutions:**
 ```bash
 # 1. Run in headless mode
-python -m easy_bdd run tests/cases/test.yaml
+python -m easybdd run tests/cases/test.yaml
 
 # 2. Try different browser
 # Edit config/framework.yaml:
@@ -257,7 +257,7 @@ ls -la .env
 
 # 2. Load environment manually
 export BASE_URL="https://staging.example.com"
-python -m easy_bdd run tests/cases/test.yaml
+python -m easybdd run tests/cases/test.yaml
 
 # 3. Use default values in YAML
 variables:
@@ -276,7 +276,7 @@ logging:
 
 ```bash
 # Run with verbose output
-python -m easy_bdd run tests/cases/test.yaml --verbose
+python -m easybdd run tests/cases/test.yaml --verbose
 
 # Check logs
 tail -f logs/debug.log
@@ -383,22 +383,22 @@ cleanup:
 ### Isolate Failing Tests
 ```bash
 # Run single test
-python -m easy_bdd run tests/cases/failing_test.yaml
+python -m easybdd run tests/cases/failing_test.yaml
 
 # Run specific data iteration
 # Edit YAML to include only failing data item
 
 # Run with tags
-python -m easy_bdd run tests/cases/ --tags debug
+python -m easybdd run tests/cases/ --tags debug
 ```
 
 ### Validate Test Structure
 ```bash
 # Generate Gherkin only (validates syntax)
-python -m easy_bdd generate tests/cases/test.yaml
+python -m easybdd generate tests/cases/test.yaml
 
 # Dry run (parse without execution)
-python -m easy_bdd run tests/cases/test.yaml --dry-run
+python -m easybdd run tests/cases/test.yaml --dry-run
 ```
 
 ### Check Browser State
@@ -421,7 +421,7 @@ pip list | grep -E "(playwright|easy-bdd)"
 playwright --version
 
 # Test execution with debug
-python -m easy_bdd run tests/cases/test.yaml --verbose --debug
+python -m easybdd run tests/cases/test.yaml --verbose --debug
 
 # Browser information
 ls ~/.cache/ms-playwright/  # Linux/macOS
@@ -641,7 +641,7 @@ discover_prefix: true
 **Fix:** Use `--dry-run` to preview the runs that would be created before committing:
 
 ```bash
-python -m easy_bdd testrail-create-run 77 52630 \
+python -m easybdd testrail-create-run 77 52630 \
   --given-section "VPS" \
   --sections "Functions" "Firmware Resiliency" \
   --dry-run

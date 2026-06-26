@@ -114,7 +114,7 @@ pipeline {
                         set -a && . .env && set +a
                         . env/bin/activate
 
-                        python -m easy_bdd testrail-convert ${projectId} \\
+                        python -m easybdd testrail-convert ${projectId} \\
                             ${sourceArg} \\
                             ${outputArg} \\
                             ${targetSuiteArg} \\

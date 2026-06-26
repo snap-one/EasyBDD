@@ -24,14 +24,14 @@ Supports three modes — pick the one that fits your workflow.
 4. Snapshots are sent to the local Python server, which generates Easy BDD YAML test cases.
 5. YAML files are written to `tests/cases/crawled/` and pushed to TestRail as Feature: cases.
 6. Optionally, a TestRail test run is created covering all generated cases.
-7. Run those cases immediately with `python -m easy_bdd testrail-run --project <id>`.
+7. Run those cases immediately with `python -m easybdd testrail-run --project <id>`.
 
 ---
 
 ## Mode 2 — Playwright browser (no Chrome extension required)
 
 ```bash
-python -m easy_bdd crawler playwright \
+python -m easybdd crawler playwright \
     --url https://app.example.com/login \
     --project 12 \
     --provider rules        # no API key needed
@@ -85,13 +85,13 @@ Convert an existing recording file to Easy BDD YAML without running a crawl.
 
 ```bash
 # Convert a single TypeScript recording
-python -m easy_bdd crawler convert-crx my_recording.ts
+python -m easybdd crawler convert-crx my_recording.ts
 
 # Convert to a specific output directory
-python -m easy_bdd crawler convert-crx my_recording.ts --output tests/cases/
+python -m easybdd crawler convert-crx my_recording.ts --output tests/cases/
 
 # Convert multiple files at once
-python -m easy_bdd crawler convert-crx recordings/*.ts --output tests/cases/
+python -m easybdd crawler convert-crx recordings/*.ts --output tests/cases/
 ```
 
 **How to record in Chrome DevTools:**
@@ -157,11 +157,11 @@ CRAWLER_AI_MODEL=claude-haiku-4-5-20251001   # optional override
 ### 3. Start the crawler server
 
 ```bash
-python -m easy_bdd crawler start
+python -m easybdd crawler start
 # Server running at http://127.0.0.1:8765
 
 # Custom host/port:
-python -m easy_bdd crawler start --host 0.0.0.0 --port 9000
+python -m easybdd crawler start --host 0.0.0.0 --port 9000
 ```
 
 ### 4. Load the Chrome extension
@@ -290,7 +290,7 @@ due to browser security policies.
 ## Troubleshooting
 
 **Extension says "Backend not reachable"**
-→ Run `python -m easy_bdd crawler start` and ensure the port matches the Settings page.
+→ Run `python -m easybdd crawler start` and ensure the port matches the Settings page.
 
 **No cases generated**
 → Check that `ANTHROPIC_API_KEY` or Ollama is running. Look at the server terminal for AI errors.
@@ -300,5 +300,5 @@ due to browser security policies.
 Check that the project supports multiple suites (TestRail project type).
 
 **Generated selectors are fragile (nth-child)**
-→ Run `python -m easy_bdd selector-audit tests/cases/crawled/` to find upgrade opportunities.
+→ Run `python -m easybdd selector-audit tests/cases/crawled/` to find upgrade opportunities.
 Adding `data-testid` attributes to your app's HTML is the most effective long-term fix.

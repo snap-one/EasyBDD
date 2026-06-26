@@ -279,7 +279,7 @@ class LiveRecorder:
 
         print(f"\n✅ Test saved to: {output_file}")
         print(f"📊 Recorded {len(self.steps)} steps")
-        print(f"\nTo run: python -m easy_bdd run {output_file}")
+        print(f"\nTo run: python -m easybdd run {output_file}")
 
 
 class InteractiveRecorder:

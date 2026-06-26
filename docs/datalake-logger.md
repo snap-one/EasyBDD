@@ -91,7 +91,7 @@ config:
 ### Basic Logging
 
 ```python
-from easy_bdd.core.datalake_logger import get_logger
+from easybdd.core.datalake_logger import get_logger
 
 # Get logger instance
 logger = get_logger()
@@ -200,7 +200,7 @@ logger.datalake_post(
     console="Test passed\nAll assertions successful",
     run_url="https://testrail.example.com/run/123",
     success=True,
-    type="easy_bdd"
+    type="easybdd"
 )
 ```
 
@@ -247,11 +247,11 @@ Only shows stack frames from your project:
 Traceback (most recent call last):
   File "/usr/lib/python3.12/site-packages/...", line 123
   ...
-  File "/your/project/easy_bdd/core/runner.py", line 456, in execute_step
+  File "/your/project/easybdd/core/runner.py", line 456, in execute_step
     service.click_element(selector)
 
 # Limited traceback (relevant only)
-  File "/your/project/easy_bdd/core/runner.py", line 456, in execute_step
+  File "/your/project/easybdd/core/runner.py", line 456, in execute_step
 ```
 
 ### Console to File
@@ -312,7 +312,7 @@ except Exception as e:
 The logger is automatically integrated:
 
 ```python
-from easy_bdd.core.runner import TestRunner
+from easybdd.core.runner import TestRunner
 
 runner = TestRunner(config_path="config/framework.yaml")
 
@@ -482,7 +482,7 @@ steps:
 ### Custom Logging in Python
 
 ```python
-from easy_bdd.core.datalake_logger import get_logger
+from easybdd.core.datalake_logger import get_logger
 import datetime
 
 logger = get_logger(

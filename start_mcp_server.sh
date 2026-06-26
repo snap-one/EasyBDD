@@ -37,7 +37,7 @@ if [ "$1" == "--daemon" ]; then
     echo "Starting Easy BDD MCP server in background..."
     echo "  Endpoint: http://$(hostname -I | awk '{print $1}'):$PORT/sse"
     echo "  Logs: $LOG"
-    nohup python -m easy_bdd mcp-serve --sse --host "$HOST" --port "$PORT" \
+    nohup python -m easybdd mcp-serve --sse --host "$HOST" --port "$PORT" \
         >> "$LOG" 2>&1 &
     echo "  PID: $!"
     echo "$!" > "$SCRIPT_DIR/mcp_server.pid"
@@ -46,5 +46,5 @@ else
     echo "  Endpoint: http://$(hostname -I | awk '{print $1}'):$PORT/sse"
     echo "  Press Ctrl+C to stop"
     echo ""
-    python -m easy_bdd mcp-serve --sse --host "$HOST" --port "$PORT"
+    python -m easybdd mcp-serve --sse --host "$HOST" --port "$PORT"
 fi

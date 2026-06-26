@@ -219,7 +219,7 @@ test_id: "test_${timestamp}_${random_id}"
 ### Getting Global Configuration
 
 ```python
-from easy_bdd.core.variable_manager import get_global_config
+from easybdd.core.variable_manager import get_global_config
 
 # Get global config instance
 config = get_global_config()
@@ -263,8 +263,8 @@ token_data = api_config.get_token('device_1')
 ### Enhanced Test Runner
 
 ```python
-from easy_bdd.core.enhanced_runner import EnhancedTestRunner
-from easy_bdd.core.config import ConfigManager
+from easybdd.core.enhanced_runner import EnhancedTestRunner
+from easybdd.core.config import ConfigManager
 
 # Initialize enhanced runner
 config = ConfigManager()

@@ -1,7 +1,7 @@
 """
 Main entry point for the Easy BDD Framework
-Usage: python -m easy_bdd [command] [options]
-       python -m easy_bdd [command] ?         # contextual help
+Usage: python -m easybdd [command] [options]
+       python -m easybdd [command] ?         # contextual help
 """
 
 import os
@@ -34,7 +34,7 @@ _W = 78  # output width
 _COMMANDS = {
     "testrail-run": {
         "summary": "Execute tests driven by an active TestRail EASY_BDD: run",
-        "usage":   "easy_bdd testrail-run <project_id> [options]",
+        "usage":   "easybdd testrail-run <project_id> [options]",
         "required": [
             ("project_id", "int", "TestRail project ID to scan for an active EASY_BDD: run"),
         ],
@@ -49,13 +49,13 @@ _COMMANDS = {
         ],
         "examples": [
             ("Run active tests in project 79",
-             "easy_bdd testrail-run 79"),
+             "easybdd testrail-run 79"),
             ("Target a specific run instead of auto-discovering",
-             "easy_bdd testrail-run 79 --run-id 194886"),
+             "easybdd testrail-run 79 --run-id 194886"),
             ("Quiet mode (Jenkins-friendly)",
-             "easy_bdd testrail-run 79 --quiet"),
+             "easybdd testrail-run 79 --quiet"),
             ("Check if a run exists without executing",
-             "easy_bdd testrail-run 79 --find-only"),
+             "easybdd testrail-run 79 --find-only"),
         ],
         "notes": [
             "Requires TESTRAIL_URL, TESTRAIL_USERNAME, TESTRAIL_API_KEY in .env",
@@ -66,7 +66,7 @@ _COMMANDS = {
 
     "testrail-list": {
         "summary": "List TestRail projects or active EASY_BDD: runs",
-        "usage":   "easy_bdd testrail-list [project_id] [options]",
+        "usage":   "easybdd testrail-list [project_id] [options]",
         "required": [],
         "optional": [
             ("project_id", "int", None,        "Show runs for this project (omit to list all projects)"),
@@ -74,16 +74,16 @@ _COMMANDS = {
         ],
         "examples": [
             ("List all TestRail projects",
-             "easy_bdd testrail-list"),
+             "easybdd testrail-list"),
             ("List active runs in project 79",
-             "easy_bdd testrail-list 79"),
+             "easybdd testrail-list 79"),
         ],
         "notes": [],
     },
 
     "testrail-create-run": {
         "summary": "Create TestRail run(s) from a suite, optionally filtered to sections",
-        "usage":   "easy_bdd testrail-create-run <project_id> <suite_id> [options]",
+        "usage":   "easybdd testrail-create-run <project_id> <suite_id> [options]",
         "required": [
             ("project_id", "int", "TestRail project ID"),
             ("suite_id",   "int", "TestRail suite ID to create the run from"),
@@ -101,13 +101,13 @@ _COMMANDS = {
         ],
         "examples": [
             ("Create a single run for all cases in suite 106670",
-             "easy_bdd testrail-create-run 79 106670"),
+             "easybdd testrail-create-run 79 106670"),
             ("Create a run with only the Firmware and Functions sections",
-             "easy_bdd testrail-create-run 79 106670 --sections Firmware Functions"),
+             "easybdd testrail-create-run 79 106670 --sections Firmware Functions"),
             ("Per-SKU mode: one run per device in the 'Products' section",
-             "easy_bdd testrail-create-run 79 106670 --given-section Products --sections Firmware Functions"),
+             "easybdd testrail-create-run 79 106670 --given-section Products --sections Firmware Functions"),
             ("Dry-run to preview without creating",
-             "easy_bdd testrail-create-run 79 106670 --given-section Products --sections Firmware --dry-run"),
+             "easybdd testrail-create-run 79 106670 --given-section Products --sections Firmware --dry-run"),
         ],
         "notes": [
             "--sections uses case-insensitive substring match against section names",
@@ -117,7 +117,7 @@ _COMMANDS = {
 
     "testrail-convert": {
         "summary": "Convert a mybdd-format TestRail suite to Easy BDD YAML files",
-        "usage":   "easy_bdd testrail-convert <project_id> (--suite SUITE_ID | --run RUN_ID) [options]",
+        "usage":   "easybdd testrail-convert <project_id> (--suite SUITE_ID | --run RUN_ID) [options]",
         "required": [
             ("project_id",       "int", "TestRail project ID"),
             ("--suite / --run",  "int", "Source suite ID or run ID (one required)"),
@@ -135,11 +135,11 @@ _COMMANDS = {
         ],
         "examples": [
             ("Convert mybdd suite 12345 in project 79 to YAML + new TestRail suite",
-             "easy_bdd testrail-convert 79 --suite 12345"),
+             "easybdd testrail-convert 79 --suite 12345"),
             ("Preview only (no files, no TestRail changes)",
-             "easy_bdd testrail-convert 79 --suite 12345 --dry-run"),
+             "easybdd testrail-convert 79 --suite 12345 --dry-run"),
             ("Convert to YAML only (no new TestRail suite)",
-             "easy_bdd testrail-convert 79 --suite 12345 --no-testrail --output-dir tests/cases/moip"),
+             "easybdd testrail-convert 79 --suite 12345 --no-testrail --output-dir tests/cases/moip"),
         ],
         "notes": [
             "Reads Given:/Shared:/Feature: prefixed cases from the source suite",
@@ -148,8 +148,8 @@ _COMMANDS = {
     },
 
     "testrail-sync": {
-        "summary": "Sync an Easy BDD TestRail suite to local YAML files (for 'easy_bdd run')",
-        "usage":   "easy_bdd testrail-sync <project_id> (--suite SUITE_ID | --run RUN_ID) [options]",
+        "summary": "Sync an Easy BDD TestRail suite to local YAML files (for 'easybdd run')",
+        "usage":   "easybdd testrail-sync <project_id> (--suite SUITE_ID | --run RUN_ID) [options]",
         "required": [
             ("project_id",      "int", "TestRail project ID"),
             ("--suite / --run", "int", "Source suite or run ID (one required)"),
@@ -162,19 +162,19 @@ _COMMANDS = {
         ],
         "examples": [
             ("Sync suite 106670 from project 79 to local YAML",
-             "easy_bdd testrail-sync 79 --suite 106670"),
+             "easybdd testrail-sync 79 --suite 106670"),
             ("Preview what would be written",
-             "easy_bdd testrail-sync 79 --suite 106670 --dry-run"),
+             "easybdd testrail-sync 79 --suite 106670 --dry-run"),
         ],
         "notes": [
-            "Produces runnable YAML files — use 'easy_bdd run <dir>' to execute them locally",
+            "Produces runnable YAML files — use 'easybdd run <dir>' to execute them locally",
             "Feature:, Shared:, Var: cases are all synced",
         ],
     },
 
     "validate": {
         "summary": "Validate test YAML files or TestRail cases for syntax errors",
-        "usage":   "easy_bdd validate [path] [options]",
+        "usage":   "easybdd validate [path] [options]",
         "required": [],
         "optional": [
             ("path",               "path", "tests/cases/", "File or directory to validate"),
@@ -190,22 +190,22 @@ _COMMANDS = {
         ],
         "examples": [
             ("Validate all local YAML files",
-             "easy_bdd validate tests/cases/"),
+             "easybdd validate tests/cases/"),
             ("Validate a single TestRail case",
-             "easy_bdd validate --testrail-case 18684737"),
+             "easybdd validate --testrail-case 18684737"),
             ("Validate all cases in a TestRail run",
-             "easy_bdd validate --testrail-run 194886"),
+             "easybdd validate --testrail-run 194886"),
             ("Validate all cases in a TestRail suite",
-             "easy_bdd validate --testrail-suite 106670 --project 79"),
+             "easybdd validate --testrail-suite 106670 --project 79"),
             ("Validate a step snippet inline",
-             "easy_bdd validate --snippet '- test.assert:\\n    expression: last_response[\"status\"] == 200'"),
+             "easybdd validate --snippet '- test.assert:\\n    expression: last_response[\"status\"] == 200'"),
         ],
         "notes": [],
     },
 
     "run": {
         "summary": "Run local YAML test files",
-        "usage":   "easy_bdd run [path] [options]",
+        "usage":   "easybdd run [path] [options]",
         "required": [],
         "optional": [
             ("path",             "path",   "tests/cases/",            "Test file or directory to run"),
@@ -219,22 +219,22 @@ _COMMANDS = {
         ],
         "examples": [
             ("Run all tests",
-             "easy_bdd run"),
+             "easybdd run"),
             ("Run a specific test file",
-             "easy_bdd run tests/cases/my_test.yaml"),
+             "easybdd run tests/cases/my_test.yaml"),
             ("Run tests tagged 'firmware'",
-             "easy_bdd run --tags firmware"),
+             "easybdd run --tags firmware"),
             ("Run headless with results exported",
-             "easy_bdd run tests/cases/ --headless --export-results results.json"),
+             "easybdd run tests/cases/ --headless --export-results results.json"),
         ],
         "notes": [
-            "For TestRail-driven runs use 'easy_bdd testrail-run' instead",
+            "For TestRail-driven runs use 'easybdd testrail-run' instead",
         ],
     },
 
     "generate": {
         "summary": "Generate Gherkin .feature files from local YAML tests",
-        "usage":   "easy_bdd generate <path> [options]",
+        "usage":   "easybdd generate <path> [options]",
         "required": [
             ("path", "path", "YAML test file or directory to convert"),
         ],
@@ -244,14 +244,14 @@ _COMMANDS = {
         ],
         "examples": [
             ("Generate Gherkin from all YAML tests",
-             "easy_bdd generate tests/cases/"),
+             "easybdd generate tests/cases/"),
         ],
         "notes": [],
     },
 
     "mcp-serve": {
         "summary": "Start the Easy BDD MCP server (for Claude / AI integrations)",
-        "usage":   "easy_bdd mcp-serve [options]",
+        "usage":   "easybdd mcp-serve [options]",
         "required": [],
         "optional": [
             ("--sse",  "flag", None,    "Use HTTP/SSE transport instead of STDIO"),
@@ -260,9 +260,9 @@ _COMMANDS = {
         ],
         "examples": [
             ("Start in STDIO mode (default, for Claude Desktop)",
-             "easy_bdd mcp-serve"),
+             "easybdd mcp-serve"),
             ("Start in SSE/HTTP mode",
-             "easy_bdd mcp-serve --sse --port 8080"),
+             "easybdd mcp-serve --sse --port 8080"),
         ],
         "notes": [],
     },
@@ -305,14 +305,14 @@ def _print_contextual_help(tokens: list) -> None:
             print(f"  {cmd:<26}  {desc}")
         print(_hr())
         print()
-        print("  Usage:  easy_bdd <command> ?         show help for a command")
-        print("  Usage:  easy_bdd <command> <args> ?  show what comes next")
+        print("  Usage:  easybdd <command> ?         show help for a command")
+        print("  Usage:  easybdd <command> <args> ?  show what comes next")
         print()
         print("  Most common:")
-        print("    easy_bdd testrail-run ?")
-        print("    easy_bdd testrail-create-run ?")
-        print("    easy_bdd testrail-list ?")
-        print("    easy_bdd validate ?")
+        print("    easybdd testrail-run ?")
+        print("    easybdd testrail-create-run ?")
+        print("    easybdd testrail-list ?")
+        print("    easybdd validate ?")
         print()
         return
 
@@ -400,11 +400,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m easy_bdd run                              # Run all tests
-  python -m easy_bdd run tests/cases/login.yaml      # Run specific test
-  python -m easy_bdd run --tags browser,api          # Run tests with tags
-  python -m easy_bdd docker-run tests/cases/login.yaml  # Run test in Docker
-  python -m easy_bdd generate tests/cases/           # Generate Gherkin only
+  python -m easybdd run                              # Run all tests
+  python -m easybdd run tests/cases/login.yaml      # Run specific test
+  python -m easybdd run --tags browser,api          # Run tests with tags
+  python -m easybdd docker-run tests/cases/login.yaml  # Run test in Docker
+  python -m easybdd generate tests/cases/           # Generate Gherkin only
         """,
     )
 
@@ -481,11 +481,11 @@ Examples:
             "Validate Easy BDD test YAML for syntax, action names, parameters,\n"
             "shared step references, and variable usage.\n\n"
             "Examples:\n"
-            "  python -m easy_bdd validate tests/cases/my_test.yaml\n"
-            "  python -m easy_bdd validate tests/cases/\n"
-            "  python -m easy_bdd validate --snippet \"- test.assert:\\n    expression: x == 1\"\n"
-            "  python -m easy_bdd validate --snippet-file my_steps.yaml\n"
-            "  cat steps.yaml | python -m easy_bdd validate --stdin"
+            "  python -m easybdd validate tests/cases/my_test.yaml\n"
+            "  python -m easybdd validate tests/cases/\n"
+            "  python -m easybdd validate --snippet \"- test.assert:\\n    expression: x == 1\"\n"
+            "  python -m easybdd validate --snippet-file my_steps.yaml\n"
+            "  cat steps.yaml | python -m easybdd validate --stdin"
         ),
     )
     validate_parser.add_argument(
@@ -718,7 +718,7 @@ Examples:
     # TestRail sync command — Easy BDD TestRail suite → local YAML files
     trs_parser = subparsers.add_parser(
         "testrail-sync",
-        help="Sync an Easy BDD TestRail suite to local YAML files runnable via 'easy_bdd run'",
+        help="Sync an Easy BDD TestRail suite to local YAML files runnable via 'easybdd run'",
     )
     trs_parser.add_argument(
         "project_id",
@@ -938,9 +938,9 @@ Examples:
               .py        — Playwright Python codegen output
 
             Examples:
-              python -m easy_bdd crawler convert-crx recording.ts
-              python -m easy_bdd crawler convert-crx recording.json --output tests/cases/
-              python -m easy_bdd crawler convert-crx *.ts --output tests/cases/
+              python -m easybdd crawler convert-crx recording.ts
+              python -m easybdd crawler convert-crx recording.json --output tests/cases/
+              python -m easybdd crawler convert-crx *.ts --output tests/cases/
         """),
     )
     crawler_crx.add_argument(
@@ -1615,7 +1615,7 @@ def docker_run(args) -> int:
         # If docker info fails, continue anyway - docker run will fail with a better error
         pass
 
-    # Get project root (parent of easy_bdd package)
+    # Get project root (parent of easybdd package)
     project_root = Path(__file__).parent.parent.parent
     test_path = Path(args.test_path)
     
@@ -1681,7 +1681,7 @@ def docker_run(args) -> int:
             run_cmd.extend(["-e", "HEADLESS=true"])
         
         # Build the test execution command inside container
-        container_test_cmd = ["python", "-m", "easy_bdd", "run", str(test_path_in_container)]
+        container_test_cmd = ["python", "-m", "easybdd", "run", str(test_path_in_container)]
         
         if args.headless:
             container_test_cmd.append("--headless")
@@ -1787,7 +1787,7 @@ def generate_features(args) -> int:
 def edit_test(args) -> int:
     """Open a test file in the default editor"""
     from pathlib import Path
-    from easy_bdd.core.parser import YAMLParser
+    from easybdd.core.parser import YAMLParser
     import platform
     import subprocess
     
@@ -2203,7 +2203,7 @@ def testrail_list(args) -> int:
         print("-" * 50)
         for p in projects:
             print(f"{p['id']:<8} {p['name']}")
-        print(f"\nUse 'easy_bdd testrail-list <project_id>' to see active runs.")
+        print(f"\nUse 'easybdd testrail-list <project_id>' to see active runs.")
     else:
         # List runs for a specific project
         import time

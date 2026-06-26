@@ -206,13 +206,13 @@ curl http://localhost:8000/api/tests/execution/{test_id}
 ### Via Command Line
 ```bash
 # Run test in background and monitor
-nohup python -m easy_bdd run tests/cases/long_test.yaml > test.log 2>&1 &
+nohup python -m easybdd run tests/cases/long_test.yaml > test.log 2>&1 &
 
 # Monitor progress
 tail -f test.log
 
 # Check if still running
-ps aux | grep easy_bdd
+ps aux | grep easybdd
 ```
 
 ## 🚨 Troubleshooting

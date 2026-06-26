@@ -20,9 +20,9 @@ _FRONTEND = Path(__file__).parent.parent / "frontend"
 if str(_FRONTEND) not in sys.path:
     sys.path.insert(0, str(_FRONTEND))
 
-from easy_bdd.services.testrail_service import TestRailService
-from easy_bdd.core.testrail_utils import build_testrail_preconditions
-from easy_bdd.core.suite_converter import _sanitize
+from easybdd.services.testrail_service import TestRailService
+from easybdd.core.testrail_utils import build_testrail_preconditions
+from easybdd.core.suite_converter import _sanitize
 
 SOURCE_PROJECT  = 81
 SOURCE_SUITE_ID = 56195

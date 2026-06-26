@@ -181,7 +181,7 @@ class DatalakeLogger:
 
             # Get project path
             project_path = os.getcwd()
-            project_path = os.path.join(project_path, "easy_bdd")
+            project_path = os.path.join(project_path, "easybdd")
 
             if original_exception:
                 tb = original_exception.__traceback__

@@ -9,7 +9,7 @@ Why this is better than DOM scraping for test generation:
   - Same data Playwright's own locators use internally
 
 Usage:
-    from easy_bdd.crawler.accessibility_snapshotter import snapshot_page_a11y
+    from easybdd.crawler.accessibility_snapshotter import snapshot_page_a11y
 
     # Inside a Playwright sync context:
     page_snapshot = snapshot_page_a11y(page)

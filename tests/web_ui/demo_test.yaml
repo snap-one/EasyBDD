@@ -3,7 +3,7 @@ description: "Demonstrates multiple web UI testing capabilities"
 tags: ["demo", "functional", "smoke"]
 
 variables:
-  search_term: "easy_bdd_test"
+  search_term: "easybdd_test"
   
 steps:
   # Test navigation

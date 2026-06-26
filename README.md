@@ -69,24 +69,24 @@ AWS_DEFAULT_REGION=us-east-1
 **Find and run all pending TestRail tests in a project:**
 
 ```bash
-python -m easy_bdd testrail-run --project-id 12
+python -m easybdd testrail-run --project-id 12
 ```
 
 **Run a specific TestRail run by ID:**
 
 ```bash
-python -m easy_bdd testrail-run --run-id 194434
+python -m easybdd testrail-run --run-id 194434
 ```
 
 **List runs available to execute:**
 
 ```bash
-python -m easy_bdd testrail-list --project-id 12
+python -m easybdd testrail-list --project-id 12
 ```
 
 Results are posted back to TestRail automatically — pass/fail/skip per case, plus a run summary. See [Authoring Tests in TestRail](#authoring-tests-in-testrail) for how to write the cases.
 
-> **Running local YAML files:** `python -m easy_bdd run tests/cases/my_test.yaml` — see [Local YAML (supplemental)](#local-yaml-supplemental).
+> **Running local YAML files:** `python -m easybdd run tests/cases/my_test.yaml` — see [Local YAML (supplemental)](#local-yaml-supplemental).
 
 ---
 
@@ -224,19 +224,19 @@ message: "Testing ${product} at ${mac}"
 
 ```bash
 # Run all EASY_BDD: runs with pending tests in a project
-python -m easy_bdd testrail-run --project-id 12
+python -m easybdd testrail-run --project-id 12
 
 # Run a specific run by ID
-python -m easy_bdd testrail-run --run-id 194434
+python -m easybdd testrail-run --run-id 194434
 
 # Quiet output (errors only)
-python -m easy_bdd testrail-run --project-id 12 --quiet
+python -m easybdd testrail-run --project-id 12 --quiet
 
 # Skip datalake reporting for this run
-python -m easy_bdd testrail-run --project-id 12 --no-datalake
+python -m easybdd testrail-run --project-id 12 --no-datalake
 
 # List runs available in a project
-python -m easy_bdd testrail-list --project-id 12
+python -m easybdd testrail-list --project-id 12
 ```
 
 The runner scans for runs whose name starts with `EASY_BDD:` (configurable via `TESTRAIL_RUN_PREFIX` in `.env` or `config/framework.yaml`).
@@ -835,20 +835,20 @@ name: final-state
 
 ```bash
 # Single test
-python -m easy_bdd run tests/cases/my_test.yaml
+python -m easybdd run tests/cases/my_test.yaml
 
 # Folder (all tests)
-python -m easy_bdd run tests/cases/networking/
+python -m easybdd run tests/cases/networking/
 
 # By tag
-python -m easy_bdd run --tags smoke
-python -m easy_bdd run --tags browser,api
+python -m easybdd run --tags smoke
+python -m easybdd run --tags browser,api
 
 # Visible browser
-python -m easy_bdd run tests/cases/my_test.yaml --headed
+python -m easybdd run tests/cases/my_test.yaml --headed
 
 # Specific environment
-python -m easy_bdd run --env staging
+python -m easybdd run --env staging
 ```
 
 ### Shared steps (local)
@@ -948,24 +948,24 @@ python frontend/bdd_migrator.py --run-id <testrail_run_id>
 
 ```bash
 # TestRail — primary
-python -m easy_bdd testrail-run --project-id 12
-python -m easy_bdd testrail-run --run-id 194434
-python -m easy_bdd testrail-run --project-id 12 --quiet
-python -m easy_bdd testrail-run --project-id 12 --no-datalake
-python -m easy_bdd testrail-list --project-id 12
+python -m easybdd testrail-run --project-id 12
+python -m easybdd testrail-run --run-id 194434
+python -m easybdd testrail-run --project-id 12 --quiet
+python -m easybdd testrail-run --project-id 12 --no-datalake
+python -m easybdd testrail-list --project-id 12
 
 # Local YAML — supplemental
-python -m easy_bdd run tests/cases/my_test.yaml
-python -m easy_bdd run tests/cases/my_test.yaml --headed
-python -m easy_bdd run tests/cases/ --tags smoke
-python -m easy_bdd run --env staging
+python -m easybdd run tests/cases/my_test.yaml
+python -m easybdd run tests/cases/my_test.yaml --headed
+python -m easybdd run tests/cases/ --tags smoke
+python -m easybdd run --env staging
 
 # Validation
-python -m easy_bdd validate tests/cases/
+python -m easybdd validate tests/cases/
 
 # Help
-python -m easy_bdd --help
-python -m easy_bdd testrail-run --help
+python -m easybdd --help
+python -m easybdd testrail-run --help
 ```
 
 ---
@@ -974,7 +974,7 @@ python -m easy_bdd testrail-run --help
 
 ```
 Easy_BDD/
-├── easy_bdd/
+├── easybdd/
 │   ├── core/
 │   │   ├── runner.py              # Execution engine, ActionRegistry, control flow
 │   │   ├── testrail_runner.py     # TestRail lifecycle — find, execute, post results
@@ -1031,7 +1031,7 @@ Check the action name uses dot-notation: `browser.click`, not `click element`. D
 
 ```bash
 playwright install chromium
-python -m easy_bdd run tests/cases/my_test.yaml --headed
+python -m easybdd run tests/cases/my_test.yaml --headed
 ```
 
 **SSH connection refused after reboot**
@@ -1060,6 +1060,6 @@ Check the value at **Administration → Statuses** in TestRail.
 **Getting help**
 
 ```bash
-python -m easy_bdd --help
-python -m easy_bdd testrail-run --help
+python -m easybdd --help
+python -m easybdd testrail-run --help
 ```

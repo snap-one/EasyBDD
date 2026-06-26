@@ -252,7 +252,7 @@ The framework posts this JSON structure to your datalake:
 
 ### Custom Datalake Endpoint
 
-The datalake configuration is in `easy_bdd/core/datalake_logger.py`:
+The datalake configuration is in `easybdd/core/datalake_logger.py`:
 
 ```python
 # Default configuration

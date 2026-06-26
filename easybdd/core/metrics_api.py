@@ -20,11 +20,11 @@ except ImportError:
     FASTAPI_AVAILABLE = False
     print("\n⚠️  FastAPI not installed. Metrics API requires optional dependencies.")
     print("   Install with: pip install fastapi uvicorn")
-    print("   Or use the CLI tool instead: python -m easy_bdd.tools.metrics_cli\n")
+    print("   Or use the CLI tool instead: python -m easybdd.tools.metrics_cli\n")
     import sys
     sys.exit(1)
 
-from easy_bdd.core.metrics_engine import TestMetrics
+from easybdd.core.metrics_engine import TestMetrics
 
 
 class MetricsAPI:
@@ -260,7 +260,7 @@ def create_metrics_api(results_dir: Path = None, s3_bucket: str = None) -> FastA
         Configured FastAPI app
 
     Example:
-        >>> from easy_bdd.core.metrics_api import create_metrics_api
+        >>> from easybdd.core.metrics_api import create_metrics_api
         >>> app = create_metrics_api(Path("reports"))
         >>> # Run with: uvicorn metrics_api:app --reload
     """

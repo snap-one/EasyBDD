@@ -51,5 +51,5 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN mkdir -p /app/reports /app/tests/cases
 
 # Default command
-CMD ["python", "-m", "easy_bdd", "run", "tests/cases/"]
+CMD ["python", "-m", "easybdd", "run", "tests/cases/"]
 

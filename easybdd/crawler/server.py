@@ -11,7 +11,7 @@ Endpoints:
   POST /heal                    — single-shot selector self-heal call
 
 Start with:
-  python -m easy_bdd crawler start [--port 8765]
+  python -m easybdd crawler start [--port 8765]
 """
 
 from __future__ import annotations

@@ -67,7 +67,7 @@ class RecorderConverter:
 
     def _to_browser_step(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Convert a flat {action: '...', param: ...} dict to the easy_bdd
+        Convert a flat {action: '...', param: ...} dict to the easybdd
         nested browser.xxx format:
           {browser.open: {url: ...}}
           {browser.click: {role: button, name: Save}}
@@ -761,7 +761,7 @@ class RecorderConverter:
     def _selenium_target_to_selector(self, target: str) -> Dict[str, Any]:
         """
         Convert a Selenium IDE target (e.g. 'css=#btn', 'xpath=//button', 'id=submit',
-        'linkText=Home', 'name=email') to an easy_bdd selector field dict.
+        'linkText=Home', 'name=email') to an easybdd selector field dict.
         Prefers role/label/text over raw CSS where possible.
         """
         if not target:
@@ -967,7 +967,7 @@ class RecorderConverter:
 
     def _katalon_target_to_selector(self, target: str) -> Dict[str, Any]:
         """
-        Convert a Katalon target string to easy_bdd selector fields.
+        Convert a Katalon target string to easybdd selector fields.
         Katalon uses XPath or CSS preceded by 'xpath:' / 'css:' prefixes,
         or object repository names like 'Object Repository/Page_Login/btn_submit'.
         """

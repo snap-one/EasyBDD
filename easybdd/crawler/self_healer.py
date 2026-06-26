@@ -15,7 +15,7 @@ attempts to recover using three strategies in order:
      (requires an active Playwright page object)
 
 Usage from browser_service.py:
-    from easy_bdd.crawler.self_healer import SelfHealer
+    from easybdd.crawler.self_healer import SelfHealer
 
     healer = SelfHealer(ai_client=build_ai_client())
     new_selector = healer.heal(

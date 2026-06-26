@@ -2,7 +2,7 @@
 
 Reads Feature:, Shared:, and Var: cases from a TestRail suite (or run) and
 writes runnable local YAML files so the same tests can be executed via
-`python -m easy_bdd run` without a TestRail connection.
+`python -m easybdd run` without a TestRail connection.
 """
 
 from __future__ import annotations

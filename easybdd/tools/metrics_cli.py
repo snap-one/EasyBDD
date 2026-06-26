@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 import argparse
 
-from easy_bdd.core.metrics_engine import TestMetrics, generate_metrics_report
+from easybdd.core.metrics_engine import TestMetrics, generate_metrics_report
 
 
 def cmd_dashboard(args):

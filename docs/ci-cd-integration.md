@@ -62,7 +62,7 @@ jobs:
           TESTRAIL_USERNAME: ${{ secrets.TESTRAIL_USERNAME }}
           TESTRAIL_API_KEY: ${{ secrets.TESTRAIL_API_KEY }}
         run: |
-          python -m easy_bdd testrail-create-run 59 106662 \
+          python -m easybdd testrail-create-run 59 106662 \
             --given-section "VPS" \
             --sections "Functions" "Firmware Resiliency" "VPS Web UI" "VPS API" \
             --description "Branch: ${{ github.ref_name }}
@@ -140,7 +140,7 @@ pipeline {
             when { environment name: 'HAS_VPS', value: 'true' }
             steps {
                 sh """
-                    python -m easy_bdd testrail-create-run 77 52630 \\
+                    python -m easybdd testrail-create-run 77 52630 \\
                       --given-section "VPS" \\
                       --sections "Functions" "Firmware Resiliency" "VPS Web UI" "VPS API" \\
                       --description "Firmware build: ${env.BUILD_NUMBER}, branch: ${env.GIT_BRANCH}"
@@ -152,7 +152,7 @@ pipeline {
             when { environment name: 'HAS_WIFI', value: 'true' }
             steps {
                 sh """
-                    python -m easy_bdd testrail-create-run 77 52630 \\
+                    python -m easybdd testrail-create-run 77 52630 \\
                       --given-section "WiFi" \\
                       --sections "Functions" "Firmware Resiliency" "WiFi Config" \\
                       --description "Firmware build: ${env.BUILD_NUMBER}, branch: ${env.GIT_BRANCH}"
@@ -164,7 +164,7 @@ pipeline {
             when { environment name: 'HAS_NS', value: 'true' }
             steps {
                 sh """
-                    python -m easy_bdd testrail-create-run 77 52630 \\
+                    python -m easybdd testrail-create-run 77 52630 \\
                       --given-section "NS" \\
                       --sections "Functions" "Firmware Resiliency" "NS API" \\
                       --description "Firmware build: ${env.BUILD_NUMBER}, branch: ${env.GIT_BRANCH}"
@@ -225,7 +225,7 @@ pipeline {
         stage('Create smoke runs') {
             steps {
                 sh """
-                    python -m easy_bdd testrail-create-run 59 106662 \\
+                    python -m easybdd testrail-create-run 59 106662 \\
                       --given-section "VPS" \\
                       --sections "Functions" "Firmware Resiliency" "VPS Web UI" "VPS API" \\
                       --description "Branch: ${env.GIT_BRANCH}
@@ -247,7 +247,7 @@ Developer pushes to GitHub
         │
         ▼
 GitHub Actions (create-smoke-run.yml)
-  └─ Installs easy_bdd
+  └─ Installs easybdd
   └─ Calls testrail-create-run --given-section "VPS" ...
   └─ Creates N TestRail runs (one per SKU)
         │
@@ -256,7 +256,7 @@ TestRail now has open runs with Untested cases
         │
         ▼ (polling, ~5 min interval)
 Jenkins (testrail-run pipeline)
-  └─ python -m easy_bdd testrail-run 59
+  └─ python -m easybdd testrail-run 59
   └─ Finds runs with pending Untested/Retest cases
   └─ Executes each Feature:/Test: case
   └─ Posts results back to TestRail

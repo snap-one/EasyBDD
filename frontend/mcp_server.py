@@ -807,7 +807,7 @@ def run_test(path: str, headed: bool = False) -> str:
     if not fpath.exists():
         return json.dumps({"error": f"File not found: {path}"})
 
-    cmd = [sys.executable, "-m", "easy_bdd", "run", str(fpath)]
+    cmd = [sys.executable, "-m", "easybdd", "run", str(fpath)]
     if headed:
         cmd.append("--headed")
 
@@ -1509,7 +1509,7 @@ def get_testrail_run_failures(run_id: int, status: str = "failed,retest") -> str
     """
     try:
         sys.path.insert(0, str(ROOT))
-        from easy_bdd.services.testrail_service import TestRailService
+        from easybdd.services.testrail_service import TestRailService
         import re as _re
 
         tr = TestRailService()
@@ -1627,7 +1627,7 @@ def repush_yaml_to_testrail(
     try:
         sys.path.insert(0, str(ROOT))
         import yaml as _yaml
-        from easy_bdd.services.testrail_service import TestRailService
+        from easybdd.services.testrail_service import TestRailService
 
         tr = TestRailService()
 

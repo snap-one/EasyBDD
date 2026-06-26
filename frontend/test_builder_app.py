@@ -3,7 +3,7 @@ DEPRECATED — The local web builder is no longer the primary authoring surface.
 
 Test cases are now authored directly in TestRail using the Easy BDD case prefix
 taxonomy (Feature:, Test:, Var:, Setup:, Teardown:, Shared:) and dot-notation
-step syntax. Run tests via `python -m easy_bdd testrail-run --project-id <id>`.
+step syntax. Run tests via `python -m easybdd testrail-run --project-id <id>`.
 
 This file is kept for reference only and is not actively maintained.
 """
@@ -1220,7 +1220,7 @@ async def execute_test(
             )
 
             # Build command - use absolute path
-            cmd = [python_executable, "-m", "easy_bdd", "run", str(test_path)]
+            cmd = [python_executable, "-m", "easybdd", "run", str(test_path)]
 
             if request.headless:
                 cmd.append("--headless")
@@ -2968,7 +2968,7 @@ async def generate_report_from_json_file(
         with open(result_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        # Import HTMLReporter directly from file to avoid importing entire easy_bdd package
+        # Import HTMLReporter directly from file to avoid importing entire easybdd package
         import importlib.util
         import sys
         from pathlib import Path as PathLib
@@ -2980,7 +2980,7 @@ async def generate_report_from_json_file(
 
         try:
             # Import directly from the file to avoid __init__.py dependencies
-            html_reporter_path = project_root / "easy_bdd" / "core" / "html_reporter.py"
+            html_reporter_path = project_root / "easybdd" / "core" / "html_reporter.py"
             if not html_reporter_path.exists():
                 raise HTTPException(
                     status_code=500, detail="HTMLReporter module not found"
@@ -3497,7 +3497,7 @@ async def execute_test_suite_background(
                 )
 
                 # Build command
-                cmd = [python_executable, "-m", "easy_bdd", "run", str(test_path)]
+                cmd = [python_executable, "-m", "easybdd", "run", str(test_path)]
 
                 if request.headless:
                     cmd.append("--headless")
@@ -6568,7 +6568,7 @@ async def execute_test_internal(test_id: str, test_path: Path, request: TestExec
     python_executable = str(venv_python) if venv_python.exists() else sys.executable
     
     # Build command
-    cmd = [python_executable, "-m", "easy_bdd", "run", str(test_path)]
+    cmd = [python_executable, "-m", "easybdd", "run", str(test_path)]
     
     if request.headless:
         cmd.append("--headless")

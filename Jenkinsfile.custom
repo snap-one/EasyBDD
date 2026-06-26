@@ -53,7 +53,7 @@ pipeline {
                         rm -f reports/run_${projectId}.properties
                         set -a && . .env && set +a
                         . env/bin/activate
-                        python -m easy_bdd testrail-run ${projectId} --prefix '${runPrefix}' || true
+                        python -m easybdd testrail-run ${projectId} --prefix '${runPrefix}' || true
                     """
                 }
             }

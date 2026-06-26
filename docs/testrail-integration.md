@@ -39,9 +39,9 @@ Run Easy BDD tests directly from TestRail — no local YAML files required for s
 
 3. Run from the CLI:
    ```bash
-   python -m easy_bdd testrail-run <project_id>
+   python -m easybdd testrail-run <project_id>
    # or target a specific run by ID:
-   python -m easy_bdd testrail-run <project_id> --run-id <run_id>
+   python -m easybdd testrail-run <project_id> --run-id <run_id>
    ```
 
 ---
@@ -822,11 +822,11 @@ This fires at 9:00 AM, Monday through Friday.
 Run this from a cron job on your CI/CD server or any machine:
 
 ```bash
-# /etc/cron.d/easy_bdd  (Linux)
-0 9 * * MON-FRI cd /path/to/easy_bdd && python -m easy_bdd testrail-run 77
+# /etc/cron.d/easybdd  (Linux)
+0 9 * * MON-FRI cd /path/to/easybdd && python -m easybdd testrail-run 77
 
 # Windows Task Scheduler command:
-python -m easy_bdd testrail-run 77
+python -m easybdd testrail-run 77
 ```
 
 The TestRail run description's `cron` field is the source of truth — the machine just calls the command, and Easy BDD decides whether it's the right time to run.
@@ -855,13 +855,13 @@ Combine with cron:
 
 ```bash
 # Scan a project for the next EASY_BDD: run with pending tests
-python -m easy_bdd testrail-run 77
+python -m easybdd testrail-run 77
 
 # Target a specific run by ID
-python -m easy_bdd testrail-run 77 --run-id 194436
+python -m easybdd testrail-run 77 --run-id 194436
 
 # List all EASY_BDD: runs in a project
-python -m easy_bdd testrail-list 77
+python -m easybdd testrail-list 77
 ```
 
 Required environment variables (or `.env` file):
@@ -879,7 +879,7 @@ TESTRAIL_API_KEY=your_api_key_here
 The `testrail-create-run` command creates one or more TestRail test runs from the command line. Use it from CI/CD pipelines, GitHub Actions, or Jenkinsfiles to create runs automatically on push or firmware detection.
 
 ```bash
-python -m easy_bdd testrail-create-run <project_id> <suite_id> [options]
+python -m easybdd testrail-create-run <project_id> <suite_id> [options]
 ```
 
 ### Arguments
@@ -901,7 +901,7 @@ python -m easy_bdd testrail-create-run <project_id> <suite_id> [options]
 Creates one run containing all cases from the specified sections.
 
 ```bash
-python -m easy_bdd testrail-create-run 59 106662 \
+python -m easybdd testrail-create-run 59 106662 \
   --name "EASY_BDD: Regression Smoke Test" \
   --sections "Functions" "Firmware Resiliency" "VPS API" \
   --description "Triggered by commit abc1234"
@@ -914,7 +914,7 @@ Searches the given section for cases whose titles start with `Given:`. Creates o
 This is useful when multiple device SKUs share the same test sections but each needs its own TestRail run.
 
 ```bash
-python -m easy_bdd testrail-create-run 77 52630 \
+python -m easybdd testrail-create-run 77 52630 \
   --given-section "VPS" \
   --sections "Functions" "Firmware Resiliency" "VPS Web UI" "VPS API"
 ```
@@ -930,7 +930,7 @@ EASY_BDD: WB-900CH1U Smoke Test
 ### Dry run (preview without creating)
 
 ```bash
-python -m easy_bdd testrail-create-run 77 52630 \
+python -m easybdd testrail-create-run 77 52630 \
   --given-section "VPS" \
   --sections "Functions" "Firmware Resiliency" \
   --dry-run

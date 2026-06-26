@@ -784,15 +784,8 @@ class TestRailRunner:
             if case["role"] != "var":
                 continue
             body = _get_case_body(case)
+            # Fetch full case body if the run's test list didn't include it
             if not body:
-                continue
-            # Fetch full case body if the run's test list doesn't include it
-            has_body = bool(
-                case.get("custom_preconds")
-                or case.get("custom_steps")
-                or case.get("custom_steps_separated")
-            )
-            if not has_body:
                 case_id = case.get("case_id")
                 if case_id:
                     try:
@@ -801,6 +794,8 @@ class TestRailRunner:
                         body = _get_case_body(case)
                     except Exception:
                         pass
+            if not body:
+                continue
             try:
                 body_fixed = _fix_step_list_indent(body)
                 parsed = _yaml_safe_load_lenient(body_fixed)

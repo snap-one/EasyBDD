@@ -5,9 +5,9 @@ Exposes the Easy BDD framework to AI models as Tools, Resources, and Prompts
 following the Model Context Protocol specification.
 
 Usage:
-    python -m easy_bdd mcp-serve            # STDIO transport (default, for Claude Desktop)
-    python -m easy_bdd mcp-serve --sse      # SSE transport (for web clients)
-    python -m easy_bdd mcp-serve --port 8080 --sse
+    python -m easybdd mcp-serve            # STDIO transport (default, for Claude Desktop)
+    python -m easybdd mcp-serve --sse      # SSE transport (for web clients)
+    python -m easybdd mcp-serve --port 8080 --sse
 
 Safety:
     - run_tests defaults to dry_run=True; set dry_run=False to execute
@@ -1178,7 +1178,7 @@ def get_testrail_run_failures(run_id: int, status: str = "failed,retest") -> str
     try:
         import sys as _sys
         _sys.path.insert(0, str(_PROJECT_ROOT))
-        from easy_bdd.services.testrail_service import TestRailService
+        from easybdd.services.testrail_service import TestRailService
 
         tr = TestRailService()
 
@@ -1263,7 +1263,7 @@ def repush_yaml_to_testrail(path: str, case_id=None) -> str:
         return json.dumps({"error": "No case_id provided and none found in variables.testrail_case_id."})
 
     try:
-        from easy_bdd.services.testrail_service import TestRailService
+        from easybdd.services.testrail_service import TestRailService
         tr = TestRailService()
         steps_yaml = _yaml.dump(
             {"steps": data.get("steps", [])},
@@ -1306,7 +1306,7 @@ def import_playwright_recording(
     output_dir      : Where to write YAML files (relative to project root).
     push_to_testrail: If True, push cases to TestRail immediately after conversion.
     """
-    from easy_bdd.crawler.playwright_importer import import_recording
+    from easybdd.crawler.playwright_importer import import_recording
 
     try:
         abs_output = str(_PROJECT_ROOT / output_dir)
@@ -1326,8 +1326,8 @@ def import_playwright_recording(
 
     if push_to_testrail and cases and project_id:
         try:
-            from easy_bdd.services.testrail_service import TestRailService
-            from easy_bdd.crawler.testrail_publisher import TestRailPublisher
+            from easybdd.services.testrail_service import TestRailService
+            from easybdd.crawler.testrail_publisher import TestRailPublisher
 
             tr = TestRailService()
             publisher = TestRailPublisher(
@@ -1435,7 +1435,7 @@ def ollama_analyze_test(path: str = "", case_id: int = 0, question: str = "") ->
 
     if case_id:
         try:
-            from easy_bdd.services.testrail_service import TestRailService
+            from easybdd.services.testrail_service import TestRailService
             tr = TestRailService()
             case = tr.get_case(case_id)
             test_name = case.get("title", f"Case {case_id}")
@@ -1603,7 +1603,7 @@ Return ONLY valid YAML — a list of test case objects:
         if push_to_testrail or output_dir:
             import yaml as _yaml
             from pathlib import Path as _Path
-            from easy_bdd.crawler.models import GeneratedTestCase, GeneratedStep
+            from easybdd.crawler.models import GeneratedTestCase, GeneratedStep
 
             try:
                 raw_cases = _yaml.safe_load(yaml_clean)
@@ -1629,7 +1629,7 @@ Return ONLY valid YAML — a list of test case objects:
                     ))
 
                 if output_dir:
-                    from easy_bdd.crawler.yaml_writer import write_test_case
+                    from easybdd.crawler.yaml_writer import write_test_case
                     out = _Path(_PROJECT_ROOT / output_dir)
                     out.mkdir(parents=True, exist_ok=True)
                     for case in cases:
@@ -1637,8 +1637,8 @@ Return ONLY valid YAML — a list of test case objects:
                     result["files_written"] = len(cases)
 
                 if push_to_testrail and project_id and cases:
-                    from easy_bdd.services.testrail_service import TestRailService
-                    from easy_bdd.crawler.testrail_publisher import TestRailPublisher
+                    from easybdd.services.testrail_service import TestRailService
+                    from easybdd.crawler.testrail_publisher import TestRailPublisher
                     tr = TestRailService()
                     publisher = TestRailPublisher(
                         testrail=tr,
@@ -1680,7 +1680,7 @@ def ollama_improve_testrail_case(
     import requests as _requests
 
     try:
-        from easy_bdd.services.testrail_service import TestRailService
+        from easybdd.services.testrail_service import TestRailService
         tr = TestRailService()
         case = tr.get_case(case_id)
     except Exception as e:

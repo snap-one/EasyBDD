@@ -62,21 +62,21 @@ hooks:
 # Code Quality
 lint:
 	@echo "Running flake8..."
-	$(PYTHON) -m flake8 easy_bdd/
+	$(PYTHON) -m flake8 easybdd/
 
 format:
 	@echo "Running black..."
-	$(PYTHON) -m black easy_bdd/ tests/
+	$(PYTHON) -m black easybdd/ tests/
 	@echo "Running isort..."
-	$(PYTHON) -m isort easy_bdd/ tests/
+	$(PYTHON) -m isort easybdd/ tests/
 
 type-check:
 	@echo "Running mypy..."
-	$(PYTHON) -m mypy easy_bdd/
+	$(PYTHON) -m mypy easybdd/
 
 security:
 	@echo "Running bandit security checks..."
-	$(PYTHON) -m bandit -r easy_bdd/ -ll
+	$(PYTHON) -m bandit -r easybdd/ -ll
 
 quality: lint type-check security
 	@echo "All quality checks complete!"
@@ -86,38 +86,38 @@ test:
 	$(PYTHON) -m pytest tests/unit/ -v
 
 test-cov:
-	$(PYTHON) -m pytest tests/unit/ --cov=easy_bdd --cov-report=html --cov-report=term
+	$(PYTHON) -m pytest tests/unit/ --cov=easybdd --cov-report=html --cov-report=term
 
 validate:
-	$(PYTHON) -m easy_bdd validate tests/cases/
+	$(PYTHON) -m easybdd validate tests/cases/
 
 # Running tests
 run:
-	$(PYTHON) -m easy_bdd run tests/cases/
+	$(PYTHON) -m easybdd run tests/cases/
 
 run-tags:
-	$(PYTHON) -m easy_bdd run tests/cases/ --tags $(TAGS)
+	$(PYTHON) -m easybdd run tests/cases/ --tags $(TAGS)
 
 # Metrics & Analytics
 metrics-dashboard:
-	$(PYTHON) -m easy_bdd.tools.metrics_cli dashboard --days 7
+	$(PYTHON) -m easybdd.tools.metrics_cli dashboard --days 7
 
 metrics-flaky:
-	$(PYTHON) -m easy_bdd.tools.metrics_cli flaky --days 30
+	$(PYTHON) -m easybdd.tools.metrics_cli flaky --days 30
 
 metrics-pass-rate:
-	$(PYTHON) -m easy_bdd.tools.metrics_cli pass-rate --days 30
+	$(PYTHON) -m easybdd.tools.metrics_cli pass-rate --days 30
 
 metrics-export:
-	$(PYTHON) -m easy_bdd.tools.metrics_cli export --output reports/metrics_dashboard.html --format html --days 30
+	$(PYTHON) -m easybdd.tools.metrics_cli export --output reports/metrics_dashboard.html --format html --days 30
 
 metrics-api:
 	@echo "Starting Metrics API on http://localhost:8001"
 	@echo "API docs: http://localhost:8001/docs"
-	$(PYTHON) -m easy_bdd.core.metrics_api
+	$(PYTHON) -m easybdd.core.metrics_api
 
 run-headed:
-	$(PYTHON) -m easy_bdd run tests/cases/ --headed
+	$(PYTHON) -m easybdd run tests/cases/ --headed
 
 # Cleanup
 clean:
@@ -136,12 +136,12 @@ clean-all: clean
 
 # Quick test run
 quick-test:
-	$(PYTHON) -m easy_bdd run tests/cases/dev/simple_test.yaml --headed
+	$(PYTHON) -m easybdd run tests/cases/dev/simple_test.yaml --headed
 
 # Performance benchmark
 benchmark:
 	@echo "Running performance benchmark..."
-	time $(PYTHON) -m easy_bdd run tests/cases/dev/aws_s3_list_firmware.yaml
+	time $(PYTHON) -m easybdd run tests/cases/dev/aws_s3_list_firmware.yaml
 
 # Security validation
 sec-validate: security validate

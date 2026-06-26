@@ -1,4 +1,4 @@
-// Jenkinsfile for jpdsauto/easy_bdd (or any repo you want to watch)
+// Jenkinsfile for jpdsauto/easybdd (or any repo you want to watch)
 // Triggers on SCM change and creates one TestRail regression smoke run
 // for project 59 / suite 106662 with the triggering commit in the description.
 
@@ -48,7 +48,7 @@ Message: ${commitMsg}
                     sh """
                         set -a && . ${EASY_BDD_DIR}/.env && set +a
                         . ${EASY_BDD_DIR}/env/bin/activate
-                        python -m easy_bdd testrail-create-run \\
+                        python -m easybdd testrail-create-run \\
                             ${PROJECT_ID} ${SUITE_ID} \\
                             --name "${RUN_NAME}" \\
                             --description "${description.replace('"', '\\"')}"

@@ -1090,26 +1090,26 @@ cleanup:
 
 ```bash
 # Run all tests
-python -m easy_bdd run
+python -m easybdd run
 
 # Run specific test
-python -m easy_bdd run tests/cases/my_test.yaml
+python -m easybdd run tests/cases/my_test.yaml
 
 # Run with tags
-python -m easy_bdd run --tags smoke
-python -m easy_bdd run --tags "critical,api"
+python -m easybdd run --tags smoke
+python -m easybdd run --tags "critical,api"
 
 # Run with browser visible
-python -m easy_bdd run tests/cases/browser_test.yaml --headed
+python -m easybdd run tests/cases/browser_test.yaml --headed
 
 # Generate Gherkin only
-python -m easy_bdd generate tests/cases/
+python -m easybdd generate tests/cases/
 
 # Validate tests
-python -m easy_bdd validate tests/cases/
+python -m easybdd validate tests/cases/
 
 # Validate with strict mode
-python -m easy_bdd validate tests/cases/ --strict
+python -m easybdd validate tests/cases/ --strict
 
 # View metrics
 make metrics-dashboard

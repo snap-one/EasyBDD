@@ -95,7 +95,7 @@ steps:
 aws configure
 
 # Your tests will automatically use these credentials
-python -m easy_bdd run tests/cases/firmware_test.yaml
+python -m easybdd run tests/cases/firmware_test.yaml
 ```
 
 ### Explicit Credentials in YAML
@@ -121,7 +121,7 @@ export AWS_ACCESS_KEY_ID="your-access-key"
 export AWS_SECRET_ACCESS_KEY="your-secret-key"
 export AWS_DEFAULT_REGION="us-east-1"
 
-python -m easy_bdd run tests/cases/firmware_test.yaml
+python -m easybdd run tests/cases/firmware_test.yaml
 ```
 
 ---

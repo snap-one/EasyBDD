@@ -6,8 +6,8 @@ The server uses an AI backend (Claude or Ollama) to analyze the UI, rank selecto
 generate Easy BDD YAML test files, and push cases to TestRail.
 
 Usage:
-    python -m easy_bdd crawler start            # default port 8765
-    python -m easy_bdd crawler start --port 9000
+    python -m easybdd crawler start            # default port 8765
+    python -m easybdd crawler start --port 9000
 """
 
 from .server import create_app, run_server

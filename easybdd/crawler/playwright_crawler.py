@@ -18,14 +18,14 @@ The Playwright browser session shares no cookies with Chrome — the user
 logs in once inside the Playwright window at startup.
 
 Usage (via CLI):
-    python -m easy_bdd crawler playwright \
+    python -m easybdd crawler playwright \
         --url https://app.example.com \
         --project 12 \
         --provider rules
 
 Usage (programmatic):
-    from easy_bdd.crawler.playwright_crawler import PlaywrightCrawler
-    from easy_bdd.crawler.models import CrawlSessionConfig
+    from easybdd.crawler.playwright_crawler import PlaywrightCrawler
+    from easybdd.crawler.models import CrawlSessionConfig
 
     config = CrawlSessionConfig(
         testrail_project_id=12,

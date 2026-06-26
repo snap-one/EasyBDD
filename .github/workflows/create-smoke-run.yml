@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install easy_bdd
+      - name: Install easybdd
         run: pip install -e . --quiet
 
       - name: Create TestRail Regression Smoke Run
@@ -27,7 +27,7 @@ jobs:
           TESTRAIL_USERNAME: ${{ secrets.TESTRAIL_USERNAME }}
           TESTRAIL_API_KEY: ${{ secrets.TESTRAIL_API_KEY }}
         run: |
-          python -m easy_bdd testrail-create-run 59 106662 \
+          python -m easybdd testrail-create-run 59 106662 \
             --name "EASY_BDD: Regression Smoke Test" \
             --description "$(cat <<EOF
           Auto-created by GitHub Actions

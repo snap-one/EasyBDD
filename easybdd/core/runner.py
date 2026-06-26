@@ -280,9 +280,9 @@ class TestRunner:
             print(f"   Error: {e}")
             print(f"\n💡 To edit the test file, run:")
             if test_path.is_file():
-                print(f"   python -m easy_bdd edit-test \"{test_path}\"")
+                print(f"   python -m easybdd edit-test \"{test_path}\"")
             else:
-                print(f"   python -m easy_bdd edit-test \"<test_file_path>\"")
+                print(f"   python -m easybdd edit-test \"<test_file_path>\"")
             return TestResult(
                 success=False,
                 total_tests=0,

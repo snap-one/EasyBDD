@@ -10,7 +10,7 @@ Once connected, the AI can list, read, validate, and run your tests directly fro
 
 | Server | File | Best for |
 |--------|------|----------|
-| **Framework server** (`easy_bdd` package) | `easy_bdd/mcp_server.py` | Full framework access — validate, run, fix, TestRail integration |
+| **Framework server** (`easybdd` package) | `easybdd/mcp_server.py` | Full framework access — validate, run, fix, TestRail integration |
 | **Frontend server** | `frontend/mcp_server.py` | Test authoring — create/update tests, browse actions, workspace management |
 
 Both speak standard MCP over **STDIO** (default), **Streamable HTTP** (recommended for remote access), or **SSE** (deprecated).  
@@ -56,9 +56,9 @@ Add the server to your project's `.claude/settings.json` (project-scoped) or
 {
   "mcpServers": {
     "easy-bdd": {
-      "command": "/Users/mark/Projects/easy_bdd/.venv/bin/python",
-      "args": ["-m", "easy_bdd", "mcp-serve"],
-      "cwd": "/Users/mark/Projects/easy_bdd"
+      "command": "/Users/mark/Projects/easybdd/.venv/bin/python",
+      "args": ["-m", "easybdd", "mcp-serve"],
+      "cwd": "/Users/mark/Projects/easybdd"
     }
   }
 }
@@ -73,9 +73,9 @@ To use the **frontend server** instead (or in addition):
 {
   "mcpServers": {
     "easy-bdd-frontend": {
-      "command": "/Users/mark/Projects/easy_bdd/.venv/bin/python",
+      "command": "/Users/mark/Projects/easybdd/.venv/bin/python",
       "args": ["frontend/mcp_server.py"],
-      "cwd": "/Users/mark/Projects/easy_bdd"
+      "cwd": "/Users/mark/Projects/easybdd"
     }
   }
 }
@@ -94,9 +94,9 @@ Edit `~/.claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "easy-bdd": {
-      "command": "/Users/mark/Projects/easy_bdd/.venv/bin/python",
-      "args": ["-m", "easy_bdd", "mcp-serve"],
-      "cwd": "/Users/mark/Projects/easy_bdd"
+      "command": "/Users/mark/Projects/easybdd/.venv/bin/python",
+      "args": ["-m", "easybdd", "mcp-serve"],
+      "cwd": "/Users/mark/Projects/easybdd"
     }
   }
 }
@@ -109,9 +109,9 @@ Python:
 {
   "mcpServers": {
     "easy-bdd": {
-      "command": "C:/path/to/easy_bdd/.venv/Scripts/python.exe",
-      "args": ["-m", "easy_bdd", "mcp-serve"],
-      "cwd": "C:/path/to/easy_bdd"
+      "command": "C:/path/to/easybdd/.venv/Scripts/python.exe",
+      "args": ["-m", "easybdd", "mcp-serve"],
+      "cwd": "C:/path/to/easybdd"
     }
   }
 }
@@ -129,8 +129,8 @@ Open **Settings → Features → MCP** and add a new server entry:
 |-------|-------|
 | Name | `easy-bdd` |
 | Type | `command` |
-| Command | `/Users/mark/Projects/easy_bdd/.venv/bin/python -m easy_bdd mcp-serve` |
-| Working directory | `/Users/mark/Projects/easy_bdd` |
+| Command | `/Users/mark/Projects/easybdd/.venv/bin/python -m easybdd mcp-serve` |
+| Working directory | `/Users/mark/Projects/easybdd` |
 
 Or edit `.cursor/mcp.json` directly (same JSON shape as Claude Code above).
 
@@ -145,9 +145,9 @@ Add to `.vscode/mcp.json` in your workspace (VS Code 1.99+):
   "servers": {
     "easy-bdd": {
       "type": "stdio",
-      "command": "/Users/mark/Projects/easy_bdd/.venv/bin/python",
-      "args": ["-m", "easy_bdd", "mcp-serve"],
-      "cwd": "/Users/mark/Projects/easy_bdd"
+      "command": "/Users/mark/Projects/easybdd/.venv/bin/python",
+      "args": ["-m", "easybdd", "mcp-serve"],
+      "cwd": "/Users/mark/Projects/easybdd"
     }
   }
 }
@@ -164,10 +164,10 @@ and your AI client (Claude Desktop, Cursor) runs on a different machine.
 
 ```bash
 # Foreground
-python -m easy_bdd mcp-serve --streamable-http --host 0.0.0.0 --port 8090
+python -m easybdd mcp-serve --streamable-http --host 0.0.0.0 --port 8090
 
 # Background (daemon)
-nohup python -m easy_bdd mcp-serve --streamable-http --host 0.0.0.0 --port 8090 \
+nohup python -m easybdd mcp-serve --streamable-http --host 0.0.0.0 --port 8090 \
   >> mcp_server.log 2>&1 &
 ```
 
@@ -186,7 +186,7 @@ After=network.target
 Type=simple
 User=jenkins
 WorkingDirectory=/home/jenkins/Easy_BDD
-ExecStart=/home/jenkins/Easy_BDD/env/bin/python -m easy_bdd mcp-serve --streamable-http --host 0.0.0.0 --port 8090
+ExecStart=/home/jenkins/Easy_BDD/env/bin/python -m easybdd mcp-serve --streamable-http --host 0.0.0.0 --port 8090
 EnvironmentFile=/home/jenkins/Easy_BDD/.env
 Restart=always
 RestartSec=5
@@ -258,7 +258,7 @@ SSE transport is deprecated in the MCP specification. Use `--streamable-http`
 instead. The `--sse` flag is kept for backwards compatibility only.
 
 ```bash
-python -m easy_bdd mcp-serve --sse --port 8080
+python -m easybdd mcp-serve --sse --port 8080
 ```
 
 Clients connect to `http://localhost:8080/sse`.

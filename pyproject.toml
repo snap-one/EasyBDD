@@ -73,7 +73,7 @@ Homepage = "https://github.com/yourorg/easy-bdd-framework"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["easy_bdd*"]
+include = ["easybdd*"]
 
 [tool.black]
 line-length = 88
