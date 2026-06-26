@@ -820,7 +820,7 @@ class YAMLParser:
                         action="for_loop",
                         parameters={},
                         for_each=str(step_data["for_each"]),
-                        loop_var=step_data.get("loop_var", "item"),
+                        loop_var=step_data.get("loop_var") or step_data.get("as", "item"),
                         loop_steps=self._parse_steps(loop_steps_data) if loop_steps_data else [],
                         loop_limit=int(step_data.get("limit", 1000)),
                         break_if=step_data.get("break_if"),
