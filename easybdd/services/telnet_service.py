@@ -582,6 +582,11 @@ class TelnetService:
                     ):
                         result = "\n".join(_lines[1:]).lstrip("\n")
 
+                # Strip trailing whitespace so callers get clean values.
+                # A trailing \n from the device prompt causes split()-based
+                # parsing (e.g. split('=')[1]) to include the newline, which
+                # then breaks `value in url` assertions.
+                result = result.rstrip()
                 print(f"         📥 Done ({len(result)} chars)")
             return result
         except OSError as exc:
@@ -598,6 +603,7 @@ class TelnetService:
                 print(f"         📤 Resending: {last_cmd!r}")
                 new_conn.send(data, encoding)
                 result = new_conn.read_until(prompt, timeout, encoding, stream=True)
+                result = result.rstrip()
                 print(f"         📥 Done ({len(result)} chars)")
                 return result
             except Exception:
