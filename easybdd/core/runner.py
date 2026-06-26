@@ -1416,12 +1416,15 @@ class TestRunner:
         return True
 
     def _dispatch_sleep(self, action, step_params, variables, sam=None):
-        seconds = float(
+        raw = (
             self._get_param(step_params, "seconds")
             or self._get_param(step_params, "duration")
             or self._get_param(step_params, "timeout")
             or 1
         )
+        if isinstance(raw, str) and hasattr(self.config, "substitute_variables"):
+            raw = self.config.substitute_variables(raw, variables)
+        seconds = float(raw)
         print(f"      ⏳ Sleeping {seconds}s...")
         time.sleep(seconds)
         return True
