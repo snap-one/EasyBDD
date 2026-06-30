@@ -2281,8 +2281,13 @@ def crawl_device(
 def serve(transport: str = "stdio", host: str = "0.0.0.0", port: int = 8080) -> None:
     """Start the MCP server."""
     if transport in ("sse", "streamable-http"):
+        from mcp.server.fastmcp.server import TransportSecuritySettings
         mcp.settings.host = host
         mcp.settings.port = port
+        # Disable DNS rebinding protection so LAN clients can connect via IP.
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False
+        )
         mcp.run(transport=transport)
     else:
         mcp.run(transport="stdio")
