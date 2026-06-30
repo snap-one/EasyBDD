@@ -1978,7 +1978,7 @@ def create_test_from_description(
 
 
 @mcp.tool()
-def crawl_device(
+async def crawl_device(
     url: str,
     username: str,
     password: str,
@@ -2011,11 +2011,11 @@ def crawl_device(
     ignore_ssl               : Ignore SSL certificate errors (default True for self-signed)
     """
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.async_api import async_playwright
     except ImportError:
         return json.dumps({"error": "playwright not installed"})
 
-    from easybdd.crawler.accessibility_snapshotter import snapshot_page_a11y
+    from easybdd.crawler.accessibility_snapshotter import snapshot_page_a11y_async as snapshot_page_a11y
     from easybdd.crawler.rule_based_analyzer import analyze_snapshot_rules
     from easybdd.crawler.yaml_writer import write_all_cases
     from easybdd.crawler.models import GeneratedTestCase
@@ -2030,7 +2030,7 @@ def crawl_device(
     all_cases: list = []
     errors: list = []
 
-    def _login(page) -> bool:
+    async def _login(page) -> bool:
         user_candidates = (
             [login_username_selector] if login_username_selector
             else ["#login-usernameIpt", "#username", "#email",
@@ -2052,21 +2052,21 @@ def crawl_device(
         user_sel = pass_sel = btn_sel = None
         for sel in user_candidates:
             try:
-                if page.locator(sel).count() > 0:
+                if await page.locator(sel).count() > 0:
                     user_sel = sel
                     break
             except Exception:
                 continue
         for sel in pass_candidates:
             try:
-                if page.locator(sel).count() > 0:
+                if await page.locator(sel).count() > 0:
                     pass_sel = sel
                     break
             except Exception:
                 continue
         for sel in btn_candidates:
             try:
-                if page.locator(sel).count() > 0:
+                if await page.locator(sel).count() > 0:
                     btn_sel = sel
                     break
             except Exception:
@@ -2077,20 +2077,20 @@ def crawl_device(
             return False
 
         try:
-            page.fill(user_sel, username)
-            page.fill(pass_sel, password)
+            await page.fill(user_sel, username)
+            await page.fill(pass_sel, password)
             if btn_sel:
-                page.click(btn_sel)
+                await page.click(btn_sel)
             else:
-                page.keyboard.press("Enter")
-            page.wait_for_load_state("domcontentloaded", timeout=15000)
-            _time.sleep(1.5)
+                await page.keyboard.press("Enter")
+            await page.wait_for_load_state("domcontentloaded", timeout=15000)
+            await page.wait_for_timeout(1500)
             return True
         except Exception as exc:
             errors.append(f"Login failed: {exc}")
             return False
 
-    def _discover_nav_links(page) -> list:
+    async def _discover_nav_links(page) -> list:
         nav_candidates = (
             [nav_selector] if nav_selector
             else ["#sidebar a", "nav a", ".sidebar a", ".nav a",
@@ -2101,9 +2101,9 @@ def crawl_device(
         links = []
         for sel in nav_candidates:
             try:
-                elements = page.locator(sel).all()
+                elements = await page.locator(sel).all()
                 for el in elements:
-                    href = el.get_attribute("href") or ""
+                    href = await el.get_attribute("href") or ""
                     if not href or href.startswith("#") or href.startswith("javascript"):
                         continue
                     full = urljoin(base_url, href)
@@ -2119,8 +2119,8 @@ def crawl_device(
 
         if not links:
             try:
-                for el in page.locator("a[href]").all():
-                    href = el.get_attribute("href") or ""
+                for el in await page.locator("a[href]").all():
+                    href = await el.get_attribute("href") or ""
                     if not href or href.startswith("#") or href.startswith("javascript"):
                         continue
                     full = urljoin(base_url, href)
@@ -2132,19 +2132,19 @@ def crawl_device(
 
         return links[:max_pages]
 
-    def _crawl_page(page, page_url: str) -> tuple:
+    async def _crawl_page(page, page_url: str) -> tuple:
         path_parts = urlparse(page_url).path.strip("/").split("/")
         section = (path_parts[-1].replace("-", " ").replace("_", " ").title()
                    if path_parts and path_parts[-1] else "General")
         try:
-            page.goto(page_url, wait_until="domcontentloaded", timeout=20000)
-            _time.sleep(0.8)
+            await page.goto(page_url, wait_until="domcontentloaded", timeout=20000)
+            await page.wait_for_timeout(800)
         except Exception as exc:
             errors.append(f"Navigation failed for {page_url}: {exc}")
             return [], section
 
         try:
-            snapshot = snapshot_page_a11y(page)
+            snapshot = await snapshot_page_a11y(page)
         except Exception as exc:
             errors.append(f"Snapshot failed for {page_url}: {exc}")
             return [], section
@@ -2172,24 +2172,24 @@ def crawl_device(
     # ── Main crawl ───────────────────────────────────────────────────────────
     case_sections: list = []   # parallel list to all_cases: section name per case
 
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(
             headless=True,
             args=["--ignore-certificate-errors", "--disable-web-security"]
             if ignore_ssl else [],
         )
-        ctx = browser.new_context(ignore_https_errors=ignore_ssl)
-        page = ctx.new_page()
+        ctx = await browser.new_context(ignore_https_errors=ignore_ssl)
+        page = await ctx.new_page()
 
         try:
-            page.goto(base_url, wait_until="domcontentloaded", timeout=20000)
-            _time.sleep(1)
+            await page.goto(base_url, wait_until="domcontentloaded", timeout=20000)
+            await page.wait_for_timeout(1000)
 
-            if not _login(page):
-                browser.close()
+            if not await _login(page):
+                await browser.close()
                 return json.dumps({"error": "Login failed", "details": errors})
 
-            nav_links = _discover_nav_links(page)
+            nav_links = await _discover_nav_links(page)
             landing = page.url
             if landing not in nav_links:
                 nav_links.insert(0, landing)
@@ -2199,13 +2199,13 @@ def crawl_device(
                 if link in visited:
                     continue
                 visited.add(link)
-                cases, section = _crawl_page(page, link)
+                cases, section = await _crawl_page(page, link)
                 for case in cases:
                     all_cases.append(case)
                     case_sections.append(section)
 
         finally:
-            browser.close()
+            await browser.close()
 
     if not all_cases:
         return json.dumps({
