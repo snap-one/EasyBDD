@@ -276,9 +276,12 @@ def _parse_js_line(line: str) -> Optional[Dict[str, Any]]:
             return {"action": "browser.assert_visible", "params": {"selector": selector}}
         if assertion == "toBeHidden":
             return {"action": "browser.assert_not_visible", "params": {"selector": selector}}
-        if assertion in ("toContainText", "toHaveText"):
+        if assertion == "toContainText":
             text = _extract_string_arg(args_str)
-            return {"action": "browser.assert_text", "params": {"selector": selector, "text": text}}
+            return {"action": "test.assert_text_contains", "params": {"selector": selector, "text": text}}
+        if assertion == "toHaveText":
+            text = _extract_string_arg(args_str)
+            return {"action": "test.assert_text_equals", "params": {"selector": selector, "text": text}}
         if assertion == "toHaveValue":
             val = _extract_string_arg(args_str)
             return {"action": "browser.assert_value", "params": {"selector": selector, "value": val}}
@@ -607,8 +610,10 @@ def _auto_description(step: Dict) -> str:
         return f"Press {p.get('key', '')} on '{sel}'"
     if action == "browser.assert_visible":
         return f"Verify '{sel}' is visible"
-    if action == "browser.assert_text":
+    if action == "test.assert_text_contains":
         return f"Verify '{sel}' contains '{p.get('text', '')}'"
+    if action == "test.assert_text_equals":
+        return f"Verify '{sel}' equals '{p.get('text', '')}'"
     if action == "browser.assert_url":
         return f"Verify URL is '{url}'"
     if action == "browser.wait_for":
