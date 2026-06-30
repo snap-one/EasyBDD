@@ -205,20 +205,52 @@ def _snapshot_iframes_sync(page: "SyncPage") -> List[ElementSnapshot]:
     return elements
 
 
+def _parse_aria_snapshot(aria_text: str) -> List[Dict[str, Any]]:
+    """
+    Parse Playwright's aria_snapshot() YAML-like text into a flat list of
+    {role, name, value} dicts so the existing _walk_tree logic can be reused
+    via a synthetic tree.
+    """
+    nodes = []
+    for line in aria_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        # Format: - role "name" [value]  or  - role /regex/
+        import re as _re
+        m = _re.match(r'^-\s+(\w+)(?:\s+"([^"]*)")?(?:\s+/([^/]*)/)?(?:\s+\[(.+)\])?', stripped)
+        if m:
+            role, name, _regex, value = m.group(1), m.group(2), m.group(3), m.group(4)
+            nodes.append({
+                "role": role,
+                "name": name or (_regex or ""),
+                "value": value or "",
+                "children": [],
+            })
+    return nodes
+
+
 async def _snapshot_iframes_async(page: "AsyncPage") -> List[ElementSnapshot]:
     elements: List[ElementSnapshot] = []
-    for frame in page.frames[1:]:
+    for i, frame in enumerate(page.frames[1:]):
         try:
             iframe_url = frame.url
             if not iframe_url or iframe_url == "about:blank":
                 continue
             frame_selector = f"iframe[src*=\"{_url_path_tail(iframe_url)}\"]"
-            tree = await frame.accessibility.snapshot(interesting_only=True)
-            if not tree:
+            # Use frame's locator aria_snapshot via page frame_locator
+            aria_text = await page.frame_locator(f"iframe:nth-of-type({i + 1})").locator("body").aria_snapshot()
+            if not aria_text:
                 continue
             seen: Set[str] = set()
             frame_els: List[ElementSnapshot] = []
-            _walk_tree(tree, frame_els, seen, in_iframe=True, iframe_selector=frame_selector)
+            for node in _parse_aria_snapshot(aria_text):
+                el = _node_to_element(node, in_iframe=True, iframe_selector=frame_selector)
+                if el is not None:
+                    key = f"{el.role}:{el.name}"
+                    if key not in seen:
+                        seen.add(key)
+                        frame_els.append(el)
             elements.extend(frame_els)
         except Exception:
             continue
@@ -288,6 +320,7 @@ def snapshot_page_a11y(page: "SyncPage", include_html: bool = False) -> PageSnap
 async def snapshot_page_a11y_async(page: "AsyncPage", include_html: bool = False) -> PageSnapshot:
     """
     Async version — use inside Playwright async context.
+    Uses aria_snapshot() (Playwright 1.41+) instead of the removed accessibility API.
     """
     url   = page.url
     title = await page.title()
@@ -297,11 +330,20 @@ async def snapshot_page_a11y_async(page: "AsyncPage", include_html: bool = False
     origin = f"{parsed.scheme}://{parsed.netloc}"
     path   = parsed.path
 
-    tree = await page.accessibility.snapshot(interesting_only=True)
     elements: List[ElementSnapshot] = []
     seen: Set[str] = set()
-    if tree:
-        _walk_tree(tree, elements, seen)
+
+    try:
+        aria_text = await page.locator("body").aria_snapshot()
+        for node in _parse_aria_snapshot(aria_text):
+            el = _node_to_element(node)
+            if el is not None:
+                key = f"{el.role}:{el.name}"
+                if key not in seen:
+                    seen.add(key)
+                    elements.append(el)
+    except Exception:
+        pass
 
     elements.extend(await _snapshot_iframes_async(page))
 
