@@ -2281,6 +2281,8 @@ def crawl_device(
 def serve(transport: str = "stdio", host: str = "0.0.0.0", port: int = 8080) -> None:
     """Start the MCP server."""
     if transport in ("sse", "streamable-http"):
-        mcp.run(transport=transport, host=host, port=port)
+        mcp.settings.host = host
+        mcp.settings.port = port
+        mcp.run(transport=transport)
     else:
         mcp.run(transport="stdio")
