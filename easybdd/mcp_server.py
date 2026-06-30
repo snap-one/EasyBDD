@@ -1538,14 +1538,15 @@ def ollama_generate_tests(
 You are a QA automation engineer. Generate Easy BDD test cases in YAML format.
 
 Easy BDD step syntax:
-  - browser.open:        {url: "${base_url}"}
-  - browser.fill:        {selector: "#field", value: "text"}
-  - browser.click:       {selector: "role=button[name='Save']"}
-  - browser.select:      {selector: "#dropdown", value: "option"}
-  - browser.wait_for:    {selector: "text='Success'", timeout: 5000}
-  - browser.assert_text: {selector: ".status", text: "Settings saved"}
-  - browser.assert_visible: {selector: ".success-banner"}
-  - browser.screenshot:  {name: "descriptive-name"}
+  - browser.open:              {url: "${base_url}"}
+  - browser.fill:              {selector: "#field", value: "text"}
+  - browser.click:             {selector: "role=button[name='Save']"}
+  - browser.select:            {selector: "#dropdown", value: "option"}
+  - browser.wait_for:          {selector: "text='Success'", timeout: 5000}
+  - test.assert_text_contains: {selector: ".status", text: "Settings saved"}
+  - test.assert_text_equals:   {selector: ".label", text: "ON"}
+  - browser.assert_visible:    {selector: ".success-banner"}
+  - browser.screenshot:        {name: "descriptive-name"}
 
 Return ONLY valid YAML — a list of test case objects:
 - name: "Test name"
@@ -1972,26 +1973,314 @@ def create_test_from_description(
 
 
 # ---------------------------------------------------------------------------
+# crawl_device — headless Playwright crawl → EasyBDD YAML → TestRail suite
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def crawl_device(
+    url: str,
+    username: str,
+    password: str,
+    project_id: int,
+    suite_name: str = "Automated Tests",
+    output_dir: str = "tests/cases/crawled",
+    push_to_testrail: bool = True,
+    max_pages: int = 30,
+    login_username_selector: str = "",
+    login_password_selector: str = "",
+    login_button_selector: str = "",
+    nav_selector: str = "",
+    ignore_ssl: bool = True,
+) -> str:
+    """
+    Parameters
+    ----------
+    url                      : Base URL of the device (e.g. https://192.168.100.145)
+    username                 : Login username
+    password                 : Login password
+    project_id               : TestRail project ID for the new suite
+    suite_name               : Name of the new TestRail suite to create
+    output_dir               : Local directory to write YAML files
+    push_to_testrail         : Create new suite and push cases (default True)
+    max_pages                : Maximum number of pages to visit (default 30)
+    login_username_selector  : Override auto-detected username selector
+    login_password_selector  : Override auto-detected password selector
+    login_button_selector    : Override auto-detected login button selector
+    nav_selector             : CSS selector for navigation links (auto-detected if blank)
+    ignore_ssl               : Ignore SSL certificate errors (default True for self-signed)
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return json.dumps({"error": "playwright not installed"})
+
+    from easybdd.crawler.accessibility_snapshotter import snapshot_page_a11y
+    from easybdd.crawler.rule_based_analyzer import analyze_snapshot_rules
+    from easybdd.crawler.yaml_writer import write_all_cases
+    from easybdd.crawler.models import GeneratedTestCase
+    from urllib.parse import urlparse, urljoin
+    import time as _time
+
+    base_url = url.rstrip("/")
+    parsed = urlparse(base_url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+
+    pages_visited: list = []
+    all_cases: list = []
+    errors: list = []
+
+    def _login(page) -> bool:
+        user_candidates = (
+            [login_username_selector] if login_username_selector
+            else ["#login-usernameIpt", "#username", "#email",
+                  'input[name="username"]', 'input[type="text"]',
+                  'input[name="email"]', 'input[placeholder*="sername"]']
+        )
+        pass_candidates = (
+            [login_password_selector] if login_password_selector
+            else ["#login-passwordIpt", "#password", 'input[type="password"]',
+                  'input[name="password"]', 'input[name="pass"]']
+        )
+        btn_candidates = (
+            [login_button_selector] if login_button_selector
+            else ["#login-login-btn", 'button[type="submit"]', 'input[type="submit"]',
+                  'button:has-text("Login")', 'button:has-text("Sign in")',
+                  'button:has-text("Log in")', ".login-btn", "#loginBtn"]
+        )
+
+        user_sel = pass_sel = btn_sel = None
+        for sel in user_candidates:
+            try:
+                if page.locator(sel).count() > 0:
+                    user_sel = sel
+                    break
+            except Exception:
+                continue
+        for sel in pass_candidates:
+            try:
+                if page.locator(sel).count() > 0:
+                    pass_sel = sel
+                    break
+            except Exception:
+                continue
+        for sel in btn_candidates:
+            try:
+                if page.locator(sel).count() > 0:
+                    btn_sel = sel
+                    break
+            except Exception:
+                continue
+
+        if not (user_sel and pass_sel):
+            errors.append("Could not auto-detect login form selectors")
+            return False
+
+        try:
+            page.fill(user_sel, username)
+            page.fill(pass_sel, password)
+            if btn_sel:
+                page.click(btn_sel)
+            else:
+                page.keyboard.press("Enter")
+            page.wait_for_load_state("domcontentloaded", timeout=15000)
+            _time.sleep(1.5)
+            return True
+        except Exception as exc:
+            errors.append(f"Login failed: {exc}")
+            return False
+
+    def _discover_nav_links(page) -> list:
+        nav_candidates = (
+            [nav_selector] if nav_selector
+            else ["#sidebar a", "nav a", ".sidebar a", ".nav a",
+                  '[role="navigation"] a', ".menu a", "#menu a",
+                  ".left-nav a", "#leftnav a", ".sidenav a"]
+        )
+        seen = set()
+        links = []
+        for sel in nav_candidates:
+            try:
+                elements = page.locator(sel).all()
+                for el in elements:
+                    href = el.get_attribute("href") or ""
+                    if not href or href.startswith("#") or href.startswith("javascript"):
+                        continue
+                    full = urljoin(base_url, href)
+                    if not full.startswith(origin):
+                        continue
+                    if full not in seen:
+                        seen.add(full)
+                        links.append(full)
+                if links:
+                    break
+            except Exception:
+                continue
+
+        if not links:
+            try:
+                for el in page.locator("a[href]").all():
+                    href = el.get_attribute("href") or ""
+                    if not href or href.startswith("#") or href.startswith("javascript"):
+                        continue
+                    full = urljoin(base_url, href)
+                    if full.startswith(origin) and full not in seen:
+                        seen.add(full)
+                        links.append(full)
+            except Exception:
+                pass
+
+        return links[:max_pages]
+
+    def _crawl_page(page, page_url: str) -> tuple:
+        path_parts = urlparse(page_url).path.strip("/").split("/")
+        section = (path_parts[-1].replace("-", " ").replace("_", " ").title()
+                   if path_parts and path_parts[-1] else "General")
+        try:
+            page.goto(page_url, wait_until="domcontentloaded", timeout=20000)
+            _time.sleep(0.8)
+        except Exception as exc:
+            errors.append(f"Navigation failed for {page_url}: {exc}")
+            return [], section
+
+        try:
+            snapshot = snapshot_page_a11y(page)
+        except Exception as exc:
+            errors.append(f"Snapshot failed for {page_url}: {exc}")
+            return [], section
+
+        try:
+            cases = analyze_snapshot_rules(snapshot)
+        except Exception as exc:
+            errors.append(f"Analysis failed for {page_url}: {exc}")
+            return [], section
+
+        page_title = snapshot.title or section
+        for case in cases:
+            case.tags = list(set(case.tags) | {"crawled", "browser"})
+            if not case.name.lower().startswith(page_title.lower()):
+                case.name = f"{page_title} — {case.name}"
+
+        pages_visited.append({
+            "url": page_url,
+            "title": snapshot.title,
+            "section": section,
+            "cases": len(cases),
+        })
+        return cases, section
+
+    # ── Main crawl ───────────────────────────────────────────────────────────
+    case_sections: list = []   # parallel list to all_cases: section name per case
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(
+            headless=True,
+            args=["--ignore-certificate-errors", "--disable-web-security"]
+            if ignore_ssl else [],
+        )
+        ctx = browser.new_context(ignore_https_errors=ignore_ssl)
+        page = ctx.new_page()
+
+        try:
+            page.goto(base_url, wait_until="domcontentloaded", timeout=20000)
+            _time.sleep(1)
+
+            if not _login(page):
+                browser.close()
+                return json.dumps({"error": "Login failed", "details": errors})
+
+            nav_links = _discover_nav_links(page)
+            landing = page.url
+            if landing not in nav_links:
+                nav_links.insert(0, landing)
+
+            visited: set = set()
+            for link in nav_links[:max_pages]:
+                if link in visited:
+                    continue
+                visited.add(link)
+                cases, section = _crawl_page(page, link)
+                for case in cases:
+                    all_cases.append(case)
+                    case_sections.append(section)
+
+        finally:
+            browser.close()
+
+    if not all_cases:
+        return json.dumps({
+            "pages_visited": len(pages_visited),
+            "cases_generated": 0,
+            "errors": errors,
+            "message": "No test cases generated — no interactive elements found.",
+        })
+
+    # Write YAML files
+    abs_output = _abs(output_dir)
+    try:
+        written_paths = write_all_cases(all_cases, abs_output, base_url=base_url)
+    except Exception as exc:
+        return json.dumps({"error": f"YAML write failed: {exc}", "errors": errors})
+
+    # Push to TestRail
+    pushed = 0
+    testrail_suite_url = ""
+    if push_to_testrail and project_id:
+        try:
+            cfg = _load_config()
+            tr_cfg = cfg.get("testrail", {})
+            tr_url = tr_cfg.get("url", "")
+            tr_user = tr_cfg.get("username", "")
+            tr_key = tr_cfg.get("api_key", "")
+            if not (tr_url and tr_user and tr_key):
+                errors.append("TestRail credentials not configured in easybdd.yaml")
+            else:
+                from easybdd.services.testrail_service import TestRailService
+                from easybdd.crawler.testrail_publisher import TestRailPublisher
+
+                tr = TestRailService(tr_url, tr_user, tr_key)
+                publisher = TestRailPublisher(
+                    testrail=tr,
+                    project_id=project_id,
+                    suite_id=None,
+                    suite_name=suite_name,
+                    section_name="General",
+                )
+                for case, sec in zip(all_cases, case_sections):
+                    try:
+                        publisher.publish_case(case, section_name=sec)
+                        pushed += 1
+                    except Exception as exc:
+                        errors.append(f"Push failed for '{case.name}': {exc}")
+
+                sid = getattr(publisher, "_suite_id", None)
+                if sid:
+                    testrail_suite_url = (
+                        f"{tr_url.rstrip('/')}/index.php?/suites/view/{sid}"
+                    )
+        except Exception as exc:
+            errors.append(f"TestRail error: {exc}")
+
+    return json.dumps({
+        "pages_visited": len(pages_visited),
+        "cases_generated": len(all_cases),
+        "yaml_files_written": len(written_paths),
+        "pushed_to_testrail": pushed,
+        "suite_name": suite_name,
+        "suite_url": testrail_suite_url,
+        "pages": pages_visited,
+        "errors": errors,
+    }, indent=2)
+
+
+# ---------------------------------------------------------------------------
 # Server entry-point (called from __main__.py)
 # ---------------------------------------------------------------------------
 
 
 def serve(transport: str = "stdio", host: str = "0.0.0.0", port: int = 8080) -> None:
-    """Start the MCP server.
-
-    Parameters
-    ----------
-    transport : "stdio" (default), "sse", or "streamable-http".
-    host      : bind address for SSE/streamable-http transport.
-    port      : port for SSE/streamable-http transport.
-    """
+    """Start the MCP server."""
     if transport in ("sse", "streamable-http"):
-        from mcp.server.transport_security import TransportSecuritySettings
-        mcp.settings.host = host
-        mcp.settings.port = port
-        mcp.settings.transport_security = TransportSecuritySettings(
-            enable_dns_rebinding_protection=False
-        )
-        mcp.run(transport=transport)
+        mcp.run(transport=transport, host=host, port=port)
     else:
         mcp.run(transport="stdio")

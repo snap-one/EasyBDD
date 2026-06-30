@@ -64,14 +64,15 @@ _WORKFLOW_TO_EASYBDD_PROMPT = """\
 Convert the following workflow plan into Easy BDD test cases.
 
 Easy BDD format (dot-notation YAML steps as JSON):
-- browser.open:    {"url": "${base_url}"}
-- browser.fill:    {"selector": "#field", "value": "text"}
-- browser.click:   {"selector": "role=button[name='Save']"}
-- browser.select:  {"selector": "#dropdown", "value": "option"}
-- browser.wait_for: {"selector": "text='Success'", "timeout": 5000}
-- browser.get_text: {"selector": ".status", "store_as": "status_text"}
-- browser.assert_text: {"selector": ".alert", "text": "Settings saved"}
-- browser.screenshot: {"name": "descriptive-name"}
+- browser.open:              {"url": "${base_url}"}
+- browser.fill:              {"selector": "#field", "value": "text"}
+- browser.click:             {"selector": "role=button[name='Save']"}
+- browser.select:            {"selector": "#dropdown", "value": "option"}
+- browser.wait_for:          {"selector": "text='Success'", "timeout": 5000}
+- browser.get_text:          {"selector": ".status", "store_as": "status_text"}
+- test.assert_text_contains: {"selector": ".alert", "text": "Settings saved"}
+- test.assert_text_equals:   {"selector": ".label", "text": "ON"}
+- browser.screenshot:        {"name": "descriptive-name"}
 
 Return ONLY a valid JSON array of test case objects:
 [{
@@ -90,7 +91,7 @@ Every test MUST:
 1. Start with browser.open
 2. End with browser.screenshot
 3. Include browser.wait_for after any save/apply click
-4. Include browser.assert_text to verify the result
+4. Include test.assert_text_contains or test.assert_text_equals to verify the result
 """
 
 
