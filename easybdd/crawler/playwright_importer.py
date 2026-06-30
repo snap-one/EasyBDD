@@ -88,9 +88,26 @@ def _resolve_locator(expr: str) -> str:
 
 
 def _extract_string_arg(s: str) -> str:
-    """Pull the first string literal from a JS argument string."""
-    m = re.search(r"['\"`]([^'\"`]*)['\"`]", s)
-    return m.group(1) if m else s.strip()
+    """Pull the first string literal from a JS argument string.
+
+    Respects the opening quote so that content containing the opposite
+    quote style is captured correctly:
+      "led.led.SystemLED='1'"  →  led.led.SystemLED='1'
+      'ON'                     →  ON
+    """
+    s = s.strip()
+    if not s:
+        return s
+    if s[0] == '"':
+        m = re.match(r'"((?:[^"\\]|\\.)*)"', s)
+        return m.group(1) if m else s
+    if s[0] == "'":
+        m = re.match(r"'((?:[^'\\]|\\.)*)'", s)
+        return m.group(1) if m else s
+    if s[0] == '`':
+        m = re.match(r'`((?:[^`\\]|\\.)*)`', s)
+        return m.group(1) if m else s
+    return s
 
 
 def _extract_args(s: str) -> List[str]:
