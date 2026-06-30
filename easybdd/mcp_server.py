@@ -1286,6 +1286,7 @@ def import_playwright_recording(
     test_name: str = "",
     project_id: int = 0,
     suite_id: int = 0,
+    suite_name: str = "",
     section_name: str = "Imported from Playwright",
     output_dir: str = "tests/cases/imported",
     push_to_testrail: bool = False,
@@ -1301,8 +1302,10 @@ def import_playwright_recording(
     test_name       : Override the test case name (used when source is raw code
                       with no test() wrapper).
     project_id      : TestRail project ID (required if push_to_testrail=True).
-    suite_id        : TestRail suite ID (0 = default suite).
-    section_name    : TestRail section to create/reuse.
+    suite_id        : TestRail suite ID (0 = create/find by suite_name).
+    suite_name      : Name of the TestRail suite to create or reuse when suite_id=0.
+                      Defaults to "Imported from Playwright" if not provided.
+    section_name    : TestRail section to create/reuse within the suite.
     output_dir      : Where to write YAML files (relative to project root).
     push_to_testrail: If True, push cases to TestRail immediately after conversion.
     """
@@ -1334,6 +1337,7 @@ def import_playwright_recording(
                 testrail=tr,
                 project_id=project_id,
                 suite_id=suite_id or None,
+                suite_name=suite_name or "Imported from Playwright",
                 section_name=section_name,
             )
             case_ids = publisher.publish_all(cases)
@@ -1752,6 +1756,219 @@ def ollama_improve_testrail_case(
 
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# WORKFLOW PROMPTS — high-level orchestration for test engineers
+# ---------------------------------------------------------------------------
+
+
+@mcp.prompt()
+def debug_testrail_run(run_id: int, auto_fix: bool = False) -> str:
+    """
+    Prompt: End-to-end debugging workflow for a failing TestRail run.
+
+    Fetches failures, cross-references local YAML files, probes live selectors,
+    suggests fixes, and (when auto_fix=True) applies and re-pushes them.
+
+    Parameters
+    ----------
+    run_id   : TestRail run ID to debug (e.g. 194886).
+    auto_fix : if True, also apply selector fixes and re-push to TestRail.
+    """
+    failures = get_testrail_run_failures(run_id=run_id)
+
+    return textwrap.dedent(
+        f"""
+        You are an Easy BDD test engineer debugging a failing TestRail run.
+        Work through each failure methodically using the tools available.
+
+        ## Failing Run: R{run_id}
+        ```json
+        {failures}
+        ```
+
+        ## Step-by-step workflow
+
+        ### 1 — Triage failures
+        For each case in `failures`:
+        - Note the `title`, `page_path`, and `yaml_hint` fields.
+        - Group them by `section_name` (same page = same root cause).
+
+        ### 2 — Locate local YAML files
+        For each yaml_hint, call `list_tests` filtered to that filename, or call
+        `get_test` with the path `tests/cases/crawled/<yaml_hint>`.
+        If no local file exists, skip to step 5 (validate via TestRail).
+
+        ### 3 — Validate the YAML
+        Call `validate_test(path=<path>)` for each local file.
+        Summarise errors and warnings per file.
+
+        ### 4 — Probe live selectors (if any step has selector issues)
+        For steps flagged with selector errors, call `probe_selector` with:
+          - `url`: the `page_path` from the failure (prepend the device base URL)
+          - `selector`: the failing CSS/ARIA selector
+          - `fallback_selectors`: any alternatives you can infer
+
+        {"### 5 — Apply fixes and re-push" if auto_fix else "### 5 — Preview fixes (read-only)"}
+        {"Call `fix_test_selectors(path=<path>)` to heal selectors in-place, then `repush_yaml_to_testrail(path=<path>)` to update the TestRail case." if auto_fix else "Call `preview_fix(path=<path>)` to show what would change WITHOUT writing files. Present the corrected YAML for each case and ask the engineer to confirm before applying."}
+
+        ### 6 — Validate TestRail cases directly (if no local file)
+        Call `validate_testrail_case(run_id={run_id})` to check syntax in
+        TestRail's Preconditions field for all Feature:/Shared: cases in the run.
+
+        ### 7 — Summary
+        Produce a table:
+        | Case title | Local file | Status | Action taken |
+        List any cases you could not fix and explain why.
+
+        ## Rules
+        - Always call `preview_fix` before `apply_fix` and confirm with the engineer.
+        - Never call `apply_fix` with confirmed=True without explicit approval.
+        - If `probe_selector` fails (navigation error), note the device may be offline.
+        """
+    )
+
+
+@mcp.prompt()
+def validate_testrail_suite(project_id: int, suite_id: int, fix: bool = False) -> str:
+    """
+    Prompt: Validate every case in a TestRail suite and produce a prioritised fix plan.
+
+    Parameters
+    ----------
+    project_id : TestRail project ID.
+    suite_id   : TestRail suite ID to validate.
+    fix        : if True, also generate corrected YAML for each fixable issue.
+    """
+    validation = validate_testrail_case(suite_id=suite_id, project_id=project_id)
+
+    return textwrap.dedent(
+        f"""
+        You are an Easy BDD quality engineer validating a TestRail suite.
+
+        ## Suite S{suite_id} — Validation Results
+        ```json
+        {validation}
+        ```
+
+        ## Your task
+
+        ### 1 — Executive summary
+        Report: total cases, error count, warning count, % passing.
+        State whether the suite is ready to run or needs fixes first.
+
+        ### 2 — Error catalogue (ERRORS only, sorted by frequency)
+        Group errors by `message` type.  For each type:
+        - Show the error message and how many cases are affected.
+        - Show one representative `location` and `reason`.
+        - Provide the canonical fix (the `suggestion` field).
+
+        ### 3 — Case-level details (ERROR cases only)
+        For each case with errors, show:
+        | Case ID | Title | Errors | Top issue |
+
+        ### 4 — Fix plan
+        {"For each fixable issue (where `correction` is non-null), show the corrected YAML snippet. Ask the engineer which cases to push corrections back to TestRail for, then call `validate_testrail_case` per case to confirm the fix is clean." if fix else "List which issues are auto-fixable (correction field is non-null) vs. need manual attention. Offer to generate corrected YAML if the engineer wants to proceed."}
+
+        ### 5 — Warnings (brief)
+        List warning types and affected case count — don't enumerate each case.
+
+        ## Rules
+        - Do not push any corrections to TestRail without explicit engineer approval.
+        - Focus on ERRORs first; warnings are advisory.
+        - If `total_cases` is 0, explain that no Feature:/Shared: cases were found.
+        """
+    )
+
+
+@mcp.prompt()
+def create_test_from_description(
+    feature_description: str,
+    page_url: str = "",
+    project_id: int = 0,
+    suite_id: int = 0,
+    count: int = 5,
+) -> str:
+    """
+    Prompt: Generate Easy BDD tests from a plain-English description, optionally
+    push them to TestRail.
+
+    Parameters
+    ----------
+    feature_description : What feature or page should be tested.
+    page_url            : URL of the page (used as browser.open target).
+    project_id          : TestRail project ID (required to push to TestRail).
+    suite_id            : TestRail suite ID (0 = default suite).
+    count               : Number of test cases to generate (default 5).
+    """
+    syntax_ref  = resource_docs_syntax()
+    action_ref  = resource_docs_actions()
+    shared      = resource_shared_steps()
+
+    push_section = (
+        f"If the engineer approves, call `ollama_generate_tests` with:\n"
+        f"  feature_description=<description>, page_url=\"{page_url}\",\n"
+        f"  push_to_testrail=True, project_id={project_id}, suite_id={suite_id},\n"
+        f"  count={count}."
+        if project_id else
+        "If the engineer approves, call `ollama_generate_tests` with the description and page_url. "
+        "Ask for a TestRail project_id and suite_id if they want to push cases there."
+    )
+
+    return textwrap.dedent(
+        f"""
+        You are an Easy BDD test author.  Generate complete, runnable test cases
+        for the feature described below, then offer to push them to TestRail.
+
+        ## Feature to test
+        {feature_description}
+        {"Page URL: " + page_url if page_url else ""}
+
+        ## Workflow
+
+        ### Step 1 — Clarify scope (ask if unclear)
+        - What is the happy path?
+        - What validation/error states exist?
+        - Are there any shared steps already available (see below)?
+        - What is the target device/environment base URL?
+
+        ### Step 2 — Generate test cases
+        Call `ollama_generate_tests` with:
+          feature_description="{feature_description}"
+          {"page_url=" + repr(page_url) if page_url else "page_url=<ask the engineer>"}
+          count={count}
+          push_to_testrail=False   # generate only, don't push yet
+
+        ### Step 3 — Show and review
+        Display the generated YAML test cases.  For each:
+        - Verify selectors look reasonable (not generic placeholders).
+        - Check that assertions (browser.assert_text / browser.assert_visible) are present.
+        - Suggest improvements inline.
+
+        ### Step 4 — Validate syntax
+        Call `validate_test(snippet=<generated_yaml>)` for each case.
+        Fix any errors before proceeding.
+
+        ### Step 5 — Push to TestRail (with approval)
+        {push_section}
+
+        ## Available Shared Steps
+        {shared}
+
+        ## Action Reference (abbreviated)
+        {action_ref}
+
+        ## Syntax Reference
+        {syntax_ref}
+
+        ## Rules
+        - Never use placeholder values like "value1" or "field_N_value" in final tests.
+        - Always include at least one assertion step per test.
+        - Always add `browser.screenshot` as the last step.
+        - Ask the engineer to confirm before pushing anything to TestRail.
+        """
+    )
 
 
 # ---------------------------------------------------------------------------

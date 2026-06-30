@@ -1,7 +1,10 @@
 # Makefile for Easy BDD Framework Development
 # Usage: make <target>
 
-.PHONY: help install dev-install test lint format type-check security validate clean run
+.PHONY: help install dev-install test lint format type-check security validate clean run \
+        validate-suite validate-run validate-case debug-run run-testrail run-testrail-id \
+        create-run create-run-dry sync-suite push-yaml fix-selectors fix-crawled \
+        record-test build-mcpb mcp-serve
 
 # Python executable - use venv if available
 PYTHON := $(shell if [ -d ".venv" ]; then echo ".venv/bin/python"; else echo "python"; fi)
@@ -161,3 +164,156 @@ builder:
 # Full CI pipeline
 ci: quality test validate
 	@echo "CI pipeline complete!"
+
+# =============================================================================
+# TEST ENGINEERING — TestRail & Easy BDD workflows
+# =============================================================================
+#
+# Required vars (set on command line):
+#   PROJECT=<project_id>   SUITE=<suite_id>   RUN=<run_id>   CASE=<case_id>
+#   FILE=<path/to/test.yaml>   TAGS=<tag1,tag2>   URL=<https://...>
+#
+# Examples:
+#   make validate-suite  PROJECT=79 SUITE=106670
+#   make debug-run       RUN=194886
+#   make run-testrail    PROJECT=79
+#   make create-run      PROJECT=79 SUITE=106670 SECTIONS="Functions Firmware"
+
+# Overridable defaults
+PROJECT ?=
+SUITE   ?=
+RUN     ?=
+CASE    ?=
+FILE    ?=
+TAGS    ?=
+URL     ?=
+NAME    ?=
+SECTIONS ?=
+
+help-testrail:
+	@echo ""
+	@echo "  Easy BDD — TestRail & test engineering targets"
+	@echo "  ─────────────────────────────────────────────────────────────────"
+	@echo "  VALIDATE"
+	@echo "    make validate-suite  PROJECT=xx SUITE=xx   Validate all cases in a suite"
+	@echo "    make validate-run    RUN=xx                Validate all cases in a run"
+	@echo "    make validate-case   CASE=xx               Validate a single TestRail case"
+	@echo ""
+	@echo "  DEBUG"
+	@echo "    make debug-run       RUN=xx                List failures in a run"
+	@echo "    make fix-selectors   FILE=tests/cases/x.yaml   Heal selectors on live page"
+	@echo "    make fix-crawled                           Batch-heal all crawled YAML files"
+	@echo "    make push-yaml       FILE=x.yaml [CASE=xx] Re-push steps to TestRail"
+	@echo ""
+	@echo "  RUN"
+	@echo "    make run-testrail    PROJECT=xx            Run active EASY_BDD: run"
+	@echo "    make run-testrail-id PROJECT=xx RUN=xx     Run a specific TestRail run"
+	@echo ""
+	@echo "  TESTRAIL"
+	@echo "    make create-run    PROJECT=xx SUITE=xx [SECTIONS='F1 F2']  Create a run"
+	@echo "    make create-run-dry  (same args)           Dry-run preview"
+	@echo "    make sync-suite    PROJECT=xx SUITE=xx     Sync suite → local YAML"
+	@echo ""
+	@echo "  AUTHORING"
+	@echo "    make record-test   [URL=https://...]       Record Playwright → YAML"
+	@echo ""
+	@echo "  MCP / BUNDLE"
+	@echo "    make mcp-serve                             Start MCP server (STDIO)"
+	@echo "    make build-mcpb                            Build easy-bdd-<ver>.mcpb"
+	@echo ""
+
+# ── Validate ─────────────────────────────────────────────────────────────────
+validate-suite:
+	@test -n "$(PROJECT)" || (echo "ERROR: set PROJECT=<project_id>"; exit 1)
+	@test -n "$(SUITE)"   || (echo "ERROR: set SUITE=<suite_id>"; exit 1)
+	$(PYTHON) -m easybdd validate --testrail-suite $(SUITE) --project $(PROJECT)
+
+validate-run:
+	@test -n "$(RUN)" || (echo "ERROR: set RUN=<run_id>"; exit 1)
+	$(PYTHON) -m easybdd validate --testrail-run $(RUN)
+
+validate-case:
+	@test -n "$(CASE)" || (echo "ERROR: set CASE=<case_id>"; exit 1)
+	$(PYTHON) -m easybdd validate --testrail-case $(CASE)
+
+# ── Debug ─────────────────────────────────────────────────────────────────────
+debug-run:
+	@test -n "$(RUN)" || (echo "ERROR: set RUN=<run_id>"; exit 1)
+	@echo "=== Failed / Retest cases for run R$(RUN) ===" && \
+	$(PYTHON) -c "\
+import sys, json; sys.path.insert(0,'.'); \
+from easybdd.mcp_server import get_testrail_run_failures; \
+data = json.loads(get_testrail_run_failures(run_id=$(RUN))); \
+print(f'Total: {data[\"total\"]}  Failures: {data[\"failures\"]}'); \
+[print(f'  C{c[\"case_id\"]}  [{c[\"status\"]}]  {c[\"title\"]}  →  {c[\"yaml_hint\"]}') for c in data['cases']] \
+"
+
+fix-selectors:
+	@test -n "$(FILE)" || (echo "ERROR: set FILE=<path/to/test.yaml>"; exit 1)
+	$(PYTHON) -c "\
+import sys, json; sys.path.insert(0,'.'); \
+from easybdd.mcp_server import fix_test_selectors; \
+data = json.loads(fix_test_selectors(path='$(FILE)')); \
+print(f'Changes: {len(data[\"changes\"])}  Unfixed: {len(data[\"unfixed\"])}  Saved: {data[\"saved\"]}'); \
+[print(f'  Step {c[\"step\"]}: {c[\"old\"]} → {c[\"new\"]}') for c in data['changes']] \
+"
+
+fix-crawled:
+	$(PYTHON) -c "\
+import sys, json; sys.path.insert(0,'.'); \
+from easybdd.mcp_server import fix_crawled_tests; \
+data = json.loads(fix_crawled_tests()); \
+print(f'Processed {data[\"processed\"]} files, total fixes: {sum(f.get(\"changes\",0) for f in data[\"files\"])}') \
+"
+
+push-yaml:
+	@test -n "$(FILE)" || (echo "ERROR: set FILE=<path/to/test.yaml>"; exit 1)
+	$(PYTHON) -c "\
+import sys, json; sys.path.insert(0,'.'); \
+from easybdd.mcp_server import repush_yaml_to_testrail; \
+kw = {'path': '$(FILE)'}$(if $(CASE), | kw.update({'case_id': $(CASE)}),); \
+print(json.loads(repush_yaml_to_testrail(**kw))) \
+"
+
+# ── Run ──────────────────────────────────────────────────────────────────────
+run-testrail:
+	@test -n "$(PROJECT)" || (echo "ERROR: set PROJECT=<project_id>"; exit 1)
+	$(PYTHON) -m easybdd testrail-run $(PROJECT)
+
+run-testrail-id:
+	@test -n "$(PROJECT)" || (echo "ERROR: set PROJECT=<project_id>"; exit 1)
+	@test -n "$(RUN)"     || (echo "ERROR: set RUN=<run_id>"; exit 1)
+	$(PYTHON) -m easybdd testrail-run $(PROJECT) --run-id $(RUN)
+
+# ── TestRail ─────────────────────────────────────────────────────────────────
+create-run:
+	@test -n "$(PROJECT)" || (echo "ERROR: set PROJECT=<project_id>"; exit 1)
+	@test -n "$(SUITE)"   || (echo "ERROR: set SUITE=<suite_id>"; exit 1)
+	$(PYTHON) -m easybdd testrail-create-run $(PROJECT) $(SUITE) \
+	    $(if $(SECTIONS),--sections $(SECTIONS),) \
+	    $(if $(NAME),--name "$(NAME)",)
+
+create-run-dry:
+	@test -n "$(PROJECT)" || (echo "ERROR: set PROJECT=<project_id>"; exit 1)
+	@test -n "$(SUITE)"   || (echo "ERROR: set SUITE=<suite_id>"; exit 1)
+	$(PYTHON) -m easybdd testrail-create-run $(PROJECT) $(SUITE) \
+	    $(if $(SECTIONS),--sections $(SECTIONS),) --dry-run
+
+sync-suite:
+	@test -n "$(PROJECT)" || (echo "ERROR: set PROJECT=<project_id>"; exit 1)
+	@test -n "$(SUITE)"   || (echo "ERROR: set SUITE=<suite_id>"; exit 1)
+	$(PYTHON) -m easybdd testrail-sync $(PROJECT) --suite $(SUITE)
+
+# ── Authoring ────────────────────────────────────────────────────────────────
+record-test:
+	$(PYTHON) -m easybdd record $(URL) \
+	    $(if $(NAME),--name "$(NAME)",) \
+	    $(if $(PROJECT),--testrail-project $(PROJECT),) \
+	    $(if $(SUITE),--testrail-suite $(SUITE),)
+
+# ── MCP / Bundle ─────────────────────────────────────────────────────────────
+mcp-serve:
+	$(PYTHON) -m easybdd mcp-serve
+
+build-mcpb:
+	$(PYTHON) build_mcpb.py

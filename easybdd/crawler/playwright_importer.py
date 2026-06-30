@@ -70,8 +70,13 @@ def _resolve_locator(expr: str) -> str:
     if m:
         return f'[data-testid="{m.group(1)}"]'
 
-    # locator('selector')
-    m = re.search(r"(?:^|\.)locator\(['\"]([^'\"]+)['\"]", expr)
+    # locator('selector') or locator("selector")
+    # Use separate patterns to correctly handle XPaths like '//div[@id="x"]'
+    # where the inner attribute values use the opposite quote style.
+    m = re.search(r"(?:^|\.)locator\('([^']*)'\)", expr)
+    if m:
+        return m.group(1)
+    m = re.search(r'(?:^|\.)locator\("([^"]*)"\)', expr)
     if m:
         return m.group(1)
 
@@ -113,8 +118,11 @@ def _extract_args(s: str) -> List[str]:
 # ── JS/TS code parser ──────────────────────────────────────────────────────────
 
 # Matches:   await expect(locator).toXxx(args)
+# The inner group uses a one-level nested-paren pattern so that
+# expect(page.locator('#id')) is captured correctly — [^)]+
+# would stop at the ) closing locator() instead of expect().
 _EXPECT_RE = re.compile(
-    r"(?:await\s+)?expect\(([^)]+)\)\s*\.\s*(toBeVisible|toBeHidden|"
+    r"(?:await\s+)?expect\(([^()]*(?:\([^)]*\)[^()]*)*)\)\s*\.\s*(toBeVisible|toBeHidden|"
     r"toContainText|toHaveText|toHaveValue|toHaveURL|toHaveTitle|"
     r"toBeChecked|toBeEnabled|toBeDisabled)\s*\(([^)]*)\)",
     re.DOTALL,
