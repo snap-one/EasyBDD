@@ -2227,13 +2227,14 @@ async def crawl_device(
     testrail_suite_url = ""
     if push_to_testrail and project_id:
         try:
+            import os as _os
             cfg = _load_config()
             tr_cfg = cfg.get("testrail", {})
-            tr_url = tr_cfg.get("url", "")
-            tr_user = tr_cfg.get("username", "")
-            tr_key = tr_cfg.get("api_key", "")
+            tr_url  = tr_cfg.get("url", "")  or _os.environ.get("TESTRAIL_URL", "")
+            tr_user = tr_cfg.get("username", "") or _os.environ.get("TESTRAIL_USERNAME", "")
+            tr_key  = tr_cfg.get("api_key", "")  or _os.environ.get("TESTRAIL_API_KEY", "")
             if not (tr_url and tr_user and tr_key):
-                errors.append("TestRail credentials not configured in easybdd.yaml")
+                errors.append("TestRail credentials not configured in easybdd.yaml or env vars")
             else:
                 from easybdd.services.testrail_service import TestRailService
                 from easybdd.crawler.testrail_publisher import TestRailPublisher
