@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import difflib
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -178,6 +179,27 @@ _CATALOG_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "test.assert_element_count": _browser_assert(
         "Assert Element Count", "Assert how many elements match a selector",
         {"count": {"type": "number", "required": True, "label": "Count", "placeholder": "1"}}),
+    "telnet.send": {
+        "category": "Telnet",
+        "label": "Telnet Send",
+        "description": "Run one command (or a list of commands) over telnet",
+        "icon": "📟",
+        "_one_of": [["command", "commands"]],
+        "parameters": {
+            "command": {"type": "text", "required": False, "label": "Command",
+                        "placeholder": "show version"},
+            "commands": {"type": "list", "required": False, "label": "Commands (list)",
+                         "help": "Run several commands in one session — YAML list"},
+            "host": {"type": "text", "required": False, "label": "Host"},
+            "port": {"type": "number", "required": False, "label": "Port", "placeholder": "23"},
+            "username": {"type": "text", "required": False, "label": "Username"},
+            "password": {"type": "text", "required": False, "label": "Password"},
+            "prompt": {"type": "text", "required": False, "label": "Shell prompt",
+                       "placeholder": "#", "help": "Prompt string to wait for after each command"},
+            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "placeholder": "15"},
+            "store_as": {"type": "text", "required": False, "label": "Store as"},
+        },
+    },
     "test.assert": {
         "category": "Test",
         "label": "Assert Condition",
@@ -632,7 +654,8 @@ def _coerce_var_value(value: Any) -> Any:
 
 def serialize_case_body(model: CaseModel) -> str:
     """Build the TestRail Preconditions text for a case model."""
-    if model.case_type == "var":
+    sanitize_model(model)
+    if model.case_type == "var" and not model.steps:
         lines = []
         for row in model.variables:
             if not row.key.strip():
@@ -680,6 +703,65 @@ def case_title(model: CaseModel) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Sanitization — strip rich-text artifacts before they reach TestRail          #
+# --------------------------------------------------------------------------- #
+
+# Characters TestRail's rich-text editor (or copy/paste from docs) injects
+# that break YAML/expressions invisibly.
+_INVISIBLE_MAP = str.maketrans({
+    "\u00a0": " ",   # non-breaking space
+    "\u200b": None,  # zero-width space
+    "\u200c": None,  # zero-width non-joiner
+    "\u200d": None,  # zero-width joiner
+    "\ufeff": None,  # BOM
+    "\u2018": "'", "\u2019": "'",  # curly single quotes
+    "\u201c": '"', "\u201d": '"',  # curly double quotes
+})
+
+
+def _sanitize_str(s: str) -> str:
+    return s.translate(_INVISIBLE_MAP)
+
+
+def _sanitize_value(v: Any) -> Any:
+    if isinstance(v, str):
+        return _sanitize_str(v)
+    if isinstance(v, dict):
+        return {(_sanitize_str(k) if isinstance(k, str) else k): _sanitize_value(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_sanitize_value(x) for x in v]
+    return v
+
+
+def _sanitize_node(node: StepNode) -> None:
+    if node.action:
+        node.action = _sanitize_str(node.action).strip()
+    node.params = {k: _sanitize_value(v) for k, v in node.params.items()}
+    if isinstance(node.name, str):
+        node.name = _sanitize_str(node.name).strip()
+    if isinstance(node.expression, str):
+        node.expression = _sanitize_str(node.expression)
+    node.items = _sanitize_value(node.items)
+    if isinstance(node.yaml_text, str):
+        node.yaml_text = _sanitize_str(node.yaml_text)
+    for lst in (node.steps, node.then_steps, node.else_steps, node.except_steps, node.finally_steps):
+        for child in lst:
+            _sanitize_node(child)
+
+
+def sanitize_model(model: CaseModel) -> None:
+    """Normalize invisible/rich-text characters everywhere in the model."""
+    model.name = _sanitize_str(model.name)
+    for row in model.variables:
+        row.key = _sanitize_str(row.key).strip()
+        row.value = _sanitize_value(row.value)
+    if isinstance(model.data_rows, str):
+        model.data_rows = _sanitize_str(model.data_rows)
+    for node in model.steps:
+        _sanitize_node(node)
+
+
+# --------------------------------------------------------------------------- #
 # Validation                                                                   #
 # --------------------------------------------------------------------------- #
 
@@ -716,49 +798,162 @@ def _validate_action_node(node: StepNode, where: str, errors: List[str], warning
                 warnings.append(f"{where}: '{action}' has unrecognized parameter '{pname}'")
 
 
-def _walk_nodes(nodes: List[StepNode], prefix: str, errors: List[str], warnings: List[str]) -> None:
+_CONTROL_FLOW_KEYS = {"for_each", "while", "condition", "if", "try", "shared_step", "test.data"}
+
+
+def _validate_raw_node(node: StepNode, where: str, errors: List[str], warnings: List[str]) -> None:
+    """Raw YAML steps get the same scrutiny: must parse, actions must exist."""
+    text = (node.yaml_text or "").strip()
+    if not text:
+        errors.append(f"{where}: raw YAML step is empty")
+        return
+    lines: List[str] = []
+    _emit_raw(node.yaml_text or "", lines)
+    try:
+        parsed = parse_yaml_lenient(fix_step_list_indent("\n".join(lines)))
+    except Exception as exc:
+        errors.append(f"{where}: raw YAML does not parse: {exc}")
+        return
+    items = parsed if isinstance(parsed, list) else [parsed]
+    for item in items:
+        if not isinstance(item, dict):
+            errors.append(f"{where}: raw YAML must be a step mapping (- service.verb: …)")
+            continue
+        if any(k in item for k in _CONTROL_FLOW_KEYS):
+            continue
+        action = item.get("action") if isinstance(item.get("action"), str) else (
+            next(iter(item)) if len(item) >= 1 and isinstance(next(iter(item)), str) and "." in next(iter(item)) else None
+        )
+        if action and not CATALOG.get(action) and not _schema_for(action):
+            suggestions = difflib.get_close_matches(action, list(CATALOG.keys()), n=3, cutoff=0.6)
+            hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
+            errors.append(f"{where}: raw YAML uses unknown action '{action}'.{hint}")
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_")
+
+
+def _walk_nodes(nodes: List[StepNode], prefix: str, errors: List[str], warnings: List[str],
+                shared_slugs: Optional[set] = None) -> None:
     for i, node in enumerate(nodes, start=1):
         where = f"{prefix}step {i}"
         if node.kind == "action":
             _validate_action_node(node, where, errors, warnings)
+        elif node.kind == "raw":
+            _validate_raw_node(node, where, errors, warnings)
         elif node.kind == "shared":
             if not (node.name or "").strip():
                 errors.append(f"{where}: shared step reference has no name")
+            elif shared_slugs is not None and _slug(node.name) not in shared_slugs:
+                close = difflib.get_close_matches(_slug(node.name), sorted(shared_slugs), n=2, cutoff=0.5)
+                hint = f" Closest in suite: {', '.join(close)}." if close else ""
+                warnings.append(f"{where}: no 'Shared: {node.name}' case found in the selected suite.{hint}")
         elif node.kind == "for_each":
             if node.items in (None, "", []):
                 errors.append(f"{where}: for_each loop has no items")
             if not node.steps:
                 errors.append(f"{where}: for_each loop has no steps")
-            _walk_nodes(node.steps, f"{where} → ", errors, warnings)
+            _walk_nodes(node.steps, f"{where} → ", errors, warnings, shared_slugs)
         elif node.kind == "while":
             if not (node.expression or "").strip():
                 errors.append(f"{where}: while loop has no condition")
             if not node.steps:
                 errors.append(f"{where}: while loop has no steps")
-            _walk_nodes(node.steps, f"{where} → ", errors, warnings)
+            _walk_nodes(node.steps, f"{where} → ", errors, warnings, shared_slugs)
         elif node.kind == "condition":
             if not (node.expression or "").strip():
                 errors.append(f"{where}: condition has no expression")
             if not node.then_steps:
                 errors.append(f"{where}: condition has no 'then' steps")
-            _walk_nodes(node.then_steps, f"{where} then → ", errors, warnings)
-            _walk_nodes(node.else_steps, f"{where} else → ", errors, warnings)
+            _walk_nodes(node.then_steps, f"{where} then → ", errors, warnings, shared_slugs)
+            _walk_nodes(node.else_steps, f"{where} else → ", errors, warnings, shared_slugs)
         elif node.kind == "try":
             if not node.steps:
                 errors.append(f"{where}: try block has no steps")
-            _walk_nodes(node.steps, f"{where} try → ", errors, warnings)
-            _walk_nodes(node.except_steps, f"{where} except → ", errors, warnings)
-            _walk_nodes(node.finally_steps, f"{where} finally → ", errors, warnings)
+            _walk_nodes(node.steps, f"{where} try → ", errors, warnings, shared_slugs)
+            _walk_nodes(node.except_steps, f"{where} except → ", errors, warnings, shared_slugs)
+            _walk_nodes(node.finally_steps, f"{where} finally → ", errors, warnings, shared_slugs)
 
 
-def validate_case(model: CaseModel) -> Dict[str, Any]:
+# Variables the runner provides implicitly at execution time.
+_BUILTIN_VARS = {
+    "last_response", "last_response_dict", "last_status_code",
+    "last_response_headers", "last_response_text",
+}
+
+_VAR_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _collect_strings(v: Any, out: List[str]) -> None:
+    if isinstance(v, str):
+        out.append(v)
+    elif isinstance(v, dict):
+        for x in v.values():
+            _collect_strings(x, out)
+    elif isinstance(v, list):
+        for x in v:
+            _collect_strings(x, out)
+
+
+def _scan_variable_usage(model: CaseModel) -> tuple:
+    """Return (referenced names, names the case itself defines)."""
+    strings: List[str] = []
+    defined = set(_BUILTIN_VARS)
+    for row in model.variables:
+        if row.key.strip():
+            defined.add(row.key.strip())
+        _collect_strings(row.value, strings)
+    if model.data_rows:
+        try:
+            rows = yaml.safe_load(model.data_rows)
+            if isinstance(rows, list):
+                for r in rows:
+                    if isinstance(r, dict):
+                        defined.update(str(k) for k in r.keys())
+        except yaml.YAMLError:
+            pass
+
+    def walk(nodes: List[StepNode]) -> None:
+        for n in nodes:
+            _collect_strings(n.params, strings)
+            if isinstance(n.params.get("store_as"), str) and n.params["store_as"].strip():
+                defined.add(n.params["store_as"].strip())
+            if n.kind == "action" and n.action == "eval.set" and isinstance(n.params.get("key"), str):
+                defined.add(n.params["key"].strip())
+            if n.loop_var:
+                defined.add(n.loop_var.strip())
+            for f in (n.expression, n.yaml_text):
+                if isinstance(f, str):
+                    strings.append(f)
+            _collect_strings(n.items, strings)
+            for lst in (n.steps, n.then_steps, n.else_steps, n.except_steps, n.finally_steps):
+                walk(lst)
+
+    walk(model.steps)
+    refs = set()
+    for s in strings:
+        refs.update(_VAR_REF_RE.findall(s))
+    return refs, defined
+
+
+def validate_case(model: CaseModel,
+                  known_vars: Optional[List[str]] = None,
+                  known_shared: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Validate a case model.
+
+    known_vars / known_shared carry suite context (keys from Var: cases,
+    names of Shared: cases). When provided, cross-reference checks run:
+    unknown ${variable} references and missing shared steps become warnings.
+    """
+    sanitize_model(model)
     errors: List[str] = []
     warnings: List[str] = []
 
     if not model.name.strip():
         errors.append("Case name is required")
 
-    if model.case_type == "var":
+    if model.case_type == "var" and not model.steps:
         if not any(r.key.strip() for r in model.variables):
             errors.append("Var: case needs at least one key/value pair")
         seen = set()
@@ -770,7 +965,23 @@ def validate_case(model: CaseModel) -> Dict[str, Any]:
     else:
         if not model.steps:
             errors.append("Add at least one step")
-        _walk_nodes(model.steps, "", errors, warnings)
+        shared_slugs = {_slug(s) for s in known_shared} if known_shared is not None else None
+        _walk_nodes(model.steps, "", errors, warnings, shared_slugs)
+
+        # Cross-reference ${variables} against everything in scope.
+        if known_vars is not None:
+            refs, defined = _scan_variable_usage(model)
+            defined.update(known_vars)
+            unknown = sorted(
+                r for r in refs
+                if r not in defined and not r.isupper()  # ALL_CAPS = env var convention
+            )
+            if unknown:
+                warnings.append(
+                    "Unknown variable reference(s): "
+                    + ", ".join("${" + u + "}" for u in unknown)
+                    + " — not defined in this case, a Var: case in the suite, or by a store_as."
+                )
 
     body = ""
     if not errors:
@@ -781,7 +992,7 @@ def validate_case(model: CaseModel) -> Dict[str, Any]:
 
     # Round-trip: parse the generated body with the exact functions the
     # runner uses, to guarantee TestRail content will execute.
-    if body and not errors and model.case_type != "var":
+    if body and not errors and (model.case_type != "var" or model.steps):
         try:
             fixed = fix_step_list_indent(body)
             parsed = parse_yaml_lenient(fixed)
@@ -882,6 +1093,23 @@ def parse_case_to_model(case: Dict[str, Any]) -> Dict[str, Any]:
     notes: List[str] = []
 
     if role == "var":
+        # A Var: case body is usually a flat key/value mapping, but the runner
+        # also supports step-based Var: cases (a steps list whose store_as
+        # results become run variables) — detect those and load them as steps.
+        step_parsed = None
+        if text.lstrip().startswith("-"):
+            try:
+                step_parsed = parse_yaml_lenient(fix_step_list_indent(text))
+            except Exception:
+                step_parsed = None
+        if isinstance(step_parsed, list) and any(isinstance(s, dict) for s in step_parsed):
+            nodes = [_dict_to_node(s) for s in step_parsed if isinstance(s, dict)]
+            model["steps"] = [n.model_dump() for n in nodes]
+            notes.append(
+                "Step-based Var: case — its steps run before the tests and "
+                "store_as results become run variables."
+            )
+            return {"model": model, "notes": notes, "raw_body": text}
         try:
             parsed = yaml.safe_load(text) if text else {}
         except yaml.YAMLError:
@@ -902,6 +1130,17 @@ def parse_case_to_model(case: Dict[str, Any]) -> Dict[str, Any]:
         return {"model": model, "notes": notes, "raw_body": text}
 
     if text:
+        # Parameterized cases may carry a "JSON:\n[...]" data prefix — split it
+        # off the same way the runner does before parsing steps.
+        try:
+            from easybdd.core.testrail_runner import _extract_inline_data
+            data_sets, text = _extract_inline_data(text)
+            if data_sets:
+                model["data_rows"] = yaml.safe_dump(
+                    data_sets, default_flow_style=False, width=100000
+                ).rstrip()
+        except Exception:
+            pass
         try:
             fixed = fix_step_list_indent(text)
             parsed = parse_yaml_lenient(fixed)
@@ -1027,20 +1266,96 @@ async def testrail_sections(project_id: int = Query(...), suite_id: Optional[int
     ]
 
 
+def _classify_role(title: str) -> str:
+    for prefix, r in _ROLE_BY_PREFIX.items():
+        if title.startswith(prefix):
+            return r
+    return "other"
+
+
+def _var_keys_from_body(text: str) -> List[str]:
+    """Extract variable keys from a Var: case body (YAML or line-based)."""
+    if not text:
+        return []
+    try:
+        parsed = yaml.safe_load(text)
+        if isinstance(parsed, dict):
+            return [str(k).lstrip("$") for k in parsed.keys()]
+    except yaml.YAMLError:
+        pass
+    keys = []
+    for line in text.splitlines():
+        line = line.strip()
+        if ":" in line and not line.startswith(("#", "-")):
+            k = line.partition(":")[0].strip().strip('"').lstrip("$")
+            if k:
+                keys.append(k)
+    return keys
+
+
+def _step_var_outputs(text: str) -> List[str]:
+    """Variables a step-based Var: case defines (store_as / eval.set keys)."""
+    out: List[str] = []
+    try:
+        parsed = parse_yaml_lenient(fix_step_list_indent(text))
+    except Exception:
+        return out
+    if not isinstance(parsed, list):
+        return out
+
+    def walk(steps: List[Any]) -> None:
+        for s in steps:
+            if not isinstance(s, dict):
+                continue
+            for key, val in s.items():
+                if isinstance(val, dict):
+                    if isinstance(val.get("store_as"), str):
+                        out.append(val["store_as"].strip())
+                    if key == "eval.set" and isinstance(val.get("key"), str):
+                        out.append(val["key"].strip())
+            for sub in ("steps", "then", "else", "try", "except", "finally"):
+                if isinstance(s.get(sub), list):
+                    walk(s[sub])
+            if isinstance(s.get("store_as"), str):  # action-key format
+                out.append(s["store_as"].strip())
+
+    walk(parsed)
+    return out
+
+
+def _suite_context(cases: List[Dict[str, Any]]) -> tuple:
+    """Collect (var keys, shared names) defined across a suite's cases."""
+    known_vars: List[str] = []
+    known_shared: List[str] = []
+    for c in cases:
+        title = c.get("title", "") or ""
+        role = _classify_role(title)
+        if role == "var":
+            body = strip_html_to_text(str(c.get("custom_preconds") or ""))
+            if body.lstrip().startswith("-"):
+                known_vars.extend(_step_var_outputs(body))
+            else:
+                known_vars.extend(_var_keys_from_body(body))
+        elif role == "shared":
+            known_shared.append(title[len("Shared:"):].strip())
+    return sorted(set(known_vars)), sorted(set(known_shared))
+
+
 @app.get("/api/testrail/cases")
 async def testrail_cases(project_id: int = Query(...), suite_id: Optional[int] = Query(None)):
     cases = _tr_call(_tr().get_cases, project_id, suite_id)
     out = []
     for c in cases:
         title = c.get("title", "")
-        role = "other"
-        for prefix, r in _ROLE_BY_PREFIX.items():
-            if title.startswith(prefix):
-                role = r
-                break
-        out.append(
-            {"id": c["id"], "title": title, "section_id": c.get("section_id"), "role": role}
-        )
+        role = _classify_role(title)
+        item = {"id": c["id"], "title": title, "section_id": c.get("section_id"), "role": role}
+        if role == "var":
+            body = strip_html_to_text(str(c.get("custom_preconds") or ""))
+            item["var_keys"] = (
+                _step_var_outputs(body) if body.lstrip().startswith("-")
+                else _var_keys_from_body(body)
+            )
+        out.append(item)
     return out
 
 
@@ -1067,9 +1382,70 @@ async def preview(model: CaseModel):
     return {"title": title, "body": body, "error": None}
 
 
+class ValidateRequest(BaseModel):
+    model: CaseModel
+    known_vars: Optional[List[str]] = None
+    known_shared: Optional[List[str]] = None
+
+
 @app.post("/api/validate")
-async def validate(model: CaseModel):
-    return validate_case(model)
+async def validate(req: ValidateRequest):
+    return validate_case(req.model, known_vars=req.known_vars, known_shared=req.known_shared)
+
+
+class LintRequest(BaseModel):
+    project_id: int
+    suite_id: Optional[int] = None
+
+
+@app.post("/api/testrail/lint")
+async def lint_suite(req: LintRequest):
+    """Health-check every case in a suite with the builder's validation.
+
+    Catches damage from hand-edits in TestRail's rich-text field: broken
+    YAML, misspelled actions, missing required params, unknown ${variables},
+    dangling shared-step references, legacy-format bodies.
+    """
+    cases = _tr_call(_tr().get_cases, req.project_id, req.suite_id)
+    known_vars, known_shared = _suite_context(cases)
+    results = []
+    counts = {"checked": 0, "clean": 0, "errors": 0, "warnings": 0}
+    for c in cases:
+        title = c.get("title", "") or ""
+        role = _classify_role(title)
+        counts["checked"] += 1
+        errors: List[str] = []
+        warnings: List[str] = []
+        if role == "other":
+            warnings.append(
+                "Title has no recognized prefix (Feature:/Var:/Shared:/Setup:/Teardown:/Test:) — the runner will skip this case."
+            )
+        elif role == "test":
+            pass  # pointer cases route to local YAML; nothing to lint here
+        else:
+            parsed = parse_case_to_model(c)
+            for note in parsed.get("notes", []):
+                # purely informational notes aren't suite-health problems
+                if not note.startswith("Step-based Var:"):
+                    warnings.append(note)
+            try:
+                model = CaseModel(**parsed["model"])
+                v = validate_case(model, known_vars=known_vars, known_shared=known_shared)
+                errors.extend(v["errors"])
+                warnings.extend(v["warnings"])
+            except Exception as exc:
+                errors.append(f"Could not validate: {exc}")
+        if errors or warnings:
+            results.append({
+                "case_id": c["id"], "title": title, "role": role,
+                "section_id": c.get("section_id"),
+                "errors": errors, "warnings": warnings,
+                "link": _case_link(c["id"]),
+            })
+            counts["errors" if errors else "warnings"] += 1
+        else:
+            counts["clean"] += 1
+    return {"counts": counts, "issues": results}
 
 
 @app.post("/api/testrail/section")
@@ -1085,7 +1461,13 @@ async def create_section(req: SectionRequest):
 
 @app.post("/api/testrail/publish")
 async def publish(req: PublishRequest):
-    result = validate_case(req.model)
+    known_vars = known_shared = None
+    try:
+        suite_cases = _tr().get_cases(req.project_id, req.suite_id)
+        known_vars, known_shared = _suite_context(suite_cases)
+    except Exception:
+        pass  # cross-reference warnings are best-effort; never block publish on them
+    result = validate_case(req.model, known_vars=known_vars, known_shared=known_shared)
     if not result["valid"]:
         raise HTTPException(status_code=422, detail={"errors": result["errors"]})
 

@@ -279,7 +279,10 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
           <select id="sel-suite" class="compact"><option value="">—</option></select>
         </div>
       </div>
-      <input id="case-search" class="compact" placeholder="Filter cases…">
+      <div style="display:flex; gap:6px; margin:10px 12px 4px">
+        <input id="case-search" class="compact" placeholder="Filter cases…" style="margin:0; flex:1">
+        <button class="btn ghost" id="btn-lint" title="Validate every case in this suite with the runner's parser — catches hand-edits made in TestRail's raw text field" style="padding:5px 10px; font-size:12.5px">🩺</button>
+      </div>
       <div id="case-list"><div class="empty-note" style="padding:12px">Select a project to browse cases.</div></div>
     </div>
 
@@ -387,6 +390,14 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
   </div>
 </div>
 
+<!-- ============ suite health modal ============ -->
+<div class="modal-back" id="lint-back">
+  <div class="modal" style="width:760px; height:80vh">
+    <div class="modal-head"><h2>Suite health check</h2><button class="icon-btn" data-close="lint-back">✕</button></div>
+    <div class="modal-body" id="lint-body" style="flex:1; min-height:0; overflow-y:auto"></div>
+  </div>
+</div>
+
 <div id="toasts"></div>
 
 <script>
@@ -473,6 +484,7 @@ function escapeHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").r
 
 function knownVariables() {
   const names = new Set(["last_status_code", "last_response"]);
+  for (const c of S.cases) for (const k of (c.var_keys || [])) names.add(k);
   if (!S.model) return names;
   for (const v of S.model.variables) if (v.key.trim()) names.add(v.key.trim());
   const walk = (nodes) => {
@@ -711,11 +723,24 @@ function renderEditor() {
   body.innerHTML = "";
   refreshVarDatalist();
 
-  if (S.model.case_type === "var") {
+  if (S.model.case_type === "var" && !(S.model.steps || []).length) {
     body.appendChild(sectionBox(
       "Variables", "Key/value pairs injected into every case in the run.",
       kvEditor(S.model.variables, "variable"),
     ));
+    return;
+  }
+  if (S.model.case_type === "var") {
+    // step-based Var: case — steps run before the tests; store_as results
+    // become run variables
+    const stepsWrap = el("div");
+    renderStepList(S.model.steps, stepsWrap, { allowControl: true });
+    body.appendChild(sectionBox(
+      "Steps (step-based Var: case)",
+      "Runs before the tests — store_as results become run variables.",
+      el("div", {}, stepsWrap,
+        el("button", { class: "big-add", onclick: () => openPalette(S.model.steps, { allowControl: true }) },
+          "＋ Add step"))));
     return;
   }
 
@@ -1098,10 +1123,14 @@ function schedulePreview() {
 async function runPreview() {
   if (!S.model) return;
   S.model.name = $("#case-name").value;
+  const ctx = S.projectId ? {
+    known_vars: [...new Set(S.cases.flatMap(c => c.var_keys || []))],
+    known_shared: S.cases.filter(c => c.role === "shared").map(c => stripPrefix(c.title)),
+  } : {};
   try {
     const [prev, val] = await Promise.all([
       api("/api/preview", { method: "POST", body: S.model }),
-      api("/api/validate", { method: "POST", body: S.model }),
+      api("/api/validate", { method: "POST", body: { model: S.model, ...ctx } }),
     ]);
     $("#preview-title").textContent = prev.title || "";
     $("#title-preview").textContent = prev.title || "";
@@ -1296,7 +1325,50 @@ async function createRun() {
   finally { btn.disabled = false; btn.textContent = "Create run"; }
 }
 
+/* ============================== suite health check ============================== */
+async function runLint() {
+  if (!S.projectId) { toast("Select a project first.", "err"); return; }
+  const btn = $("#btn-lint");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  const body = $("#lint-body");
+  body.innerHTML = "";
+  $("#lint-back").classList.add("open");
+  body.appendChild(el("div", { class: "empty-note" }, "Checking every case in the suite…"));
+  try {
+    const res = await api("/api/testrail/lint", { method: "POST", body: { project_id: S.projectId, suite_id: S.suiteId } });
+    body.innerHTML = "";
+    const c = res.counts;
+    const summary = el("div", { class: "issue " + (c.errors ? "error" : c.warnings ? "warning" : "okline") },
+      c.errors || c.warnings
+        ? `Checked ${c.checked} cases — ${c.clean} clean, ${c.errors} with errors, ${c.warnings} with warnings.`
+        : `✓ All ${c.checked} cases are clean — every body parses and every action checks out.`);
+    body.appendChild(summary);
+    for (const item of res.issues) {
+      const card = el("div", { class: "step-card", style: "margin-top:10px" });
+      card.appendChild(el("div", { class: "step-head", onclick: () => {
+          $("#lint-back").classList.remove("open");
+          loadCase(item.case_id);
+        }, title: "Open in the editor" },
+        el("span", { class: `role-badge role-${item.role}` }, item.role === "other" ? "?" : item.role),
+        el("span", { class: "titlebit", style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(item.title) || item.title),
+        el("span", { class: "actid", style: "margin-left:auto; flex-shrink:0" }, `C${item.case_id}`),
+      ));
+      const det = el("div", { style: "padding: 4px 12px 10px" });
+      for (const e of item.errors) det.appendChild(el("div", { class: "issue error" }, "✕ " + e));
+      for (const w of item.warnings) det.appendChild(el("div", { class: "issue warning" }, "⚠ " + w));
+      card.appendChild(det);
+      body.appendChild(card);
+    }
+  } catch (e) {
+    body.innerHTML = "";
+    body.appendChild(el("div", { class: "issue error" }, "Health check failed: " + e.message));
+  } finally {
+    btn.disabled = false; btn.textContent = "🩺";
+  }
+}
+
 /* ============================== wire up ============================== */
+$("#btn-lint").addEventListener("click", runLint);
 $("#sel-project").addEventListener("change", onProjectChange);
 $("#sel-suite").addEventListener("change", onSuiteChange);
 $("#case-search").addEventListener("input", renderCaseList);

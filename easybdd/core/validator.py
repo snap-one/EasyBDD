@@ -99,8 +99,13 @@ ACTION_SCHEMA: Dict[str, Dict] = {
 
     # telnet.*
     "telnet.send": {
-        "required": ["command"],
-        "optional": ["host", "port", "username", "password", "prompt", "timeout", "store_as"],
+        # command (single) or commands (list) — telnet_service accepts either
+        "required": [],
+        "optional": [
+            "command", "commands", "host", "port", "username", "password",
+            "prompt", "shell_prompt", "username_prompt", "password_prompt",
+            "timeout", "store_as", "encoding", "max_retries",
+        ],
     },
 
     # websocket.* / ws.*  (params mirror websocket_service._WEBSOCKET_CONTROL_PARAMS;
@@ -179,8 +184,15 @@ ACTION_SCHEMA: Dict[str, Dict] = {
 
     # aws.*
     "aws.list_files": {
+        # mirrors aws_service.list_firmware_files signature
         "required": ["bucket_name"],
-        "optional": ["folder_prefix", "filename_pattern", "store_as"],
+        "optional": [
+            "folder_prefix", "filename_pattern", "version_pattern",
+            "file_extension", "specific_version", "cloudfront_url",
+            "cloudfront_filename_only", "download_dir", "protocol",
+            "access_key_id", "secret_access_key", "region", "store_as",
+            "discover_prefix", "repo_root",
+        ],
     },
     "aws list firmware files": {"alias_of": "aws.list_files"},
     "s3.list":                 {"alias_of": "aws.list_files"},
