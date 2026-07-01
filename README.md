@@ -30,6 +30,7 @@ A TestRail-first test automation framework for web UI, REST API, and firmware re
 - [Connections](#connections)
 - [Configuration](#configuration)
 - [Local YAML (supplemental)](#local-yaml-supplemental)
+- [Test Builder UI](#test-builder-ui)
 - [Migration Tools](#migration-tools)
 - [CLI Reference](#cli-reference)
 - [Project Structure](#project-structure)
@@ -901,6 +902,29 @@ file: tests/cases/networking/login.yaml
 
 ---
 
+## Test Builder UI
+
+A web interface for authoring TestRail cases without writing YAML by hand. Engineers pick actions from the framework catalog, fill in guided forms, and publish `Var:` / `Shared:` / `Setup:` / `Teardown:` / `Feature:` cases straight into a TestRail suite — no syntax or action-name spelling to get wrong.
+
+```bash
+python frontend/start_testrail_builder.py          # http://localhost:8091
+python frontend/start_testrail_builder.py --port 9000
+```
+
+Uses the same TestRail credentials as the runner (`.env`: `TESTRAIL_URL`, `TESTRAIL_USERNAME`, `TESTRAIL_API_KEY`).
+
+What it does:
+
+- **Case types** — build any of the five case types; the correct title prefix is applied automatically.
+- **Step palette** — every action the runner supports (Browser, API, SSH, Telnet, Serial, WebSocket, OvrC, AWS, Eval, Test utilities…), searchable, with per-parameter forms, required-field markers, and help text.
+- **Control flow** — for-each / while / if-else / try-except blocks with nested steps.
+- **Shared steps** — call `Shared:` cases from the selected suite by picking them from a dropdown.
+- **Live preview + validation** — the Preconditions body is generated server-side and round-trip parsed with the runner's own parser before publishing, so what lands in TestRail is guaranteed to execute. Typos get "did you mean" suggestions.
+- **Publish & run** — create or update cases in a chosen section, then assemble selected cases into a run (run prefix added automatically) ready for `python -m easybdd testrail-run --run-id <id>`.
+- **Edit existing cases** — click any case in the suite browser to load it back into the editor. Legacy-format bodies load as a raw step with a warning instead of being silently dropped.
+
+---
+
 ## Migration Tools
 
 ### From Robot Framework
@@ -1000,8 +1024,11 @@ Easy_BDD/
 │   ├── mcp_server.py              # MCP server for AI assistant integration
 │   ├── bdd_migrator.py            # mybdd → Easy BDD migration
 │   ├── robot_migrator.py          # Robot Framework → Easy BDD migration
-│   ├── test_builder_app.py        # [DEPRECATED] local web builder
-│   └── action_definitions.py      # [DEPRECATED] web builder action catalog
+│   ├── testrail_builder.py        # Test Builder UI backend (publish to TestRail)
+│   ├── start_testrail_builder.py  # Test Builder UI launcher (port 8091)
+│   ├── static/testrail_builder.html  # Test Builder UI frontend
+│   ├── action_definitions.py      # Action catalog (used by Test Builder UI)
+│   └── test_builder_app.py        # [DEPRECATED] old local web builder
 ├── tests/                         # Local YAML test files (supplemental)
 │   └── cases/{workspace}/
 │       ├── shared_steps.yaml

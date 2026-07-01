@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Easy BDD · TestRail Test Builder</title>
+<style>
+:root {
+  --bg: #0f1419;
+  --bg-panel: #161c24;
+  --bg-card: #1c242e;
+  --bg-input: #12181f;
+  --bg-hover: #232d3a;
+  --border: #2a3542;
+  --border-focus: #3d7eff;
+  --text: #dbe4ee;
+  --text-dim: #8a99ab;
+  --text-faint: #5c6a7a;
+  --accent: #3d7eff;
+  --accent-hover: #5a92ff;
+  --green: #2ecc71;
+  --red: #e74c5c;
+  --amber: #f0a832;
+  --purple: #a06bff;
+  --mono: "SF Mono", "Cascadia Code", Consolas, Menlo, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg); color: var(--text); overflow: hidden;
+}
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+input, select, textarea {
+  font: inherit; color: var(--text); background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; width: 100%;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--border-focus); }
+input[type=checkbox] { width: auto; }
+textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #2c3947; border-radius: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- layout ---------- */
+#app { display: flex; flex-direction: column; height: 100vh; }
+#topbar {
+  display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 52px;
+  background: var(--bg-panel); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#topbar .logo { font-weight: 700; font-size: 15px; white-space: nowrap; }
+#topbar .logo span { color: var(--accent); }
+#conn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+#conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
+#conn.ok .dot { background: var(--green); }
+#conn.err .dot { background: var(--red); }
+#main { display: flex; flex: 1; min-height: 0; }
+
+/* ---------- sidebar ---------- */
+#sidebar {
+  width: 300px; flex-shrink: 0; background: var(--bg-panel);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0;
+}
+#sidebar .ctx { padding: 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+#sidebar label.small, .field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); }
+#case-search { margin: 10px 12px 4px; width: calc(100% - 24px); }
+#case-list { flex: 1; overflow-y: auto; padding: 6px 8px 20px; }
+.case-group-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); padding: 10px 6px 4px; }
+.case-item {
+  display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+  padding: 5px 8px; border-radius: 6px; color: var(--text-dim); font-size: 13px;
+}
+.case-item:hover { background: var(--bg-hover); color: var(--text); }
+.case-item.active { background: rgba(61,126,255,.15); color: var(--text); }
+.case-item .cid { margin-left: auto; font-size: 11px; color: var(--text-faint); font-family: var(--mono); }
+.role-badge {
+  font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+  text-transform: uppercase; letter-spacing: .03em;
+}
+.role-feature  { background: rgba(61,126,255,.18); color: #7aa5ff; }
+.role-var      { background: rgba(240,168,50,.18); color: #f0b95c; }
+.role-shared   { background: rgba(160,107,255,.18); color: #b98cff; }
+.role-setup    { background: rgba(46,204,113,.18); color: #5cdd97; }
+.role-teardown { background: rgba(231,76,92,.18);  color: #f08090; }
+.role-test, .role-other { background: rgba(138,153,171,.15); color: var(--text-dim); }
+
+/* ---------- editor ---------- */
+#editor { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#editor-head { padding: 14px 20px 10px; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+#type-row { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+.type-pill {
+  padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border);
+  font-size: 12.5px; color: var(--text-dim);
+}
+.type-pill:hover { border-color: var(--text-faint); color: var(--text); }
+.type-pill.active { border-color: var(--accent); background: rgba(61,126,255,.15); color: #7aa5ff; font-weight: 600; }
+#name-row { display: flex; gap: 10px; align-items: center; }
+#case-name { font-size: 15px; font-weight: 600; flex: 1; }
+#title-preview { font-family: var(--mono); font-size: 12px; color: var(--text-faint); white-space: nowrap; }
+#editor-body { flex: 1; overflow-y: auto; padding: 16px 20px 80px; }
+.section-box { margin-bottom: 18px; }
+.section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.section-head h3 { font-size: 13px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+.section-head .hint { font-size: 12px; color: var(--text-faint); }
+.kv-row { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+.kv-row input.k { width: 220px; flex-shrink: 0; font-family: var(--mono); font-size: 12.5px; }
+.kv-row input.v { flex: 1; font-family: var(--mono); font-size: 12.5px; }
+.icon-btn { color: var(--text-faint); padding: 4px 7px; border-radius: 5px; font-size: 13px; }
+.icon-btn:hover { color: var(--text); background: var(--bg-hover); }
+.icon-btn.danger:hover { color: var(--red); }
+.add-link { color: var(--accent); font-size: 13px; padding: 4px 2px; }
+.add-link:hover { color: var(--accent-hover); }
+
+/* step cards */
+.step-card {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 9px;
+  margin-bottom: 10px;
+}
+.step-card.control { border-left: 3px solid var(--purple); }
+.step-card.shared-card { border-left: 3px solid #b98cff; }
+.step-head { display: flex; align-items: center; gap: 9px; padding: 9px 12px; cursor: pointer; }
+.step-head .num {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: var(--bg-input); border-radius: 4px; padding: 1px 6px; flex-shrink: 0;
+}
+.step-head .icon { font-size: 15px; }
+.step-head .titlebit { font-weight: 600; font-size: 13.5px; }
+.step-head .actid { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); }
+.step-head .summary { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.step-head .controls { margin-left: auto; display: flex; gap: 2px; flex-shrink: 0; }
+.step-body { padding: 4px 14px 12px; border-top: 1px solid var(--border); }
+.param-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; padding-top: 10px; }
+.param-field.wide { grid-column: 1 / -1; }
+.param-field label { display: flex; gap: 5px; align-items: baseline; font-size: 12px; color: var(--text-dim); margin-bottom: 3px; }
+.param-field label .req { color: var(--red); }
+.param-field .help { font-size: 11px; color: var(--text-faint); margin-top: 3px; }
+.param-field input, .param-field select { font-family: var(--mono); font-size: 12.5px; }
+.nested-zone { margin-top: 10px; border: 1px dashed var(--border); border-radius: 8px; padding: 10px; }
+.nested-zone > .zone-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--purple); margin-bottom: 8px; }
+.nested-zone .step-card { background: var(--bg-panel); }
+#add-step-row { display: flex; gap: 10px; }
+.big-add {
+  flex: 1; border: 1px dashed var(--border); border-radius: 9px; padding: 12px;
+  color: var(--text-dim); font-size: 13.5px; text-align: center;
+}
+.big-add:hover { border-color: var(--accent); color: var(--accent); background: rgba(61,126,255,.05); }
+.empty-note { color: var(--text-faint); font-size: 13px; padding: 8px 2px; }
+
+/* ---------- right panel ---------- */
+#right {
+  width: 420px; flex-shrink: 0; background: var(--bg-panel); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; min-height: 0;
+}
+#right-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#right-tabs button { flex: 1; padding: 10px; font-size: 13px; color: var(--text-dim); border-bottom: 2px solid transparent; }
+#right-tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+#right-tabs button .badge {
+  display: inline-block; min-width: 17px; padding: 0 5px; margin-left: 5px; border-radius: 9px;
+  font-size: 11px; font-weight: 700; background: var(--red); color: #fff;
+}
+#right-tabs button .badge.warn { background: var(--amber); color: #201500; }
+#preview-pane, #issues-pane { flex: 1; overflow-y: auto; padding: 12px; display: none; min-height: 0; }
+#preview-pane.active, #issues-pane.active { display: block; }
+#preview-title { font-family: var(--mono); font-size: 12.5px; color: var(--amber); margin-bottom: 8px; word-break: break-all; }
+#preview-body {
+  font-family: var(--mono); font-size: 12px; white-space: pre; overflow-x: auto;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+  color: #b8c8da; min-height: 120px;
+}
+.copy-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.copy-row .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); }
+.issue { display: flex; gap: 8px; padding: 8px 10px; border-radius: 7px; margin-bottom: 7px; font-size: 13px; }
+.issue.error { background: rgba(231,76,92,.1); color: #f297a3; }
+.issue.warning { background: rgba(240,168,50,.1); color: #f0c37c; }
+.issue.okline { background: rgba(46,204,113,.1); color: #7bdfa5; }
+#publish-bar {
+  border-top: 1px solid var(--border); padding: 12px; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 9px; background: var(--bg-panel);
+}
+#publish-bar .row { display: flex; gap: 8px; align-items: center; }
+.btn {
+  padding: 8px 16px; border-radius: 7px; font-weight: 600; font-size: 13.5px;
+  background: var(--bg-hover); color: var(--text);
+}
+.btn:hover { background: #2c3947; }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.primary:disabled { background: #2a3542; color: var(--text-faint); cursor: not-allowed; }
+.btn.ghost { background: transparent; border: 1px solid var(--border); }
+
+/* ---------- modal ---------- */
+.modal-back {
+  position: fixed; inset: 0; background: rgba(5,8,12,.65); display: none;
+  align-items: center; justify-content: center; z-index: 40;
+}
+.modal-back.open { display: flex; }
+.modal {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px;
+  width: 720px; max-width: 92vw; max-height: 84vh; display: flex; flex-direction: column; overflow: hidden;
+}
+.modal-head { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.modal-head h2 { font-size: 15px; }
+.modal-head .icon-btn { margin-left: auto; }
+#palette-search-row { padding: 10px 16px; border-bottom: 1px solid var(--border); }
+#palette-main { display: flex; flex: 1; min-height: 0; }
+#palette-cats { width: 170px; border-right: 1px solid var(--border); overflow-y: auto; padding: 8px; flex-shrink: 0; }
+#palette-cats button { display: block; width: 100%; text-align: left; padding: 6px 10px; border-radius: 6px; color: var(--text-dim); font-size: 13px; }
+#palette-cats button:hover { background: var(--bg-hover); color: var(--text); }
+#palette-cats button.active { background: rgba(61,126,255,.15); color: #7aa5ff; }
+#palette-items { flex: 1; overflow-y: auto; padding: 10px; }
+.pal-item {
+  display: flex; gap: 10px; width: 100%; text-align: left; padding: 9px 11px;
+  border-radius: 8px; align-items: baseline;
+}
+.pal-item:hover { background: var(--bg-hover); }
+.pal-item .icon { font-size: 15px; }
+.pal-item .name { font-weight: 600; font-size: 13.5px; white-space: nowrap; }
+.pal-item .pid { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); }
+.pal-item .desc { font-size: 12px; color: var(--text-dim); }
+.modal .modal-body { padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.modal .modal-foot { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+
+/* run modal case picker */
+.run-case-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 5px; font-size: 13px; }
+.run-case-row:hover { background: var(--bg-hover); }
+.run-case-row .cid { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+
+/* toasts */
+#toasts { position: fixed; bottom: 18px; right: 18px; z-index: 60; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 8px; padding: 11px 15px; min-width: 260px; max-width: 420px; font-size: 13px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.4); animation: slidein .18s ease-out;
+}
+.toast.ok { border-left-color: var(--green); }
+.toast.err { border-left-color: var(--red); }
+.toast a { color: var(--accent-hover); }
+@keyframes slidein { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--text-faint); border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.mono { font-family: var(--mono); }
+.dim { color: var(--text-dim); }
+select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div class="logo">Easy BDD <span>· TestRail Test Builder</span></div>
+    <div id="conn"><span class="dot"></span><span id="conn-text">connecting…</span></div>
+    <div style="flex:1"></div>
+    <button class="btn ghost" id="btn-run-modal" title="Assemble published cases into an EASY_BDD: run">🏃 Create Run</button>
+    <button class="btn ghost" id="btn-new-case">＋ New Case</button>
+  </div>
+
+  <div id="main">
+    <!-- ============ sidebar ============ -->
+    <div id="sidebar">
+      <div class="ctx">
+        <div>
+          <label class="small">Project</label>
+          <select id="sel-project" class="compact"><option value="">loading…</option></select>
+        </div>
+        <div id="suite-wrap">
+          <label class="small">Suite</label>
+          <select id="sel-suite" class="compact"><option value="">—</option></select>
+        </div>
+      </div>
+      <input id="case-search" class="compact" placeholder="Filter cases…">
+      <div id="case-list"><div class="empty-note" style="padding:12px">Select a project to browse cases.</div></div>
+    </div>
+
+    <!-- ============ editor ============ -->
+    <div id="editor">
+      <div id="editor-head">
+        <div id="type-row"></div>
+        <div id="name-row">
+          <input id="case-name" placeholder="Case name — e.g. Firmware upgrade via OvrC">
+          <span id="title-preview"></span>
+        </div>
+      </div>
+      <div id="editor-body"></div>
+    </div>
+
+    <!-- ============ right panel ============ -->
+    <div id="right">
+      <div id="right-tabs">
+        <button id="tab-preview" class="active">TestRail Preview</button>
+        <button id="tab-issues">Issues<span id="issue-badge" style="display:none" class="badge">0</span></button>
+      </div>
+      <div id="preview-pane" class="active">
+        <div id="preview-title"></div>
+        <div class="copy-row">
+          <span class="lbl">Preconditions field</span>
+          <button class="icon-btn" id="btn-copy" title="Copy body">📋 copy</button>
+        </div>
+        <div id="preview-body"></div>
+      </div>
+      <div id="issues-pane"></div>
+      <div id="publish-bar">
+        <div class="row">
+          <div style="flex:1">
+            <label class="small">Section</label>
+            <select id="sel-section" class="compact"><option value="">—</option></select>
+          </div>
+          <button class="icon-btn" id="btn-new-section" title="Create new section" style="margin-top:16px">＋</button>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="btn-publish" style="flex:1">Publish to TestRail</button>
+        </div>
+        <div id="publish-status" class="dim" style="font-size:12px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ palette modal ============ -->
+<div class="modal-back" id="palette-back">
+  <div class="modal" style="height:70vh">
+    <div class="modal-head">
+      <h2 id="palette-title">Add step</h2>
+      <button class="icon-btn" data-close="palette-back">✕</button>
+    </div>
+    <div id="palette-search-row"><input id="palette-search" placeholder="Search actions… (e.g. click, ssh, assert)"></div>
+    <div id="palette-main">
+      <div id="palette-cats"></div>
+      <div id="palette-items"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ new case modal ============ -->
+<div class="modal-back" id="newcase-back">
+  <div class="modal" style="width:560px">
+    <div class="modal-head"><h2>New case</h2><button class="icon-btn" data-close="newcase-back">✕</button></div>
+    <div class="modal-body" id="newcase-body"></div>
+  </div>
+</div>
+
+<!-- ============ new section modal ============ -->
+<div class="modal-back" id="section-back">
+  <div class="modal" style="width:460px">
+    <div class="modal-head"><h2>New section</h2><button class="icon-btn" data-close="section-back">✕</button></div>
+    <div class="modal-body">
+      <div><label class="small">Section name</label><input id="new-section-name" placeholder="e.g. Smoke — Firmware"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close="section-back">Cancel</button>
+      <button class="btn primary" id="btn-create-section">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ run modal ============ -->
+<div class="modal-back" id="run-back">
+  <div class="modal" style="width:640px; height:76vh">
+    <div class="modal-head"><h2>Create TestRail run</h2><button class="icon-btn" data-close="run-back">✕</button></div>
+    <div class="modal-body" style="flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:10px">
+      <div>
+        <label class="small">Run name (prefix added automatically so the runner picks it up)</label>
+        <input id="run-name" placeholder="e.g. WB-800 Smoke — FW 2.1.4">
+      </div>
+      <div class="row" style="display:flex; gap:8px">
+        <button class="add-link" id="run-select-all">Select all</button>
+        <button class="add-link" id="run-select-none">Select none</button>
+        <span class="dim" style="margin-left:auto; font-size:12px" id="run-count"></span>
+      </div>
+      <div id="run-cases" style="flex:1; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:6px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close="run-back">Cancel</button>
+      <button class="btn primary" id="btn-create-run">Create run</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+"use strict";
+/* ============================== state ============================== */
+const S = {
+  catalog: {},          // category -> [action defs]
+  actionsById: {},      // action id -> def
+  projects: [],
+  projectId: null,
+  suiteId: null,
+  suiteMode: 1,
+  sections: [],
+  cases: [],
+  model: null,          // current case model
+  editingCaseId: null,  // TestRail case id when editing existing
+  dirty: false,
+  valid: false,
+  paletteTarget: null,  // {list: array, allowControl: bool, onAdd: fn}
+  previewTimer: null,
+};
+
+const ROLE_ORDER = ["var", "setup", "shared", "feature", "teardown", "test", "other"];
+const ROLE_LABEL = { var: "Var — run variables", setup: "Setup", shared: "Shared — reusable steps",
+                     feature: "Feature — test cases", teardown: "Teardown", test: "Test — pointers", other: "Other" };
+const TYPE_INFO = [
+  ["feature",  "Feature",  "Primary test case. Steps run and report a result."],
+  ["var",      "Var",      "Key/value variables injected into every case in the run."],
+  ["shared",   "Shared",   "Reusable step library, called from Feature cases by name."],
+  ["setup",    "Setup",    "Runs once before the Feature cases (login, device prep)."],
+  ["teardown", "Teardown", "Runs once after all Feature cases (cleanup, logout)."],
+];
+const CONTROL_DEFS = [
+  { id: "_for_each",  icon: "🔁", name: "For each loop", desc: "Repeat steps for every item in a list" },
+  { id: "_while",     icon: "⏳", name: "While loop",    desc: "Repeat steps while a condition holds" },
+  { id: "_condition", icon: "🔀", name: "If / Else",     desc: "Run steps only when a condition is true" },
+  { id: "_try",       icon: "🛟", name: "Try / Except / Finally", desc: "Recover from failing steps" },
+];
+const COMPOSE_DEFS = [
+  { id: "_shared", icon: "🧩", name: "Shared step", desc: "Call a Shared: case from this suite by name" },
+  { id: "_raw",    icon: "📝", name: "Raw YAML step", desc: "Escape hatch — paste one step as YAML" },
+];
+
+/* ============================== helpers ============================== */
+const $ = (sel) => document.querySelector(sel);
+const el = (tag, attrs = {}, ...children) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined) n.setAttribute(k, v);
+  }
+  for (const c of children) {
+    if (c === null || c === undefined) continue;
+    n.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+  }
+  return n;
+};
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!r.ok) {
+    let detail = r.statusText;
+    try { const j = await r.json(); detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); } catch {}
+    throw new Error(detail);
+  }
+  return r.json();
+}
+
+function toast(msg, kind = "", html = false) {
+  const t = el("div", { class: `toast ${kind}` });
+  if (html) t.innerHTML = msg; else t.textContent = msg;
+  $("#toasts").appendChild(t);
+  setTimeout(() => t.remove(), kind === "err" ? 9000 : 6000);
+}
+
+function stripPrefix(title) { return title.replace(/^[A-Za-z]+:\s*/, ""); }
+function escapeHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+function knownVariables() {
+  const names = new Set(["last_status_code", "last_response"]);
+  if (!S.model) return names;
+  for (const v of S.model.variables) if (v.key.trim()) names.add(v.key.trim());
+  const walk = (nodes) => {
+    for (const n of nodes || []) {
+      if (n.params && n.params.store_as) names.add(String(n.params.store_as));
+      if (n.loop_var) names.add(n.loop_var);
+      walk(n.steps); walk(n.then_steps); walk(n.else_steps); walk(n.except_steps); walk(n.finally_steps);
+    }
+  };
+  walk(S.model.steps);
+  return names;
+}
+
+function refreshVarDatalist() {
+  let dl = $("#var-datalist");
+  if (!dl) { dl = el("datalist", { id: "var-datalist" }); document.body.appendChild(dl); }
+  dl.innerHTML = "";
+  for (const n of knownVariables()) dl.appendChild(el("option", { value: "${" + n + "}" }));
+}
+
+/* ============================== model ============================== */
+function newModel(type) {
+  return { case_type: type, name: "", variables: [], data_rows: null, steps: [] };
+}
+function newNode(kind) {
+  return { kind, action: null, params: {}, name: null, items: null, loop_var: null,
+           expression: null, loop_limit: null, steps: [], then_steps: [], else_steps: [],
+           except_steps: [], finally_steps: [], yaml_text: null };
+}
+
+function markDirty() {
+  S.dirty = true;
+  schedulePreview();
+}
+
+/* ============================== boot ============================== */
+async function boot() {
+  try {
+    const cat = await api("/api/catalog");
+    S.catalog = cat.categories;
+    for (const items of Object.values(S.catalog)) for (const a of items) S.actionsById[a.id] = a;
+  } catch (e) { toast("Failed to load action catalog: " + e.message, "err"); }
+
+  S.model = newModel("feature");
+  renderTypeRow(); renderEditor(); schedulePreview();
+
+  try {
+    const st = await api("/api/testrail/status");
+    if (!st.configured) {
+      $("#conn").className = "err";
+      $("#conn-text").textContent = "TestRail credentials missing (.env)";
+      return;
+    }
+    const projects = await api("/api/testrail/projects");
+    S.projects = projects;
+    $("#conn").className = "ok";
+    $("#conn-text").textContent = st.url.replace(/^https?:\/\//, "");
+    const sel = $("#sel-project");
+    sel.innerHTML = "<option value=''>— select —</option>";
+    for (const p of projects) sel.appendChild(el("option", { value: p.id }, `${p.name} (#${p.id})`));
+  } catch (e) {
+    $("#conn").className = "err";
+    $("#conn-text").textContent = "TestRail unreachable";
+    toast("TestRail: " + e.message, "err");
+  }
+}
+
+/* ============================== TestRail context ============================== */
+async function onProjectChange() {
+  S.projectId = Number($("#sel-project").value) || null;
+  S.suiteId = null;
+  S.sections = []; S.cases = [];
+  renderCaseList(); renderSections();
+  if (!S.projectId) return;
+  const proj = S.projects.find(p => p.id === S.projectId);
+  S.suiteMode = proj ? proj.suite_mode : 1;
+  const suiteSel = $("#sel-suite");
+  suiteSel.innerHTML = "";
+  try {
+    const suites = await api(`/api/testrail/suites?project_id=${S.projectId}`);
+    for (const s of suites) suiteSel.appendChild(el("option", { value: s.id }, `${s.name} (#${s.id})`));
+    if (suites.length) { S.suiteId = suites[0].id; suiteSel.value = String(S.suiteId); }
+    $("#suite-wrap").style.display = suites.length > 1 ? "" : "none";
+    await reloadSuite();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function onSuiteChange() {
+  S.suiteId = Number($("#sel-suite").value) || null;
+  await reloadSuite();
+}
+
+async function reloadSuite() {
+  if (!S.projectId) return;
+  const q = `project_id=${S.projectId}` + (S.suiteId ? `&suite_id=${S.suiteId}` : "");
+  try {
+    [S.sections, S.cases] = await Promise.all([
+      api(`/api/testrail/sections?${q}`),
+      api(`/api/testrail/cases?${q}`),
+    ]);
+  } catch (e) { toast(e.message, "err"); S.sections = []; S.cases = []; }
+  renderSections(); renderCaseList();
+}
+
+function renderSections() {
+  const sel = $("#sel-section");
+  sel.innerHTML = "<option value=''>— select section —</option>";
+  for (const s of S.sections) {
+    sel.appendChild(el("option", { value: s.id }, `${"  ".repeat(s.depth || 0)}${s.name}`));
+  }
+}
+
+function renderCaseList() {
+  const box = $("#case-list");
+  box.innerHTML = "";
+  const filter = $("#case-search").value.trim().toLowerCase();
+  if (!S.cases.length) {
+    box.appendChild(el("div", { class: "empty-note", style: "padding:12px" },
+      S.projectId ? "No cases in this suite yet." : "Select a project to browse cases."));
+    return;
+  }
+  const groups = {};
+  for (const c of S.cases) {
+    if (filter && !c.title.toLowerCase().includes(filter)) continue;
+    (groups[c.role] = groups[c.role] || []).push(c);
+  }
+  for (const role of ROLE_ORDER) {
+    const items = groups[role];
+    if (!items || !items.length) continue;
+    box.appendChild(el("div", { class: "case-group-title" }, `${ROLE_LABEL[role]} (${items.length})`));
+    for (const c of items) {
+      box.appendChild(el("button", {
+        class: "case-item" + (S.editingCaseId === c.id ? " active" : ""),
+        onclick: () => loadCase(c.id),
+        title: c.title,
+      },
+        el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
+        el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
+        el("span", { class: "cid" }, `C${c.id}`),
+      ));
+    }
+  }
+}
+
+async function loadCase(caseId) {
+  if (S.dirty && !confirm("Discard unsaved changes in the editor?")) return;
+  try {
+    const res = await api(`/api/testrail/case/${caseId}`);
+    S.model = res.model;
+    S.model.variables = S.model.variables || [];
+    S.model.steps = S.model.steps || [];
+    S.editingCaseId = caseId;
+    S.dirty = false;
+    for (const note of res.notes || []) toast(note, "");
+    const c = S.cases.find(x => x.id === caseId);
+    if (c && c.section_id) $("#sel-section").value = String(c.section_id);
+    renderTypeRow(); renderEditor(); renderCaseList(); schedulePreview();
+    $("#publish-status").textContent = `Editing C${caseId} — publishing will update it.`;
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ============================== editor rendering ============================== */
+function renderTypeRow() {
+  const row = $("#type-row");
+  row.innerHTML = "";
+  for (const [key, label, desc] of TYPE_INFO) {
+    row.appendChild(el("button", {
+      class: "type-pill" + (S.model.case_type === key ? " active" : ""),
+      title: desc,
+      onclick: () => { S.model.case_type = key; markDirty(); renderTypeRow(); renderEditor(); },
+    }, `${label}:`));
+  }
+  if (S.editingCaseId) {
+    row.appendChild(el("span", { class: "dim", style: "font-size:12px; margin-left:6px" }, `editing C${S.editingCaseId}`));
+    row.appendChild(el("button", { class: "add-link", onclick: startFresh }, "start fresh"));
+  }
+  $("#case-name").value = S.model.name || "";
+}
+
+function startFresh() {
+  if (S.dirty && !confirm("Discard unsaved changes?")) return;
+  S.model = newModel(S.model.case_type);
+  S.editingCaseId = null; S.dirty = false;
+  $("#publish-status").textContent = "";
+  renderTypeRow(); renderEditor(); renderCaseList(); schedulePreview();
+}
+
+function renderEditor() {
+  const body = $("#editor-body");
+  body.innerHTML = "";
+  refreshVarDatalist();
+
+  if (S.model.case_type === "var") {
+    body.appendChild(sectionBox(
+      "Variables", "Key/value pairs injected into every case in the run.",
+      kvEditor(S.model.variables, "variable"),
+    ));
+    return;
+  }
+
+  // variables (scoped to case)
+  body.appendChild(sectionBox(
+    "Case variables", "Optional — scoped to this case. Reference anywhere as ${name}.",
+    kvEditor(S.model.variables, "variable"),
+  ));
+
+  // data rows for feature cases
+  if (S.model.case_type === "feature") {
+    const ta = el("textarea", {
+      rows: 3, placeholder: "- mac: D4:6A:91:29:0F:5A\n  product: WB-800\n- mac: A8:3B:76:11:CC:22\n  product: WB-250",
+      oninput: (e) => { S.model.data_rows = e.target.value || null; markDirty(); },
+    });
+    ta.value = S.model.data_rows || "";
+    body.appendChild(sectionBox(
+      "Data rows", "Optional — repeat all steps once per row (YAML list of mappings).", ta,
+    ));
+  }
+
+  // steps
+  const stepsWrap = el("div");
+  renderStepList(S.model.steps, stepsWrap, { allowControl: true });
+  const addBtn = el("button", { class: "big-add", onclick: () => openPalette(S.model.steps, { allowControl: true }) },
+    "＋ Add step — pick a framework tool");
+  body.appendChild(sectionBox("Steps", "Executed top to bottom.", el("div", {}, stepsWrap, el("div", { id: "add-step-row" }, addBtn))));
+}
+
+function sectionBox(title, hint, content) {
+  return el("div", { class: "section-box" },
+    el("div", { class: "section-head" }, el("h3", {}, title), el("span", { class: "hint" }, hint)),
+    content);
+}
+
+function kvEditor(rows, noun) {
+  const wrap = el("div");
+  const render = () => {
+    wrap.innerHTML = "";
+    rows.forEach((row, i) => {
+      wrap.appendChild(el("div", { class: "kv-row" },
+        el("input", { class: "k compact", placeholder: "name", value: row.key,
+          oninput: (e) => { row.key = e.target.value; markDirty(); refreshVarDatalist(); } }),
+        el("input", { class: "v compact", placeholder: "value", value: row.value === null || row.value === undefined ? "" : (typeof row.value === "object" ? JSON.stringify(row.value) : String(row.value)),
+          list: "var-datalist",
+          oninput: (e) => { row.value = e.target.value; markDirty(); } }),
+        el("button", { class: "icon-btn danger", title: "Remove", onclick: () => { rows.splice(i, 1); markDirty(); render(); } }, "✕"),
+      ));
+    });
+    wrap.appendChild(el("button", { class: "add-link", onclick: () => { rows.push({ key: "", value: "" }); markDirty(); render(); } },
+      `＋ add ${noun}`));
+  };
+  render();
+  return wrap;
+}
+
+/* ---------- step list ---------- */
+function renderStepList(list, container, opts) {
+  container.innerHTML = "";
+  if (!list.length) {
+    container.appendChild(el("div", { class: "empty-note" }, "No steps yet."));
+  }
+  list.forEach((node, i) => container.appendChild(stepCard(node, list, i, opts)));
+}
+
+function stepSummary(node) {
+  if (node.kind === "action") {
+    const p = node.params || {};
+    for (const k of ["url", "selector", "name", "command", "expression", "message", "field", "host", "key", "code"]) {
+      if (p[k]) return `${k}: ${typeof p[k] === "object" ? JSON.stringify(p[k]) : p[k]}`;
+    }
+    return "";
+  }
+  if (node.kind === "shared") return node.name || "";
+  if (node.kind === "for_each") return `${JSON.stringify(node.items) || ""} as ${node.loop_var || "?"}`;
+  if (node.kind === "while" || node.kind === "condition") return node.expression || "";
+  if (node.kind === "raw") return (node.yaml_text || "").split("\n")[0];
+  return "";
+}
+
+function stepCard(node, list, index, opts) {
+  const isControl = ["for_each", "while", "condition", "try"].includes(node.kind);
+  const card = el("div", { class: "step-card" + (isControl ? " control" : "") + (node.kind === "shared" ? " shared-card" : "") });
+  const def = node.kind === "action" ? S.actionsById[node.action] : null;
+  const icon = def ? def.icon
+    : node.kind === "shared" ? "🧩"
+    : node.kind === "for_each" ? "🔁" : node.kind === "while" ? "⏳"
+    : node.kind === "condition" ? "🔀" : node.kind === "try" ? "🛟" : "📝";
+  const title = def ? def.label
+    : node.kind === "shared" ? "Shared step"
+    : node.kind === "for_each" ? "For each" : node.kind === "while" ? "While"
+    : node.kind === "condition" ? "If / Else" : node.kind === "try" ? "Try / Except" : "Raw YAML";
+
+  let bodyVisible = true;
+  const bodyEl = el("div", { class: "step-body" });
+  const summaryEl = el("span", { class: "summary" }, "");
+
+  const head = el("div", { class: "step-head", onclick: (e) => {
+      if (e.target.closest(".controls")) return;
+      bodyVisible = !bodyVisible;
+      bodyEl.style.display = bodyVisible ? "" : "none";
+      summaryEl.textContent = bodyVisible ? "" : stepSummary(node);
+    } },
+    el("span", { class: "num" }, String(index + 1)),
+    el("span", { class: "icon" }, icon),
+    el("span", { class: "titlebit" }, title),
+    node.kind === "action" ? el("span", { class: "actid" }, node.action) : null,
+    summaryEl,
+    el("span", { class: "controls" },
+      el("button", { class: "icon-btn", title: "Move up", onclick: () => { if (index > 0) { list.splice(index - 1, 0, list.splice(index, 1)[0]); markDirty(); renderEditor(); } } }, "↑"),
+      el("button", { class: "icon-btn", title: "Move down", onclick: () => { if (index < list.length - 1) { list.splice(index + 1, 0, list.splice(index, 1)[0]); markDirty(); renderEditor(); } } }, "↓"),
+      el("button", { class: "icon-btn", title: "Duplicate", onclick: () => { list.splice(index + 1, 0, JSON.parse(JSON.stringify(node))); markDirty(); renderEditor(); } }, "⧉"),
+      el("button", { class: "icon-btn danger", title: "Delete", onclick: () => { list.splice(index, 1); markDirty(); renderEditor(); } }, "✕"),
+    ),
+  );
+  card.appendChild(head);
+
+  if (node.kind === "action") bodyEl.appendChild(actionForm(node));
+  else if (node.kind === "shared") bodyEl.appendChild(sharedForm(node));
+  else if (node.kind === "raw") bodyEl.appendChild(rawForm(node));
+  else bodyEl.appendChild(controlForm(node));
+  card.appendChild(bodyEl);
+  return card;
+}
+
+/* ---------- forms ---------- */
+function paramField(node, pname, pdef) {
+  const wide = ["textarea", "json", "keyvalue", "list", "object"].includes(pdef.type);
+  const wrap = el("div", { class: "param-field" + (wide ? " wide" : "") });
+  const label = el("label", {}, pdef.label || pname,
+    pdef.required ? el("span", { class: "req" }, "*") : null,
+    el("span", { class: "mono dim", style: "font-size:10.5px" }, pname));
+  wrap.appendChild(label);
+  const cur = node.params[pname];
+  const set = (v) => {
+    if (v === "" || v === null || v === undefined || v === false) delete node.params[pname];
+    else node.params[pname] = v;
+    markDirty(); refreshVarDatalist();
+  };
+
+  if (pdef.type === "select") {
+    const sel = el("select", { class: "compact", onchange: (e) => set(e.target.value) });
+    sel.appendChild(el("option", { value: "" }, pdef.required ? "— choose —" : "— default —"));
+    for (const o of pdef.options || []) sel.appendChild(el("option", { value: o }, String(o)));
+    if (cur !== undefined) sel.value = String(cur);
+    wrap.appendChild(sel);
+  } else if (pdef.type === "boolean") {
+    const cb = el("input", { type: "checkbox", onchange: (e) => set(e.target.checked ? true : "") });
+    cb.checked = cur === true || cur === "true";
+    wrap.appendChild(el("div", { style: "padding:6px 0" }, cb));
+  } else if (pdef.type === "number") {
+    const inp = el("input", { type: "text", class: "compact", placeholder: pdef.placeholder || "", list: "var-datalist",
+      oninput: (e) => set(e.target.value) });
+    if (cur !== undefined) inp.value = String(cur);
+    wrap.appendChild(inp);
+  } else if (["textarea", "json", "keyvalue", "list", "object"].includes(pdef.type)) {
+    const ta = el("textarea", { rows: pdef.type === "textarea" ? 4 : 3,
+      placeholder: pdef.placeholder || (pdef.type === "json" || pdef.type === "keyvalue" || pdef.type === "object"
+        ? '{key: value, other: "${var}"}' : pdef.type === "list" ? "[item1, item2]" : ""),
+      oninput: (e) => set(e.target.value) });
+    if (cur !== undefined) ta.value = typeof cur === "object" ? JSON.stringify(cur) : String(cur);
+    wrap.appendChild(ta);
+  } else {
+    const inp = el("input", { type: "text", class: "compact", placeholder: pdef.placeholder || "", list: "var-datalist",
+      oninput: (e) => set(e.target.value) });
+    if (cur !== undefined) inp.value = typeof cur === "object" ? JSON.stringify(cur) : String(cur);
+    wrap.appendChild(inp);
+  }
+  if (pdef.help) wrap.appendChild(el("div", { class: "help" }, pdef.help));
+  return wrap;
+}
+
+function actionForm(node) {
+  const def = S.actionsById[node.action] || { parameters: {} };
+  const grid = el("div", { class: "param-grid" });
+  const declared = Object.keys(def.parameters || {});
+  for (const [pname, pdef] of Object.entries(def.parameters || {})) {
+    grid.appendChild(paramField(node, pname, pdef));
+  }
+  // extra params not in the schema
+  const extras = Object.keys(node.params || {}).filter(k => !declared.includes(k));
+  const extraWrap = el("div", { class: "param-field wide" });
+  const renderExtras = () => {
+    extraWrap.innerHTML = "";
+    for (const k of Object.keys(node.params).filter(x => !declared.includes(x))) {
+      extraWrap.appendChild(el("div", { class: "kv-row" },
+        el("input", { class: "k compact", value: k, disabled: true }),
+        el("input", { class: "v compact", value: typeof node.params[k] === "object" ? JSON.stringify(node.params[k]) : String(node.params[k]),
+          list: "var-datalist",
+          oninput: (e) => { node.params[k] = e.target.value; markDirty(); } }),
+        el("button", { class: "icon-btn danger", onclick: () => { delete node.params[k]; markDirty(); renderExtras(); } }, "✕"),
+      ));
+    }
+    extraWrap.appendChild(el("button", { class: "add-link", onclick: () => {
+      const k = prompt("Parameter name:");
+      if (k && k.trim()) { node.params[k.trim()] = ""; markDirty(); renderExtras(); }
+    } }, "＋ add parameter"));
+  };
+  renderExtras();
+  grid.appendChild(extraWrap);
+  if (def.description) grid.prepend(el("div", { class: "param-field wide help", style: "margin-top:8px" }, def.description));
+  return grid;
+}
+
+function sharedForm(node) {
+  const wrap = el("div", { class: "param-grid" });
+  const shared = S.cases.filter(c => c.role === "shared").map(c => stripPrefix(c.title));
+  const field = el("div", { class: "param-field wide" });
+  field.appendChild(el("label", {}, "Shared step name", el("span", { class: "req" }, "*")));
+  if (shared.length) {
+    const sel = el("select", { class: "compact", onchange: (e) => { node.name = e.target.value || null; markDirty(); } });
+    sel.appendChild(el("option", { value: "" }, "— choose from suite —"));
+    for (const s of shared) sel.appendChild(el("option", { value: s }, s));
+    if (node.name && !shared.includes(node.name)) sel.appendChild(el("option", { value: node.name }, node.name + " (not in suite)"));
+    if (node.name) sel.value = node.name;
+    field.appendChild(sel);
+    field.appendChild(el("div", { class: "help" }, "Shared: cases found in the selected suite. The runner matches by name."));
+  } else {
+    const inp = el("input", { class: "compact", placeholder: "e.g. Authenticate", value: node.name || "",
+      oninput: (e) => { node.name = e.target.value || null; markDirty(); } });
+    field.appendChild(inp);
+    field.appendChild(el("div", { class: "help" }, "No Shared: cases found in the selected suite — type a name."));
+  }
+  wrap.appendChild(field);
+  return wrap;
+}
+
+function rawForm(node) {
+  const wrap = el("div", { class: "param-grid" });
+  const field = el("div", { class: "param-field wide" });
+  field.appendChild(el("label", {}, "Raw YAML (one step)"));
+  const ta = el("textarea", { rows: 5, placeholder: "- service.verb:\n    param: value",
+    oninput: (e) => { node.yaml_text = e.target.value; markDirty(); } });
+  ta.value = node.yaml_text || "";
+  field.appendChild(ta);
+  wrap.appendChild(field);
+  return wrap;
+}
+
+function controlForm(node) {
+  const wrap = el("div");
+  const grid = el("div", { class: "param-grid" });
+
+  if (node.kind === "for_each") {
+    grid.appendChild(simpleField("Items (YAML list or ${variable})", node.items ?? "", "[1, 10, 30] or ${device_list}",
+      (v) => { node.items = v; }, true));
+    grid.appendChild(simpleField("Loop variable", node.loop_var || "", "item",
+      (v) => { node.loop_var = v || null; }));
+  } else if (node.kind === "while") {
+    grid.appendChild(simpleField("Condition (loops while true)", node.expression || "", "device_state != 'ready'",
+      (v) => { node.expression = v || null; }));
+    grid.appendChild(simpleField("Loop limit", node.loop_limit ?? "", "30",
+      (v) => { node.loop_limit = v ? Number(v) : null; }));
+  } else if (node.kind === "condition") {
+    grid.appendChild(simpleField("Condition", node.expression || "", "current_version != target_version",
+      (v) => { node.expression = v || null; }, true));
+  }
+  wrap.appendChild(grid);
+
+  const zones = node.kind === "condition"
+    ? [["then_steps", "Then — when condition is true"], ["else_steps", "Else — when condition is false (optional)"]]
+    : node.kind === "try"
+      ? [["steps", "Try"], ["except_steps", "Except — on failure (optional)"], ["finally_steps", "Finally — always runs (optional)"]]
+      : [["steps", "Loop body"]];
+
+  for (const [key, label] of zones) {
+    const zone = el("div", { class: "nested-zone" });
+    zone.appendChild(el("div", { class: "zone-label" }, label));
+    const listWrap = el("div");
+    renderStepList(node[key], listWrap, { allowControl: false });
+    zone.appendChild(listWrap);
+    zone.appendChild(el("button", { class: "add-link", onclick: () => openPalette(node[key], { allowControl: false }) }, "＋ add step"));
+    wrap.appendChild(zone);
+  }
+  return wrap;
+}
+
+function simpleField(label, value, placeholder, onset, wide) {
+  const f = el("div", { class: "param-field" + (wide ? " wide" : "") });
+  f.appendChild(el("label", {}, label));
+  const v = typeof value === "object" && value !== null ? JSON.stringify(value) : String(value ?? "");
+  f.appendChild(el("input", { class: "compact", placeholder, value: v, list: "var-datalist",
+    oninput: (e) => { onset(e.target.value); markDirty(); } }));
+  return f;
+}
+
+/* ============================== palette ============================== */
+let paletteCat = null;
+function openPalette(targetList, opts) {
+  S.paletteTarget = { list: targetList, allowControl: opts.allowControl };
+  $("#palette-title").textContent = opts.allowControl ? "Add step" : "Add nested step";
+  $("#palette-search").value = "";
+  paletteCat = null;
+  renderPaletteCats(); renderPaletteItems();
+  $("#palette-back").classList.add("open");
+  setTimeout(() => $("#palette-search").focus(), 50);
+}
+
+function renderPaletteCats() {
+  const box = $("#palette-cats");
+  box.innerHTML = "";
+  const cats = ["All", "★ Composition", ...Object.keys(S.catalog).sort()];
+  for (const c of cats) {
+    box.appendChild(el("button", {
+      class: (paletteCat === c || (!paletteCat && c === "All")) ? "active" : "",
+      onclick: () => { paletteCat = c === "All" ? null : c; renderPaletteCats(); renderPaletteItems(); },
+    }, c));
+  }
+}
+
+function renderPaletteItems() {
+  const box = $("#palette-items");
+  const q = $("#palette-search").value.trim().toLowerCase();
+  box.innerHTML = "";
+  const allowControl = S.paletteTarget?.allowControl;
+
+  const addSpecial = (defs) => {
+    for (const d of defs) {
+      if (q && !(d.name + d.desc + d.id).toLowerCase().includes(q)) continue;
+      box.appendChild(el("button", { class: "pal-item", onclick: () => pickSpecial(d.id) },
+        el("span", { class: "icon" }, d.icon),
+        el("span", {}, el("div", { class: "name" }, d.name), el("div", { class: "desc" }, d.desc)),
+      ));
+    }
+  };
+
+  if (!paletteCat || paletteCat === "★ Composition") {
+    addSpecial(COMPOSE_DEFS);
+    if (allowControl) addSpecial(CONTROL_DEFS);
+    if (paletteCat === "★ Composition") return;
+  }
+
+  for (const [cat, items] of Object.entries(S.catalog).sort()) {
+    if (paletteCat && paletteCat !== cat) continue;
+    for (const a of items) {
+      if (q && !(a.id + a.label + a.description).toLowerCase().includes(q)) continue;
+      box.appendChild(el("button", { class: "pal-item", onclick: () => pickAction(a.id) },
+        el("span", { class: "icon" }, a.icon || "⚙️"),
+        el("span", {},
+          el("div", {}, el("span", { class: "name" }, a.label + " "), el("span", { class: "pid" }, a.id)),
+          el("div", { class: "desc" }, a.description || cat)),
+      ));
+    }
+  }
+  if (!box.children.length) box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "No matches."));
+}
+
+function pickAction(actionId) {
+  const node = newNode("action");
+  node.action = actionId;
+  const def = S.actionsById[actionId];
+  if (def) {
+    for (const [pname, pdef] of Object.entries(def.parameters || {})) {
+      if (pdef.default !== undefined && pdef.default !== null && pdef.default !== "") node.params[pname] = pdef.default;
+    }
+  }
+  S.paletteTarget.list.push(node);
+  $("#palette-back").classList.remove("open");
+  markDirty(); renderEditor();
+}
+
+function pickSpecial(id) {
+  const kind = id.replace(/^_/, "");
+  const node = newNode(kind);
+  if (kind === "while") node.loop_limit = 30;
+  S.paletteTarget.list.push(node);
+  $("#palette-back").classList.remove("open");
+  markDirty(); renderEditor();
+}
+
+/* ============================== preview / validation ============================== */
+function schedulePreview() {
+  clearTimeout(S.previewTimer);
+  S.previewTimer = setTimeout(runPreview, 350);
+  $("#title-preview").textContent = "";
+}
+
+async function runPreview() {
+  if (!S.model) return;
+  S.model.name = $("#case-name").value;
+  try {
+    const [prev, val] = await Promise.all([
+      api("/api/preview", { method: "POST", body: S.model }),
+      api("/api/validate", { method: "POST", body: S.model }),
+    ]);
+    $("#preview-title").textContent = prev.title || "";
+    $("#title-preview").textContent = prev.title || "";
+    $("#preview-body").textContent = prev.error ? `⚠ ${prev.error}` : (prev.body || "(empty)");
+    renderIssues(val);
+  } catch (e) {
+    renderIssues({ valid: false, errors: ["Preview failed: " + e.message], warnings: [] });
+  }
+}
+
+function renderIssues(val) {
+  S.valid = val.valid;
+  const pane = $("#issues-pane");
+  pane.innerHTML = "";
+  const badge = $("#issue-badge");
+  const count = val.errors.length + val.warnings.length;
+  if (count) {
+    badge.style.display = "";
+    badge.textContent = String(count);
+    badge.className = "badge" + (val.errors.length ? "" : " warn");
+  } else badge.style.display = "none";
+
+  if (!val.errors.length && !val.warnings.length) {
+    pane.appendChild(el("div", { class: "issue okline" }, "✓ Case is valid — the generated body parses with the runner's own parser."));
+  }
+  for (const e of val.errors) pane.appendChild(el("div", { class: "issue error" }, "✕ " + e));
+  for (const w of val.warnings) pane.appendChild(el("div", { class: "issue warning" }, "⚠ " + w));
+  $("#btn-publish").disabled = !val.valid || !S.projectId;
+  if (!S.projectId) $("#publish-status").textContent = "Select a TestRail project to publish.";
+}
+
+/* ============================== publish ============================== */
+async function publish() {
+  S.model.name = $("#case-name").value;
+  const sectionId = Number($("#sel-section").value) || null;
+  if (!S.editingCaseId && !sectionId) { toast("Pick a section (or create one with ＋) before publishing.", "err"); return; }
+  const btn = $("#btn-publish");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publishing…';
+  try {
+    const res = await api("/api/testrail/publish", { method: "POST", body: {
+      model: S.model, project_id: S.projectId, suite_id: S.suiteId,
+      section_id: sectionId, case_id: S.editingCaseId,
+    } });
+    S.editingCaseId = res.case_id;
+    S.dirty = false;
+    toast(`Case ${res.action}: <b>${escapeHtml(res.title)}</b> — <a href="${res.link}" target="_blank">open C${res.case_id} in TestRail ↗</a>`, "ok", true);
+    $("#publish-status").textContent = `Editing C${res.case_id} — publishing will update it.`;
+    await reloadSuite();
+  } catch (e) {
+    toast("Publish failed: " + e.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "Publish to TestRail";
+  }
+}
+
+/* ============================== new case / section / run ============================== */
+function openNewCase() {
+  const body = $("#newcase-body");
+  body.innerHTML = "";
+  for (const [key, label, desc] of TYPE_INFO) {
+    body.appendChild(el("button", { class: "pal-item", onclick: () => {
+      if (S.dirty && !confirm("Discard unsaved changes?")) return;
+      S.model = newModel(key); S.editingCaseId = null; S.dirty = false;
+      $("#newcase-back").classList.remove("open");
+      $("#publish-status").textContent = "";
+      renderTypeRow(); renderEditor(); renderCaseList(); schedulePreview();
+      $("#case-name").focus();
+    } },
+      el("span", { class: `role-badge role-${key}`, style: "align-self:center" }, key),
+      el("span", {}, el("div", { class: "name" }, label + ":"), el("div", { class: "desc" }, desc)),
+    ));
+  }
+  $("#newcase-back").classList.add("open");
+}
+
+async function createSection() {
+  const name = $("#new-section-name").value.trim();
+  if (!name) return;
+  try {
+    const res = await api("/api/testrail/section", { method: "POST", body: {
+      project_id: S.projectId, suite_id: S.suiteId, name,
+    } });
+    toast(`Section created: ${res.name}`, "ok");
+    $("#section-back").classList.remove("open");
+    await reloadSuite();
+    $("#sel-section").value = String(res.id);
+  } catch (e) { toast(e.message, "err"); }
+}
+
+function openRunModal() {
+  if (!S.projectId) { toast("Select a project first.", "err"); return; }
+  const box = $("#run-cases");
+  box.innerHTML = "";
+  const groups = {};
+  for (const c of S.cases) (groups[c.role] = groups[c.role] || []).push(c);
+  for (const role of ROLE_ORDER) {
+    for (const c of groups[role] || []) {
+      box.appendChild(el("label", { class: "run-case-row" },
+        el("input", { type: "checkbox", "data-cid": c.id, onchange: updateRunCount }),
+        el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
+        el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
+        el("span", { class: "cid" }, `C${c.id}`),
+      ));
+    }
+  }
+  updateRunCount();
+  $("#run-back").classList.add("open");
+}
+
+function updateRunCount() {
+  const n = document.querySelectorAll("#run-cases input:checked").length;
+  $("#run-count").textContent = `${n} case${n === 1 ? "" : "s"} selected`;
+}
+
+async function createRun() {
+  const name = $("#run-name").value.trim();
+  if (!name) { toast("Give the run a name.", "err"); return; }
+  const ids = [...document.querySelectorAll("#run-cases input:checked")].map(cb => Number(cb.dataset.cid));
+  if (!ids.length) { toast("Select at least one case.", "err"); return; }
+  const btn = $("#btn-create-run");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Creating…';
+  try {
+    const res = await api("/api/testrail/run", { method: "POST", body: {
+      project_id: S.projectId, suite_id: S.suiteId, name, case_ids: ids,
+    } });
+    $("#run-back").classList.remove("open");
+    toast(`Run created: <b>${escapeHtml(res.name)}</b> — <a href="${res.link}" target="_blank">open R${res.run_id} ↗</a><br>` +
+          `<span class="dim">Execute with: <code>python -m easybdd testrail-run --run-id ${res.run_id}</code></span>`, "ok", true);
+  } catch (e) { toast(e.message, "err"); }
+  finally { btn.disabled = false; btn.textContent = "Create run"; }
+}
+
+/* ============================== wire up ============================== */
+$("#sel-project").addEventListener("change", onProjectChange);
+$("#sel-suite").addEventListener("change", onSuiteChange);
+$("#case-search").addEventListener("input", renderCaseList);
+$("#case-name").addEventListener("input", () => { S.model.name = $("#case-name").value; markDirty(); });
+$("#btn-publish").addEventListener("click", publish);
+$("#btn-new-case").addEventListener("click", openNewCase);
+$("#btn-new-section").addEventListener("click", () => {
+  if (!S.projectId) { toast("Select a project first.", "err"); return; }
+  $("#new-section-name").value = "";
+  $("#section-back").classList.add("open");
+});
+$("#btn-create-section").addEventListener("click", createSection);
+$("#btn-run-modal").addEventListener("click", openRunModal);
+$("#btn-create-run").addEventListener("click", createRun);
+$("#run-select-all").addEventListener("click", () => { document.querySelectorAll("#run-cases input").forEach(cb => cb.checked = true); updateRunCount(); });
+$("#run-select-none").addEventListener("click", () => { document.querySelectorAll("#run-cases input").forEach(cb => cb.checked = false); updateRunCount(); });
+$("#palette-search").addEventListener("input", renderPaletteItems);
+$("#tab-preview").addEventListener("click", () => switchTab("preview"));
+$("#tab-issues").addEventListener("click", () => switchTab("issues"));
+$("#btn-copy").addEventListener("click", () => {
+  navigator.clipboard.writeText($("#preview-body").textContent).then(() => toast("Copied Preconditions body.", "ok"));
+});
+document.querySelectorAll("[data-close]").forEach(b =>
+  b.addEventListener("click", () => $("#" + b.dataset.close).classList.remove("open")));
+document.querySelectorAll(".modal-back").forEach(m =>
+  m.addEventListener("mousedown", (e) => { if (e.target === m) m.classList.remove("open"); }));
+window.addEventListener("beforeunload", (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+function switchTab(name) {
+  $("#tab-preview").classList.toggle("active", name === "preview");
+  $("#tab-issues").classList.toggle("active", name === "issues");
+  $("#preview-pane").classList.toggle("active", name === "preview");
+  $("#issues-pane").classList.toggle("active", name === "issues");
+}
+
+boot();
+</script>
+</body>
+</html>
