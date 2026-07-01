@@ -103,14 +103,26 @@ ACTION_SCHEMA: Dict[str, Dict] = {
         "optional": ["host", "port", "username", "password", "prompt", "timeout", "store_as"],
     },
 
-    # websocket.* / ws.*
-    "websocket.connect":    {"required": ["url"], "optional": ["timeout", "headers"]},
+    # websocket.* / ws.*  (params mirror websocket_service._WEBSOCKET_CONTROL_PARAMS;
+    # connections are pooled by url, so url is required on send/receive too)
+    "websocket.connect":    {"required": ["url"], "optional": [
+        "timeout", "headers", "subprotocols", "protocol", "verify_ssl", "session_token",
+        "auth_url", "auth_username", "auth_password", "auth_body_key", "auth_token_var",
+    ]},
     "ws.connect":           {"alias_of": "websocket.connect"},
-    "websocket.disconnect": {"required": [], "optional": []},
+    "websocket.disconnect": {"required": [], "optional": ["url"]},
     "ws.disconnect":        {"alias_of": "websocket.disconnect"},
-    "websocket.send":       {"required": [], "optional": ["message", "data", "timeout"]},
+    "websocket.send":       {"required": ["url"], "optional": [
+        "data", "method", "timeout", "wait_for", "store_as", "headers",
+        "subprotocols", "protocol", "verify_ssl", "session_token",
+        "auth_url", "auth_username", "auth_password", "auth_body_key", "auth_token_var",
+    ]},
     "ws.send":              {"alias_of": "websocket.send"},
-    "websocket.receive":    {"required": [], "optional": ["store_as", "timeout"]},
+    "websocket.receive":    {"required": ["url"], "optional": [
+        "timeout", "wait_for", "store_as", "headers", "subprotocols", "protocol",
+        "verify_ssl", "session_token",
+        "auth_url", "auth_username", "auth_password", "auth_body_key", "auth_token_var",
+    ]},
     "ws.receive":           {"alias_of": "websocket.receive"},
     "websocket.read":       {"alias_of": "websocket.receive"},
     "ws.read":              {"alias_of": "websocket.receive"},

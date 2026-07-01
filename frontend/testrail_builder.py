@@ -140,6 +140,71 @@ _CATALOG_OVERRIDES: Dict[str, Dict[str, Any]] = {
             },
         },
     },
+    "websocket.connect": {
+        "category": "WebSocket",
+        "label": "WebSocket Connect",
+        "description": "Open a WebSocket connection (pooled by URL — later send/receive steps reuse it)",
+        "icon": "🔄",
+        "parameters": {
+            "url": {"type": "text", "required": True, "label": "URL",
+                    "placeholder": "wss://host:port/path", "help": "WebSocket endpoint (ws:// or wss://)"},
+            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "placeholder": "10"},
+            "headers": {"type": "json", "required": False, "label": "Headers",
+                        "help": "e.g. {header: '${mac},127.0.0.1,80,plain'}"},
+            "subprotocols": {"type": "list", "required": False, "label": "Subprotocols"},
+            "verify_ssl": {"type": "boolean", "required": False, "label": "Verify SSL"},
+            "session_token": {"type": "text", "required": False, "label": "Session token"},
+            "auth_url": {"type": "text", "required": False, "label": "Auth URL",
+                         "help": "Optional HTTP auth endpoint called before connecting"},
+            "auth_username": {"type": "text", "required": False, "label": "Auth username"},
+            "auth_password": {"type": "text", "required": False, "label": "Auth password"},
+        },
+    },
+    "websocket.send": {
+        "category": "WebSocket",
+        "label": "WebSocket Send",
+        "description": "Send a message and read the reply. With Method set, sends a JSON-RPC envelope; extra parameters become the JSON-RPC params.",
+        "icon": "📨",
+        "parameters": {
+            "url": {"type": "text", "required": True, "label": "URL",
+                    "placeholder": "wss://host:port/path",
+                    "help": "Identifies the pooled connection (reconnects automatically)"},
+            "method": {"type": "text", "required": False, "label": "JSON-RPC method",
+                       "placeholder": "dxGetAbout",
+                       "help": "When set, the message is wrapped in a JSON-RPC 2.0 envelope"},
+            "data": {"type": "json", "required": False, "label": "Data / params",
+                     "help": "Raw message, or the params dict in JSON-RPC mode"},
+            "wait_for": {"type": "text", "required": False, "label": "Wait for",
+                         "help": "Keep reading until the response contains this text"},
+            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "placeholder": "10"},
+            "store_as": {"type": "text", "required": False, "label": "Store as",
+                         "help": "Variable name to store the response"},
+        },
+    },
+    "websocket.receive": {
+        "category": "WebSocket",
+        "label": "WebSocket Receive",
+        "description": "Read the next message from an open WebSocket connection",
+        "icon": "📥",
+        "parameters": {
+            "url": {"type": "text", "required": True, "label": "URL",
+                    "help": "Identifies the pooled connection"},
+            "wait_for": {"type": "text", "required": False, "label": "Wait for",
+                         "help": "Keep reading until the response contains this text"},
+            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "placeholder": "10"},
+            "store_as": {"type": "text", "required": False, "label": "Store as"},
+        },
+    },
+    "websocket.disconnect": {
+        "category": "WebSocket",
+        "label": "WebSocket Disconnect",
+        "description": "Close a pooled WebSocket connection",
+        "icon": "🔌",
+        "parameters": {
+            "url": {"type": "text", "required": False, "label": "URL",
+                    "help": "Connection to close (omit to no-op)"},
+        },
+    },
     "test.extract": {
         "category": "Test",
         "label": "Extract Value",
@@ -559,6 +624,11 @@ def case_title(model: CaseModel) -> str:
 # Validation                                                                   #
 # --------------------------------------------------------------------------- #
 
+# Actions where arbitrary extra params are legitimate (websocket.send folds
+# unrecognized params into the JSON-RPC params dict).
+_FREEFORM_PARAM_ACTIONS = {"websocket.send"}
+
+
 def _validate_action_node(node: StepNode, where: str, errors: List[str], warnings: List[str]) -> None:
     action = node.action or ""
     definition = CATALOG.get(action)
@@ -573,7 +643,7 @@ def _validate_action_node(node: StepNode, where: str, errors: List[str], warning
         for pname, pdef in definition.get("parameters", {}).items():
             if pdef.get("required") and pname not in params:
                 errors.append(f"{where}: '{action}' is missing required parameter '{pname}'")
-    if schema:
+    if schema and action not in _FREEFORM_PARAM_ACTIONS:
         known = set(schema.get("required", [])) | set(schema.get("optional", []))
         if definition:
             known |= set(definition.get("parameters", {}).keys())
