@@ -4675,6 +4675,14 @@ class TestRunner:
                 service.assert_unchecked(selector, timeout=timeout)
                 return True
 
+            elif action in ("browser.get_title", "test.get_title") and hasattr(service, "get_title"):
+                store_as = self._get_param(step_params, "store_as", "")
+                title = service.get_title()
+                variables["last_response"] = title
+                if store_as:
+                    variables[store_as] = title
+                return True
+
             elif "wait" in action:
                 params = self._get_params(step_params)
                 wait_time = (

@@ -143,6 +143,9 @@ ACTION_SCHEMA: Dict[str, Dict] = {
     "fill form field":      {"alias_of": "browser.fill"},
     "fill field":           {"alias_of": "browser.fill"},
 
+    "browser.get_title": {"required": [], "optional": ["store_as"]},
+    "test.get_title":    {"alias_of": "browser.get_title"},
+
     # browser assertion family (dispatched dynamically in runner via the
     # browser service — see runner.py "TEST ASSERTIONS" block)
     "browser.assert_checked":         {"required": ["selector"], "optional": ["timeout"]},

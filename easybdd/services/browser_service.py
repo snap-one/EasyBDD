@@ -2305,6 +2305,17 @@ class BrowserService:
         except Exception as e:
             raise RuntimeError(f"Text '{text}' did not appear: {e}")
 
+    def get_title(self) -> str:
+        """Get the current page title."""
+        if self.playwright_page:
+            title = self.playwright_page.title()
+        elif self.selenium_driver:
+            title = self.selenium_driver.title
+        else:
+            raise RuntimeError("No browser session active")
+        print(f"      ✓ Page title: '{title}'")
+        return title or ""
+
     def get_element_text(self, selector: str) -> str:
         """Get text content from element"""
         if not self.playwright_page:

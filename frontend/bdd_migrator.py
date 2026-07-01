@@ -436,10 +436,15 @@ def _map_browser(cmd_dict: Dict) -> Dict:
             s["exact"] = exact
         step = s
     elif cmd in ("containstext", "contains_text", "assert_text", "asserttext"):
-        s = {"action": "browser.assert_text", "text": cmd_dict.get("text", text)}
+        # With a selector, test.assert_text_contains scopes the substring
+        # check to that element; without one, browser.verify_text checks
+        # the whole page (both are contains-semantics like the legacy cmd).
         if param or target:
-            s["selector"] = param or target
-        step = s
+            step = {"action": "test.assert_text_contains",
+                    "selector": param or target,
+                    "text": cmd_dict.get("text", text)}
+        else:
+            step = {"action": "browser.verify_text", "text": cmd_dict.get("text", text)}
     elif cmd in ("gettitle", "get_title", "asserttitle", "assert_title"):
         store = cmd_dict.get("store_as", "page_title")
         step = {"action": "browser.get_title", "store_as": store}

@@ -179,6 +179,16 @@ _CATALOG_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "test.assert_element_count": _browser_assert(
         "Assert Element Count", "Assert how many elements match a selector",
         {"count": {"type": "number", "required": True, "label": "Count", "placeholder": "1"}}),
+    "browser.get_title": {
+        "category": "Browser",
+        "label": "Get Page Title",
+        "description": "Read the browser tab title (also stored as last_response)",
+        "icon": "🏷️",
+        "parameters": {
+            "store_as": {"type": "text", "required": False, "label": "Store as",
+                         "placeholder": "page_title"},
+        },
+    },
     "telnet.send": {
         "category": "Telnet",
         "label": "Telnet Send",
