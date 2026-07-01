@@ -12,7 +12,7 @@
   "keywords": ["bdd", "testing", "playwright", "testrail", "yaml", "qa", "automation"],
   "license": "MIT",
   "server": {
-    "type": "uv",
+    "type": "python",
     "entry_point": "easybdd/__main__.py",
     "mcp_config": {
       "command": "uv",
@@ -57,17 +57,20 @@
     {
       "name": "generate_tests",
       "description": "Generate Easy BDD test cases for a module or feature",
-      "arguments": ["module", "description"]
+      "arguments": ["module", "description"],
+      "text": "Generate complete, runnable Easy BDD YAML test cases for the module '${arguments.module}'. ${arguments.description}"
     },
     {
       "name": "debug_failure",
       "description": "Diagnose a failing test and suggest a concrete fix",
-      "arguments": ["test_name", "report_path"]
+      "arguments": ["test_name", "report_path"],
+      "text": "Diagnose why the Easy BDD test '${arguments.test_name}' failed (report: ${arguments.report_path}) and suggest a concrete YAML fix."
     },
     {
       "name": "validate_and_fix",
       "description": "Validate a test file and interactively apply suggested fixes",
-      "arguments": ["path"]
+      "arguments": ["path"],
+      "text": "Validate the Easy BDD test file at '${arguments.path}', explain each issue found, and apply auto-fixable corrections after confirming with me."
     }
   ],
   "user_config": {

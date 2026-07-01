@@ -46,8 +46,8 @@ def is_ignored(rel_path: Path, patterns: list[str]) -> bool:
     for pattern in patterns:
         # Directory patterns (trailing /) — match any path component
         if pattern.endswith("/"):
-            dir_name = pattern.rstrip("/")
-            if dir_name in parts:
+            dir_pattern = pattern.rstrip("/")
+            if any(fnmatch.fnmatch(part, dir_pattern) for part in parts):
                 return True
         else:
             # Match against the full relative path OR just the filename

@@ -2,6 +2,7 @@
 
 # Python runtime artifacts
 .venv/
+env/
 __pycache__/
 *.pyc
 *.pyo
@@ -11,6 +12,17 @@ __pycache__/
 dist/
 build/
 .eggs/
+
+# Non-server project content — not needed to run the MCP server
+Firmware/
+chrome_extension/
+docs/
+config/
+tests/
+archive/
+examples/
+frontend/
+scripts/
 
 # Test output / reports (keep tests/cases but not generated outputs)
 reports/
