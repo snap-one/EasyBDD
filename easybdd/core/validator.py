@@ -132,9 +132,25 @@ ACTION_SCHEMA: Dict[str, Dict] = {
     "open browser":         {"alias_of": "browser.open"},
     "browser.click":        {"required": [], "optional": ["selector", "text", "button", "role", "name", "label"]},
     "click element":        {"alias_of": "browser.click"},
-    "browser.fill":         {"required": [], "optional": ["selector", "field", "value"]},
+    "browser.fill":         {"required": [], "optional": [
+        "selector", "field", "value", "role", "name", "label", "clear",
+    ]},
     "fill form field":      {"alias_of": "browser.fill"},
     "fill field":           {"alias_of": "browser.fill"},
+
+    # browser assertion family (dispatched dynamically in runner via the
+    # browser service — see runner.py "TEST ASSERTIONS" block)
+    "browser.assert_checked":         {"required": ["selector"], "optional": ["timeout"]},
+    "test.assert_checked":            {"alias_of": "browser.assert_checked"},
+    "browser.assert_unchecked":       {"required": ["selector"], "optional": ["timeout"]},
+    "test.assert_unchecked":          {"alias_of": "browser.assert_unchecked"},
+    "test.assert_text_contains":      {"required": ["selector", "text"], "optional": ["timeout"]},
+    "test.assert_text_equals":        {"required": ["selector", "text"], "optional": ["timeout"]},
+    "test.assert_element_visible":    {"required": ["selector"], "optional": ["timeout"]},
+    "test.assert_element_not_visible": {"required": ["selector"], "optional": ["timeout"]},
+    "test.assert_element_enabled":    {"required": ["selector"], "optional": ["timeout"]},
+    "test.assert_element_disabled":   {"required": ["selector"], "optional": ["timeout"]},
+    "test.assert_element_count":      {"required": ["selector", "count"], "optional": ["timeout"]},
     "browser.screenshot":   {"required": [], "optional": ["filename", "path"]},
     "take screenshot":      {"alias_of": "browser.screenshot"},
     "browser.wait":         {"required": [], "optional": ["selector", "timeout"]},

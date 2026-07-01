@@ -118,7 +118,66 @@ _PREFIX_ICON = {
 # Definitions that override / extend action_definitions.py where it disagrees
 # with what the runner actually dispatches (see runner._handle_assert_action
 # and runner._handle_extract_action).
+def _sel_param(help_text: str = "CSS selector for the element") -> Dict[str, Any]:
+    return {"type": "text", "required": False, "label": "Selector",
+            "placeholder": "#element or .class", "help": help_text}
+
+
+def _timeout_param() -> Dict[str, Any]:
+    return {"type": "number", "required": False, "label": "Timeout (ms)", "placeholder": "10000"}
+
+
+def _browser_assert(label: str, desc: str, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    params: Dict[str, Any] = {"selector": {**_sel_param(), "required": True}}
+    params.update(extra or {})
+    params["timeout"] = _timeout_param()
+    return {"category": "Browser", "label": label, "description": desc, "icon": "✅", "parameters": params}
+
+
 _CATALOG_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "browser.fill": {
+        "category": "Browser",
+        "label": "Fill Input Field",
+        "description": "Fill a form field with text — target it by CSS selector, role+name, or label",
+        "icon": "✏️",
+        "_one_of": [["selector", "field", "role", "label"]],
+        "parameters": {
+            "selector": _sel_param("CSS selector for the input field"),
+            "value": {"type": "text", "required": True, "label": "Value",
+                      "placeholder": "testuser", "help": "Text to fill in the field"},
+            "role": {"type": "text", "required": False, "label": "Role",
+                     "placeholder": "textbox", "help": "ARIA role (use with Name)"},
+            "name": {"type": "text", "required": False, "label": "Name",
+                     "help": "Accessible name (use with Role)"},
+            "label": {"type": "text", "required": False, "label": "Label",
+                      "help": "Target by form label text"},
+            "field": {"type": "text", "required": False, "label": "Field (alias)",
+                      "help": "Alias of Selector — kept for older cases"},
+            "clear": {"type": "boolean", "required": False, "label": "Clear first",
+                      "help": "Clear the field before typing"},
+        },
+    },
+    "browser.assert_checked": _browser_assert(
+        "Assert Checkbox Checked", "Assert a checkbox/toggle is checked"),
+    "browser.assert_unchecked": _browser_assert(
+        "Assert Checkbox Unchecked", "Assert a checkbox/toggle is NOT checked"),
+    "test.assert_text_contains": _browser_assert(
+        "Assert Text Contains", "Assert an element's text contains a substring",
+        {"text": {"type": "text", "required": True, "label": "Text"}}),
+    "test.assert_text_equals": _browser_assert(
+        "Assert Text Equals", "Assert an element's text equals a value",
+        {"text": {"type": "text", "required": True, "label": "Text"}}),
+    "test.assert_element_visible": _browser_assert(
+        "Assert Element Visible", "Assert an element is visible on the page"),
+    "test.assert_element_not_visible": _browser_assert(
+        "Assert Element Not Visible", "Assert an element is not visible"),
+    "test.assert_element_enabled": _browser_assert(
+        "Assert Element Enabled", "Assert an element is enabled"),
+    "test.assert_element_disabled": _browser_assert(
+        "Assert Element Disabled", "Assert an element is disabled"),
+    "test.assert_element_count": _browser_assert(
+        "Assert Element Count", "Assert how many elements match a selector",
+        {"count": {"type": "number", "required": True, "label": "Count", "placeholder": "1"}}),
     "test.assert": {
         "category": "Test",
         "label": "Assert Condition",
@@ -643,6 +702,11 @@ def _validate_action_node(node: StepNode, where: str, errors: List[str], warning
         for pname, pdef in definition.get("parameters", {}).items():
             if pdef.get("required") and pname not in params:
                 errors.append(f"{where}: '{action}' is missing required parameter '{pname}'")
+        for group in definition.get("_one_of", []):
+            if not any(p in params for p in group):
+                errors.append(
+                    f"{where}: '{action}' needs one of: {', '.join(group)}"
+                )
     if schema and action not in _FREEFORM_PARAM_ACTIONS:
         known = set(schema.get("required", [])) | set(schema.get("optional", []))
         if definition:

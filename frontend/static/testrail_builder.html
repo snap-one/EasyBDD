@@ -742,10 +742,12 @@ function stepCard(node, list, index, opts) {
   const card = el("div", { class: "step-card" + (isControl ? " control" : "") + (node.kind === "shared" ? " shared-card" : "") });
   const def = node.kind === "action" ? S.actionsById[node.action] : null;
   const icon = def ? def.icon
+    : node.kind === "action" ? "⚠️"
     : node.kind === "shared" ? "🧩"
     : node.kind === "for_each" ? "🔁" : node.kind === "while" ? "⏳"
     : node.kind === "condition" ? "🔀" : node.kind === "try" ? "🛟" : "📝";
   const title = def ? def.label
+    : node.kind === "action" ? (node.action || "Unknown action")
     : node.kind === "shared" ? "Shared step"
     : node.kind === "for_each" ? "For each" : node.kind === "while" ? "While"
     : node.kind === "condition" ? "If / Else" : node.kind === "try" ? "Try / Except" : "Raw YAML";
