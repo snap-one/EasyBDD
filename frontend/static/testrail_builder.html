@@ -233,6 +233,9 @@ textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
 .sec-head .count { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--text-faint); }
 .sec-head .tw { width: 14px; text-align: center; color: var(--text-faint); font-size: 10px; flex-shrink: 0; }
 .sec-children { margin-left: 20px; border-left: 1px solid var(--border); padding-left: 8px; }
+#case-list .sec-children { margin-left: 12px; padding-left: 4px; }
+#case-list .sec-head { padding: 4px 5px; font-size: 12.5px; }
+#case-list .case-item { padding-left: 5px; }
 
 /* toasts */
 #toasts { position: fixed; bottom: 18px; right: 18px; z-index: 60; display: flex; flex-direction: column; gap: 8px; }
@@ -404,6 +407,7 @@ const S = {
   valid: false,
   paletteTarget: null,  // {list: array, allowControl: bool, onAdd: fn}
   previewTimer: null,
+  collapsedSections: new Set(),  // sidebar section ids the user collapsed
 };
 
 const ROLE_ORDER = ["var", "setup", "shared", "feature", "teardown", "test", "other"];
@@ -563,6 +567,7 @@ async function onSuiteChange() {
 
 async function reloadSuite() {
   if (!S.projectId) return;
+  S.collapsedSections.clear();
   const q = `project_id=${S.projectId}` + (S.suiteId ? `&suite_id=${S.suiteId}` : "");
   try {
     [S.sections, S.cases] = await Promise.all([
@@ -581,6 +586,18 @@ function renderSections() {
   }
 }
 
+function caseListItem(c) {
+  return el("button", {
+    class: "case-item" + (S.editingCaseId === c.id ? " active" : ""),
+    onclick: () => loadCase(c.id),
+    title: c.title,
+  },
+    el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
+    el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
+    el("span", { class: "cid" }, `C${c.id}`),
+  );
+}
+
 function renderCaseList() {
   const box = $("#case-list");
   box.innerHTML = "";
@@ -590,27 +607,60 @@ function renderCaseList() {
       S.projectId ? "No cases in this suite yet." : "Select a project to browse cases."));
     return;
   }
-  const groups = {};
+
+  const childSections = {};
+  for (const s of S.sections) {
+    const p = s.parent_id || 0;
+    (childSections[p] = childSections[p] || []).push(s);
+  }
+  const knownSections = new Set(S.sections.map(s => s.id));
+  const casesBySection = {};
+  const orphans = [];
   for (const c of S.cases) {
     if (filter && !c.title.toLowerCase().includes(filter)) continue;
-    (groups[c.role] = groups[c.role] || []).push(c);
+    if (c.section_id && knownSections.has(c.section_id)) {
+      (casesBySection[c.section_id] = casesBySection[c.section_id] || []).push(c);
+    } else orphans.push(c);
   }
-  for (const role of ROLE_ORDER) {
-    const items = groups[role];
-    if (!items || !items.length) continue;
-    box.appendChild(el("div", { class: "case-group-title" }, `${ROLE_LABEL[role]} (${items.length})`));
-    for (const c of items) {
-      box.appendChild(el("button", {
-        class: "case-item" + (S.editingCaseId === c.id ? " active" : ""),
-        onclick: () => loadCase(c.id),
-        title: c.title,
-      },
-        el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
-        el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
-        el("span", { class: "cid" }, `C${c.id}`),
-      ));
-    }
+
+  // Recursive section renderer; returns null for branches with no (matching) cases.
+  const buildSection = (sec) => {
+    const ownCases = casesBySection[sec.id] || [];
+    const childBlocks = (childSections[sec.id] || []).map(buildSection).filter(Boolean);
+    if (!ownCases.length && !childBlocks.length) return null;
+    const total = ownCases.length + childBlocks.reduce((n, b) => n + Number(b.dataset.count), 0);
+
+    const collapsed = !filter && S.collapsedSections.has(sec.id);
+    const tw = el("span", { class: "tw" }, collapsed ? "▸" : "▾");
+    const children = el("div", { class: "sec-children" }, ...ownCases.map(caseListItem), ...childBlocks);
+    if (collapsed) children.style.display = "none";
+    const head = el("div", { class: "sec-head", onclick: () => {
+        const open = children.style.display !== "none";
+        children.style.display = open ? "none" : "";
+        tw.textContent = open ? "▸" : "▾";
+        if (open) S.collapsedSections.add(sec.id); else S.collapsedSections.delete(sec.id);
+      } },
+      tw, el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, sec.name),
+      el("span", { class: "count" }, String(total)),
+    );
+    return el("div", { class: "sec-block", "data-count": total }, head, children);
+  };
+
+  let any = false;
+  for (const root of childSections[0] || []) {
+    const b = buildSection(root);
+    if (b) { box.appendChild(b); any = true; }
   }
+  if (orphans.length) {
+    any = true;
+    box.appendChild(el("div", { class: "sec-block" },
+      el("div", { class: "sec-head", style: "cursor:default" },
+        el("span", { class: "tw" }, ""), el("span", {}, "No section"),
+        el("span", { class: "count" }, String(orphans.length))),
+      el("div", { class: "sec-children" }, ...orphans.map(caseListItem)),
+    ));
+  }
+  if (!any) box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "No cases match the filter."));
 }
 
 async function loadCase(caseId) {
