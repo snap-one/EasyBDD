@@ -1310,7 +1310,7 @@ function onRunCaseToggle() {
 async function createRun() {
   const name = $("#run-name").value.trim();
   if (!name) { toast("Give the run a name.", "err"); return; }
-  const ids = [...document.querySelectorAll("#run-cases input:checked")].map(cb => Number(cb.dataset.cid));
+  const ids = [...document.querySelectorAll("#run-cases input[data-cid]:checked")].map(cb => Number(cb.dataset.cid));
   if (!ids.length) { toast("Select at least one case.", "err"); return; }
   const btn = $("#btn-create-run");
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Creating…';
