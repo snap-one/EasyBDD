@@ -138,13 +138,17 @@ def _sub_vars(text: str) -> str:
 
 # ── patterns applied to Python code strings (eval.exec, test.assert, etc.) ──
 # Maps (pattern, replacement) where replacement can be a string or callable.
+# Bare JSON-RPC method name (dxGetAbout, wbSetUnderOverSettings, …) as opposed
+# to a URL path segment — used to route webservice|send position 3 correctly.
+_RPC_METHOD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 _CODE_PATTERNS: List[Tuple[str, Any]] = [
     # gv.log response text — Easy BDD stores the full response dict under store_as;
     # the body JSON string lives in last_response["body"].
-    (r"gv\.log\[-1\]\['response_txt'\]",    "last_response["body"]"),
-    (r"gv\.log\[-1\]\['response'\]",         "last_response["body"]"),
-    (r"gv\.log\[-2\]\['response_txt'\]",    "last_response["body"]"),
-    (r"gv\.log\[-2\]\['response'\]",         "last_response["body"]"),
+    (r"gv\.log\[-1\]\['response_txt'\]",    'last_response["body"]'),
+    (r"gv\.log\[-1\]\['response'\]",         'last_response["body"]'),
+    (r"gv\.log\[-2\]\['response_txt'\]",    'last_response["body"]'),
+    (r"gv\.log\[-2\]\['response'\]",         'last_response["body"]'),
     # gv.log response dict
     (r"gv\.log\[-1\]\['response_dict'\]",   "last_response_dict"),
     (r"gv\.log\[-2\]\['response_dict'\]",   "last_response_dict"),
@@ -153,7 +157,7 @@ _CODE_PATTERNS: List[Tuple[str, Any]] = [
     (r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "last_response['headers']"),
     # Numeric-indexed log entries
     (r"gv\.log\[(-?\d+)\]\['response(?:_txt)?'\]",
-        lambda m: "last_response["body"]" if m.group(1) in ("-1",)
+        lambda m: 'last_response["body"]' if m.group(1) in ("-1",)
                   else f"log_response_{m.group(1).lstrip('-')}['body']"),
     (r"gv\.log\[(-?\d+)\]\['response_dict'\]",
         lambda m: "last_response_dict" if m.group(1) in ("-1",)
@@ -596,7 +600,15 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         is_ws = method == "SEND" or full_url.startswith("wss://") or full_url.startswith("ws://")
         if is_ws:
             body_val = _expand_json_payload(data_str) if data_str and data_str not in ("{}", "") else None
-            return {"action": "websocket.send", "url": full_url, "data": body_val, "store_as": "last_response"}
+            ws_step: Dict[str, Any] = {"action": "websocket.send", "url": _ensure_base_url(url), "store_as": "last_response"}
+            if path and _RPC_METHOD_RE.match(path):
+                # path is a JSON-RPC method name, not a URL segment
+                ws_step["method"] = path
+            else:
+                ws_step["url"] = full_url
+            if body_val is not None:
+                ws_step["data"] = body_val
+            return ws_step
         step: Dict[str, Any] = {"action": "api.request", "method": method, "url": full_url, "store_as": "last_response"}
         payload = _expand_json_payload(data_str)
         if payload is not None:
@@ -861,19 +873,24 @@ def _parse_step_line(line: str) -> Optional[Dict]:
         method = m.group(2).strip().upper()
         path   = _sub_vars(m.group(3).strip())
         data   = m.group(4).strip()
-        # Always append path to URL with a proper separator (the path may omit the leading slash)
-        if path:
-            full_url = url.rstrip("/") + "/" + path.lstrip("/")
-        else:
-            full_url = url
-        full_url = _ensure_base_url(full_url)
         is_ws = method == "SEND" or url.startswith("wss://") or url.startswith("ws://")
         if is_ws:
+            # In "send" mode position 3 is the JSON-RPC method (dxGetAbout,
+            # wbSetUnderOverSettings, …), not a URL path — websocket_service
+            # wraps it in a JSON-RPC envelope with position 4 as params.
             body_val = _expand_json_payload(data) if data and data not in ("{}", "") else None
-            ws_step: Dict[str, Any] = {"action": "websocket.send", "url": full_url, "store_as": "last_response"}
+            ws_step: Dict[str, Any] = {"action": "websocket.send", "url": _ensure_base_url(url), "store_as": "last_response"}
+            if path and _RPC_METHOD_RE.match(path):
+                ws_step["method"] = path
+            elif path:
+                # A real path (contains / or vars) — keep it on the URL
+                ws_step["url"] = _ensure_base_url(url.rstrip("/") + "/" + path.lstrip("/"))
             if body_val is not None:
                 ws_step["data"] = body_val
             return ws_step
+        # Plain HTTP: append path to URL with a proper separator
+        full_url = (url.rstrip("/") + "/" + path.lstrip("/")) if path else url
+        full_url = _ensure_base_url(full_url)
         step: Dict[str, Any] = {"action": "api.request", "method": method, "url": full_url, "store_as": "last_response"}
         payload = _expand_json_payload(data)
         if payload is not None:

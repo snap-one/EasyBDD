@@ -61,15 +61,17 @@ def build_testrail_preconditions(steps: list) -> str:
             elif isinstance(params, dict):
                 lines.append(f"- {action_key}:")
                 for k, v in params.items():
-                    if isinstance(v, dict):
+                    if isinstance(v, (dict, list)):
                         # Inline flow-style keeps params flush-left so
                         # _fix_step_list_indent can safely re-indent them.
                         # Block-style indented children break re-indentation.
-                        inner = ", ".join(
-                            f"'{dk}': '{str(dv).replace(chr(39), chr(39)*2)}'"
-                            for dk, dv in v.items()
-                        )
-                        lines.append(f"{k}: {{{inner}}}")
+                        # yaml flow dump preserves native scalar types
+                        # (0 / false stay unquoted) unlike str()-quoting.
+                        import yaml as _yaml
+                        inner = _yaml.safe_dump(
+                            v, default_flow_style=True, width=100000
+                        ).strip()
+                        lines.append(f"{k}: {inner}")
                     elif isinstance(v, str) and _needs_quoting(v):
                         safe = v.replace("'", "''")
                         lines.append(f"{k}: '{safe}'")
