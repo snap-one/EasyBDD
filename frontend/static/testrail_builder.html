@@ -224,6 +224,15 @@ textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
 .run-case-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 5px; font-size: 13px; }
 .run-case-row:hover { background: var(--bg-hover); }
 .run-case-row .cid { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.sec-block { margin: 2px 0; }
+.sec-head {
+  display: flex; align-items: center; gap: 7px; padding: 5px 6px; border-radius: 6px;
+  font-size: 13px; font-weight: 600; color: var(--text-dim); cursor: pointer;
+}
+.sec-head:hover { background: var(--bg-hover); color: var(--text); }
+.sec-head .count { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--text-faint); }
+.sec-head .tw { width: 14px; text-align: center; color: var(--text-faint); font-size: 10px; flex-shrink: 0; }
+.sec-children { margin-left: 20px; border-left: 1px solid var(--border); padding-left: 8px; }
 
 /* toasts */
 #toasts { position: fixed; bottom: 18px; right: 18px; z-index: 60; display: flex; flex-direction: column; gap: 8px; }
@@ -1132,28 +1141,90 @@ async function createSection() {
   } catch (e) { toast(e.message, "err"); }
 }
 
+function caseRow(c) {
+  return el("label", { class: "run-case-row" },
+    el("input", { type: "checkbox", "data-cid": c.id, onchange: onRunCaseToggle }),
+    el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
+    el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
+    el("span", { class: "cid" }, `C${c.id}`),
+  );
+}
+
 function openRunModal() {
   if (!S.projectId) { toast("Select a project first.", "err"); return; }
   const box = $("#run-cases");
   box.innerHTML = "";
-  const groups = {};
-  for (const c of S.cases) (groups[c.role] = groups[c.role] || []).push(c);
-  for (const role of ROLE_ORDER) {
-    for (const c of groups[role] || []) {
-      box.appendChild(el("label", { class: "run-case-row" },
-        el("input", { type: "checkbox", "data-cid": c.id, onchange: updateRunCount }),
-        el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
-        el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
-        el("span", { class: "cid" }, `C${c.id}`),
-      ));
-    }
+
+  const childSections = {};
+  for (const s of S.sections) {
+    const p = s.parent_id || 0;
+    (childSections[p] = childSections[p] || []).push(s);
   }
-  updateRunCount();
+  const casesBySection = {};
+  const knownSections = new Set(S.sections.map(s => s.id));
+  const orphans = [];
+  for (const c of S.cases) {
+    if (c.section_id && knownSections.has(c.section_id)) {
+      (casesBySection[c.section_id] = casesBySection[c.section_id] || []).push(c);
+    } else orphans.push(c);
+  }
+
+  // Build a section subtree; returns null when no cases live anywhere below.
+  const buildSection = (sec) => {
+    const ownCases = casesBySection[sec.id] || [];
+    const childBlocks = (childSections[sec.id] || []).map(buildSection).filter(Boolean);
+    if (!ownCases.length && !childBlocks.length) return null;
+    const total = ownCases.length + childBlocks.reduce((n, b) => n + Number(b.dataset.count), 0);
+
+    const secCb = el("input", { type: "checkbox", "data-sec": sec.id,
+      onclick: (e) => e.stopPropagation(),
+      onchange: (e) => {
+        block.querySelectorAll("input[data-cid]").forEach(cb => { cb.checked = e.target.checked; });
+        onRunCaseToggle();
+      } });
+    const tw = el("span", { class: "tw" }, "▾");
+    const children = el("div", { class: "sec-children" }, ...ownCases.map(caseRow), ...childBlocks);
+    const head = el("div", { class: "sec-head", onclick: () => {
+        const open = children.style.display !== "none";
+        children.style.display = open ? "none" : "";
+        tw.textContent = open ? "▸" : "▾";
+      } },
+      tw, secCb, el("span", {}, sec.name),
+      el("span", { class: "count" }, `${total} case${total === 1 ? "" : "s"}`),
+    );
+    const block = el("div", { class: "sec-block", "data-count": total }, head, children);
+    return block;
+  };
+
+  for (const root of childSections[0] || []) {
+    const b = buildSection(root);
+    if (b) box.appendChild(b);
+  }
+  if (orphans.length) {
+    box.appendChild(el("div", { class: "sec-block" },
+      el("div", { class: "sec-head", style: "cursor:default" },
+        el("span", { class: "tw" }, ""), el("span", {}, "No section"),
+        el("span", { class: "count" }, `${orphans.length}`)),
+      el("div", { class: "sec-children" }, ...orphans.map(caseRow)),
+    ));
+  }
+  if (!box.children.length) box.appendChild(el("div", { class: "empty-note", style: "padding:10px" }, "No cases in this suite."));
+
+  onRunCaseToggle();
   $("#run-back").classList.add("open");
 }
 
-function updateRunCount() {
-  const n = document.querySelectorAll("#run-cases input:checked").length;
+/* Roll selection state up the section tree: checked / unchecked / indeterminate */
+function onRunCaseToggle() {
+  document.querySelectorAll("#run-cases .sec-block").forEach(block => {
+    const secCb = block.querySelector(":scope > .sec-head input[data-sec]");
+    if (!secCb) return;
+    const caseCbs = block.querySelectorAll("input[data-cid]");
+    const checked = [...caseCbs].filter(cb => cb.checked).length;
+    secCb.checked = caseCbs.length > 0 && checked === caseCbs.length;
+    secCb.indeterminate = checked > 0 && checked < caseCbs.length;
+  });
+  const n = document.querySelectorAll("#run-cases input[data-cid]:checked").length;
   $("#run-count").textContent = `${n} case${n === 1 ? "" : "s"} selected`;
 }
 
@@ -1190,8 +1261,8 @@ $("#btn-new-section").addEventListener("click", () => {
 $("#btn-create-section").addEventListener("click", createSection);
 $("#btn-run-modal").addEventListener("click", openRunModal);
 $("#btn-create-run").addEventListener("click", createRun);
-$("#run-select-all").addEventListener("click", () => { document.querySelectorAll("#run-cases input").forEach(cb => cb.checked = true); updateRunCount(); });
-$("#run-select-none").addEventListener("click", () => { document.querySelectorAll("#run-cases input").forEach(cb => cb.checked = false); updateRunCount(); });
+$("#run-select-all").addEventListener("click", () => { document.querySelectorAll("#run-cases input[data-cid]").forEach(cb => cb.checked = true); onRunCaseToggle(); });
+$("#run-select-none").addEventListener("click", () => { document.querySelectorAll("#run-cases input[data-cid]").forEach(cb => cb.checked = false); onRunCaseToggle(); });
 $("#palette-search").addEventListener("input", renderPaletteItems);
 $("#tab-preview").addEventListener("click", () => switchTab("preview"));
 $("#tab-issues").addEventListener("click", () => switchTab("issues"));
