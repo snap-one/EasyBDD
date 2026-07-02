@@ -392,10 +392,9 @@ def _map_browser(cmd_dict: Dict) -> Dict:
     elif cmd in ("screenshot", "capture"):
         step = {"action": "browser.screenshot", "name": name or param or "screenshot"}
     elif cmd in ("wait", "waitfor", "wait_for_element"):
-        s = {"action": "browser.wait_for_element"}
         sel = target or param
-        if sel:
-            s["selector"] = sel
+        # A bare wait with no target is a timed pause, not an element wait
+        s = {"action": "browser.wait_for", "selector": sel} if sel else {"action": "browser.wait"}
         if timeout:
             s["timeout"] = timeout
         step = s

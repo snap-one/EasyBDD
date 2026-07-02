@@ -245,7 +245,7 @@ class PlaywrightTsConverter:
         m = re.match(r"page\.waitForURL\(\s*" + self._STR, stmt)
         if m:
             url = (m.group(1) or m.group(2) or "").strip()
-            return {"browser.wait_for_element": {"selector": "body", "state": "visible"}}
+            return {"browser.wait_for": {"selector": "body", "state": "visible"}}
         return None
 
     # ── waitForSelector ───────────────────────────────────────────────────────
@@ -258,7 +258,7 @@ class PlaywrightTsConverter:
             sm = re.search(r"state\s*:\s*['\"](\w+)['\"]", stmt)
             if sm:
                 state = sm.group(1)
-            return {"browser.wait_for_element": {"selector": sel, "state": state}}
+            return {"browser.wait_for": {"selector": sel, "state": state}}
         return None
 
     # ── expect ────────────────────────────────────────────────────────────────
@@ -303,11 +303,11 @@ class PlaywrightTsConverter:
 
         # .toBeVisible()
         if rest.startswith("toBeVisible("):
-            return {"browser.wait_for_element": {**sel_fields, "state": "visible"}}
+            return {"browser.wait_for": {"selector": self._fields_to_selector(sel_fields), "state": "visible"}}
 
         # .toBeHidden()
         if rest.startswith("toBeHidden("):
-            return {"browser.wait_for_element": {**sel_fields, "state": "hidden"}}
+            return {"browser.wait_for": {"selector": self._fields_to_selector(sel_fields), "state": "hidden"}}
 
         # .toBeChecked()
         if rest.startswith("toBeChecked("):
@@ -315,11 +315,11 @@ class PlaywrightTsConverter:
 
         # .toBeEnabled()
         if rest.startswith("toBeEnabled("):
-            return {"browser.wait_for_element": {**sel_fields, "state": "enabled"}}
+            return {"browser.wait_for": {"selector": self._fields_to_selector(sel_fields), "state": "enabled"}}
 
         # .toBeDisabled()
         if rest.startswith("toBeDisabled("):
-            return {"browser.wait_for_element": {**sel_fields, "state": "disabled"}}
+            return {"browser.wait_for": {"selector": self._fields_to_selector(sel_fields), "state": "disabled"}}
 
         # .toHaveText(text)  / .toContainText(text)
         for method in ("toHaveText(", "toContainText("):
@@ -339,6 +339,29 @@ class PlaywrightTsConverter:
                 return {"browser.assert_text": {**sel_fields, "text": val}}
 
         return None
+
+    @staticmethod
+    def _fields_to_selector(fields: Dict[str, Any]) -> str:
+        """
+        Collapse locator fields to a single Playwright selector string.
+        browser.wait_for only accepts selector/state/timeout (unlike
+        browser.click, which understands role/name/text/label), so
+        role/text/label locators are expressed via selector engines.
+        """
+        if fields.get("selector"):
+            return fields["selector"]
+        if fields.get("role"):
+            name = fields.get("name")
+            if name:
+                return f'role={fields["role"]}[name="{_esc(name)}"]'
+            return f'role={fields["role"]}'
+        if fields.get("text"):
+            return f'text="{_esc(fields["text"])}"'
+        if fields.get("label"):
+            # Best effort — getByLabel also matches <label> association,
+            # but aria-label is the closest selector-only equivalent.
+            return f'[aria-label="{_esc(fields["label"])}"]'
+        return "body"
 
     def _locator_expr_to_fields(self, expr: str) -> Dict[str, Any]:
         """
@@ -544,7 +567,7 @@ class PlaywrightTsConverter:
             sm = re.search(r"state\s*:\s*['\"](\w+)['\"]", action_expr)
             if sm:
                 state = sm.group(1)
-            return {"browser.wait_for_element": {**fields, "state": state}}
+            return {"browser.wait_for": {"selector": self._fields_to_selector(fields), "state": state}}
 
         return None
 

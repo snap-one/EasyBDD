@@ -787,7 +787,7 @@ def _build_modal_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTestCa
         steps = [
             _open_step(url),
             _step("browser.click", el, {}, f"Open '{label}' dialog"),
-            GeneratedStep(action="browser.wait_for_element",
+            GeneratedStep(action="browser.wait_for",
                           params={"selector": "[role='dialog'], .modal, .dialog", "timeout": 5},
                           description="Wait for dialog to appear"),
             _screenshot_step(f"dialog-{re.sub(r'[^a-z0-9]', '-', label.lower())[:20]}"),

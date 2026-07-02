@@ -52,7 +52,7 @@ _KEYWORD_MAP: Dict[str, Any] = {
     "press key":              lambda args: {"action": "browser.press_key", "params": {"key": args[0] if args else ""}},
     "capture page screenshot": lambda args: {"action": "browser.screenshot", "params": {"name": args[0] if args else "screenshot"}},
     "take screenshot":        lambda args: {"action": "browser.screenshot", "params": {"name": args[0] if args else "screenshot"}},
-    "wait until element is visible": lambda args: {"action": "browser.wait_for_element", "params": {"selector": args[0] if args else "", "state": "visible"}},
+    "wait until element is visible": lambda args: {"action": "browser.wait_for", "params": {"selector": args[0] if args else "", "state": "visible"}},
     "wait until page contains": lambda args: {"action": "browser.wait_for_text", "params": {"text": args[0] if args else ""}},
     "element should be visible": lambda args: {"action": "test.assert_element_visible", "params": {"selector": args[0] if args else ""}},
     "page should contain":    lambda args: {"action": "test.assert_text_contains", "params": {"text": args[0] if args else ""}},
