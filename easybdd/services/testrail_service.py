@@ -201,6 +201,14 @@ class TestRailService:
     def add_results(self, run_id: int, results: List[Dict]) -> List:
         return self._post(f"add_results/{run_id}", {"results": results})
 
+    def add_results_for_cases(self, run_id: int, results: List[Dict]) -> List:
+        """Add results keyed by case_id (entries: {case_id, status_id, comment?})."""
+        return self._post(f"add_results_for_cases/{run_id}", {"results": results})
+
+    def get_statuses(self) -> List[Dict]:
+        """All result statuses (system + custom). Ids 1-5 are the built-ins."""
+        return self._get("get_statuses")
+
     def get_results(self, test_id: int) -> List[Dict]:
         return self._paginated(f"get_results/{test_id}", "results")
 

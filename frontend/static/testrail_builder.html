@@ -262,6 +262,7 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
     <div class="logo">Easy BDD <span>· TestRail Test Builder</span></div>
     <div id="conn"><span class="dot"></span><span id="conn-text">connecting…</span></div>
     <div style="flex:1"></div>
+    <button class="btn ghost" id="btn-runs-view" title="Browse test runs, check results, mark tests for retest">📊 Runs</button>
     <button class="btn ghost" id="btn-run-modal" title="Assemble published cases into an EASY_BDD: run">🏃 Create Run</button>
     <button class="btn ghost" id="btn-new-case">＋ New Case</button>
   </div>
@@ -395,6 +396,23 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
   <div class="modal" style="width:760px; height:80vh">
     <div class="modal-head"><h2>Suite health check</h2><button class="icon-btn" data-close="lint-back">✕</button></div>
     <div class="modal-body" id="lint-body" style="flex:1; min-height:0; overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- ============ runs view modal ============ -->
+<div class="modal-back" id="runsview-back">
+  <div class="modal" style="width:860px; height:85vh">
+    <div class="modal-head">
+      <h2 id="runsview-title">Test runs</h2>
+      <button class="icon-btn" data-close="runsview-back">✕</button>
+    </div>
+    <div class="modal-body" id="runsview-body" style="flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:6px"></div>
+    <div class="modal-foot" id="runsview-foot" style="display:none; align-items:center; gap:8px; justify-content:flex-start">
+      <span class="dim" style="font-size:12.5px" id="runsview-selcount">0 selected</span>
+      <select id="runsview-status" class="compact" style="width:auto; margin-left:auto"></select>
+      <input id="runsview-comment" class="compact" placeholder="Comment (optional)" style="width:220px">
+      <button class="btn primary" id="btn-runsview-apply" disabled>Apply</button>
+    </div>
   </div>
 </div>
 
@@ -1442,6 +1460,195 @@ $("#tab-issues").addEventListener("click", () => switchTab("issues"));
 $("#btn-copy").addEventListener("click", () => {
   navigator.clipboard.writeText($("#preview-body").textContent).then(() => toast("Copied Preconditions body.", "ok"));
 });
+
+/* ============================== runs view ============================== */
+const RV = { runs: [], detail: null, filter: "all", selected: new Set() };
+
+const STATUS_COLORS = {
+  "Passed": "var(--green)", "Failed": "var(--red)", "Retest": "var(--amber)",
+  "Blocked": "var(--purple)", "Untested": "var(--text-faint)",
+};
+function statusColor(label) { return STATUS_COLORS[label] || "var(--accent)"; }
+function runDate(ts) { return ts ? new Date(ts * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""; }
+
+function runProgressBar(counts, total) {
+  const bar = el("div", { style: "display:flex; height:6px; border-radius:3px; overflow:hidden; background:var(--bg-input); min-width:160px; flex:1" });
+  if (!total) return bar;
+  for (const [key, label] of [["passed", "Passed"], ["failed", "Failed"], ["retest", "Retest"], ["blocked", "Blocked"], ["untested", "Untested"]]) {
+    const n = counts[key] || 0;
+    if (n) bar.appendChild(el("div", { style: `width:${(n / total) * 100}%; background:${statusColor(label)}`, title: `${label}: ${n}` }));
+  }
+  return bar;
+}
+
+async function openRunsView() {
+  if (!S.projectId) { toast("Select a project first.", "err"); return; }
+  RV.detail = null; RV.selected.clear();
+  $("#runsview-back").classList.add("open");
+  $("#runsview-title").textContent = "Test runs";
+  $("#runsview-foot").style.display = "none";
+  const body = $("#runsview-body");
+  body.innerHTML = "<div class='empty-note' style='padding:12px'>Loading runs…</div>";
+  try {
+    RV.runs = await api(`/api/testrail/runs?project_id=${S.projectId}`);
+    renderRunsList();
+  } catch (e) {
+    body.innerHTML = "";
+    body.appendChild(el("div", { style: "color:var(--red); padding:12px" }, e.message));
+  }
+}
+
+function renderRunsList() {
+  RV.detail = null; RV.selected.clear();
+  $("#runsview-title").textContent = "Test runs";
+  $("#runsview-foot").style.display = "none";
+  const body = $("#runsview-body");
+  body.innerHTML = "";
+  if (!RV.runs.length) {
+    body.innerHTML = "<div class='empty-note' style='padding:12px'>No runs in this project yet — use 🏃 Create Run.</div>";
+    return;
+  }
+  for (const r of RV.runs) {
+    const row = el("div", {
+      style: "display:flex; align-items:center; gap:12px; padding:9px 12px; border:1px solid var(--border); border-radius:8px; cursor:pointer; background:var(--bg-card)",
+      onclick: () => openRunDetail(r.id),
+      onmouseenter: (e) => e.currentTarget.style.background = "var(--bg-hover)",
+      onmouseleave: (e) => e.currentTarget.style.background = "var(--bg-card)",
+    },
+      el("div", { style: "flex:1; min-width:0" },
+        el("div", { style: "font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" },
+          r.name, r.is_completed ? el("span", { class: "dim", style: "font-weight:400; font-size:11.5px; margin-left:8px; border:1px solid var(--border); border-radius:4px; padding:1px 6px" }, "completed") : null),
+        el("div", { class: "dim", style: "font-size:11.5px; margin-top:2px" },
+          `${runDate(r.created_on)} — ${r.total} tests · ${r.counts.passed} passed · ${r.counts.failed} failed · ${r.counts.retest} retest · ${r.counts.untested} untested`)),
+      runProgressBar(r.counts, r.total),
+      el("a", { href: r.url, target: "_blank", class: "icon-btn", title: "Open in TestRail", onclick: (e) => e.stopPropagation() }, "↗"),
+    );
+    body.appendChild(row);
+  }
+}
+
+async function openRunDetail(runId) {
+  const body = $("#runsview-body");
+  body.innerHTML = "<div class='empty-note' style='padding:12px'>Loading tests…</div>";
+  try {
+    RV.detail = await api(`/api/testrail/run/${runId}/tests`);
+    RV.filter = "all"; RV.selected.clear();
+    renderRunDetail();
+  } catch (e) {
+    body.innerHTML = "";
+    body.appendChild(el("div", { style: "color:var(--red); padding:12px" }, e.message));
+  }
+}
+
+function renderRunDetail() {
+  const d = RV.detail;
+  const body = $("#runsview-body");
+  body.innerHTML = "";
+  $("#runsview-title").textContent = d.run.name;
+
+  // header: back + TestRail link
+  body.appendChild(el("div", { style: "display:flex; align-items:center; gap:10px" },
+    el("button", { class: "add-link", onclick: renderRunsList }, "← All runs"),
+    el("span", { class: "dim", style: "font-size:12px" }, runDate(d.run.created_on)),
+    d.run.is_completed ? el("span", { class: "dim", style: "font-size:11.5px; border:1px solid var(--border); border-radius:4px; padding:1px 6px" }, "completed — read only") : null,
+    el("a", { href: d.run.url, target: "_blank", class: "add-link", style: "margin-left:auto" }, "Open in TestRail ↗"),
+  ));
+
+  // status filter chips
+  const byStatus = {};
+  for (const t of d.tests) byStatus[t.status] = (byStatus[t.status] || 0) + 1;
+  const chips = el("div", { style: "display:flex; gap:6px; flex-wrap:wrap" });
+  const mkChip = (key, label, count) => el("button", {
+    class: "btn ghost",
+    style: `padding:3px 10px; font-size:12px; ${RV.filter === key ? "border-color:var(--accent); color:var(--text)" : ""}`,
+    onclick: () => { RV.filter = key; renderRunDetail(); },
+  }, `${label} (${count})`);
+  chips.appendChild(mkChip("all", "All", d.tests.length));
+  for (const [status, count] of Object.entries(byStatus).sort((a, b) => b[1] - a[1])) {
+    chips.appendChild(mkChip(status, status, count));
+  }
+  body.appendChild(chips);
+
+  // selection helpers
+  const shown = d.tests.filter(t => RV.filter === "all" || t.status === RV.filter);
+  if (!d.run.is_completed && shown.length) {
+    body.appendChild(el("div", { style: "display:flex; gap:12px; font-size:12px" },
+      el("button", { class: "add-link", onclick: () => { shown.forEach(t => RV.selected.add(t.case_id)); renderRunDetail(); } }, "Select shown"),
+      el("button", { class: "add-link", onclick: () => { RV.selected.clear(); renderRunDetail(); } }, "Clear selection"),
+    ));
+  }
+
+  // test rows
+  const list = el("div", { style: "display:flex; flex-direction:column; gap:2px" });
+  for (const t of shown) {
+    const row = el("label", {
+      style: "display:flex; align-items:center; gap:9px; padding:5px 8px; border-radius:6px; cursor:pointer; font-size:13px; background:" +
+        (RV.selected.has(t.case_id) ? "var(--bg-hover)" : "transparent"),
+    });
+    if (!d.run.is_completed) {
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = RV.selected.has(t.case_id);
+      cb.addEventListener("change", () => {
+        cb.checked ? RV.selected.add(t.case_id) : RV.selected.delete(t.case_id);
+        updateRunsFoot();
+        row.style.background = cb.checked ? "var(--bg-hover)" : "transparent";
+      });
+      row.appendChild(cb);
+    }
+    row.appendChild(el("span", {
+      style: `flex:0 0 74px; text-align:center; font-size:11px; font-weight:600; border-radius:4px; padding:2px 0; color:#0f1419; background:${statusColor(t.status)}`,
+    }, t.status));
+    row.appendChild(el("span", { style: "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, t.title));
+    row.appendChild(el("span", { class: "dim", style: "font-size:11.5px" }, `C${t.case_id}`));
+    list.appendChild(row);
+  }
+  if (!shown.length) list.appendChild(el("div", { class: "empty-note", style: "padding:10px" }, "No tests match this filter."));
+  body.appendChild(list);
+
+  // footer controls
+  const foot = $("#runsview-foot");
+  if (d.run.is_completed) {
+    foot.style.display = "none";
+  } else {
+    foot.style.display = "flex";
+    const sel = $("#runsview-status");
+    sel.innerHTML = "";
+    for (const s of d.statuses) {
+      if (s.label === "Untested") continue;  // initial state — not settable
+      sel.appendChild(el("option", { value: s.id }, s.label));
+    }
+    sel.value = "4";  // Retest by default
+    updateRunsFoot();
+  }
+}
+
+function updateRunsFoot() {
+  const n = RV.selected.size;
+  $("#runsview-selcount").textContent = `${n} selected`;
+  $("#btn-runsview-apply").disabled = !n;
+  $("#btn-runsview-apply").textContent = n ? `Apply to ${n} test${n === 1 ? "" : "s"}` : "Apply";
+}
+
+$("#btn-runsview-apply").addEventListener("click", async () => {
+  if (!RV.detail || !RV.selected.size) return;
+  const btn = $("#btn-runsview-apply");
+  btn.disabled = true;
+  try {
+    const r = await api(`/api/testrail/run/${RV.detail.run.id}/results`, { method: "POST", body: {
+      case_ids: [...RV.selected],
+      status_id: Number($("#runsview-status").value),
+      comment: $("#runsview-comment").value,
+    }});
+    toast(`Marked ${r.updated} test${r.updated === 1 ? "" : "s"} as ${r.status}.`, "ok");
+    $("#runsview-comment").value = "";
+    await openRunDetail(RV.detail.run.id);  // refresh statuses
+  } catch (e) {
+    toast(e.message, "err");
+    btn.disabled = false;
+  }
+});
+
+$("#btn-runs-view").addEventListener("click", openRunsView);
 
 /* ============================== import recording ============================== */
 let importResult = null;
