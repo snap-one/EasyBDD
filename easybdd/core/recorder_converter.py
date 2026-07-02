@@ -3,6 +3,18 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 
+def _quoted(n: int) -> str:
+    """Regex fragment matching a quoted string argument whose content may
+    contain the *other* quote character, e.g. "button:has-text('Save')".
+    Captures the content in named group f"v{n}"."""
+    return rf'(?P<q{n}>["\'])(?P<v{n}>(?:(?!(?P=q{n})).)*)(?P=q{n})'
+
+
+_Q1 = _quoted(1)
+_Q2 = _quoted(2)
+_Q3 = _quoted(3)
+
+
 class RecorderConverter:
     """Convert UI recorder formats to Easy BDD YAML format"""
 
@@ -117,146 +129,146 @@ class RecorderConverter:
         # Parse different Playwright methods
 
         # goto(url)
-        if match := re.match(r'goto\(["\']([^"\']*)["\'](.*?)\)', line):
+        if match := re.match(rf'goto\({_Q1}(.*?)\)', line):
             return {
                 "action": "Open browser",
-                "url": match.group(1),
-                "description": f"Navigate to {match.group(1)}",
+                "url": match.group("v1"),
+                "description": f"Navigate to {match.group('v1')}",
             }
 
         # get_by_role(role, name=name).click()
         if match := re.match(
-            r'get_by_role\(["\']([^"\']*)["\'](.*?)name\s*=\s*["\']([^"\']*)["\'](.*?)\.click\(\)',
+            rf'get_by_role\({_Q1}(.*?)name\s*=\s*{_Q2}(.*?)\.click\(\)',
             line,
         ):
             return {
                 "action": "Click element",
-                "role": match.group(1),
-                "name": match.group(3),
+                "role": match.group("v1"),
+                "name": match.group("v2"),
             }
 
         # get_by_role(role, name=name).fill(value)
         if match := re.match(
-            r'get_by_role\(["\']([^"\']*)["\'](.*?)name\s*=\s*["\']([^"\']*)["\'](.*?)\.fill\(["\']([^"\']*)["\']\)',
+            rf'get_by_role\({_Q1}(.*?)name\s*=\s*{_Q2}(.*?)\.fill\({_Q3}\)',
             line,
         ):
             return {
                 "action": "Fill form field",
-                "role": match.group(1),
-                "name": match.group(3),
-                "value": match.group(5),
+                "role": match.group("v1"),
+                "name": match.group("v2"),
+                "value": match.group("v3"),
             }
 
         # get_by_role(role).click() — no name
         if match := re.match(
-            r'get_by_role\(["\']([^"\']*)["\'](?!\s*,\s*name)\s*\)\.click\(\)',
+            rf'get_by_role\({_Q1}(?!\s*,\s*name)\s*\)\.click\(\)',
             line,
         ):
             return {
                 "action": "Click element",
-                "role": match.group(1),
+                "role": match.group("v1"),
             }
 
         # get_by_text(text).click()
-        if match := re.match(r'get_by_text\(["\']([^"\']*)["\'](.*?)\.click\(\)', line):
+        if match := re.match(rf'get_by_text\({_Q1}(.*?)\.click\(\)', line):
             return {
                 "action": "Click element",
-                "text": match.group(1),
+                "text": match.group("v1"),
             }
 
         # get_by_label(label).fill(value)
         if match := re.match(
-            r'get_by_label\(["\']([^"\']*)["\'](.*?)\.fill\(["\']([^"\']*)["\'](.*?)\)',
+            rf'get_by_label\({_Q1}(.*?)\.fill\({_Q2}(.*?)\)',
             line,
         ):
             return {
                 "action": "Fill form field",
-                "label": match.group(1),
-                "value": match.group(3),
+                "label": match.group("v1"),
+                "value": match.group("v2"),
             }
 
         # get_by_label(label).click()
-        if match := re.match(r'get_by_label\(["\']([^"\']*)["\'](.*?)\.click\(\)', line):
+        if match := re.match(rf'get_by_label\({_Q1}(.*?)\.click\(\)', line):
             return {
                 "action": "Click element",
-                "label": match.group(1),
+                "label": match.group("v1"),
             }
 
         # get_by_placeholder(placeholder).fill(value)
         if match := re.match(
-            r'get_by_placeholder\(["\']([^"\']*)["\'](.*?)\.fill\(["\']([^"\']*)["\'](.*?)\)',
+            rf'get_by_placeholder\({_Q1}(.*?)\.fill\({_Q2}(.*?)\)',
             line,
         ):
             return {
                 "action": "Fill form field",
-                "label": match.group(1),
-                "value": match.group(3),
+                "label": match.group("v1"),
+                "value": match.group("v2"),
             }
 
         # click(selector)
-        if match := re.match(r'click\(["\']([^"\']*)["\'](.*?)\)', line):
+        if match := re.match(rf'click\({_Q1}(.*?)\)', line):
             return {
                 "action": "Click element",
-                "selector": match.group(1),
-                "description": f"Click element: {match.group(1)}",
+                "selector": match.group("v1"),
+                "description": f"Click element: {match.group('v1')}",
             }
 
         # fill(selector, value)
         if match := re.match(
-            r'fill\(["\']([^"\']*)["\'](.*?)["\']([^"\']*)["\'](.*?)\)', line
+            rf'fill\({_Q1}(.*?){_Q2}(.*?)\)', line
         ):
             return {
                 "action": "Fill form field",
-                "field": match.group(1),
-                "value": match.group(3),
-                "description": f"Fill {match.group(1)} with {match.group(3)}",
+                "field": match.group("v1"),
+                "value": match.group("v2"),
+                "description": f"Fill {match.group('v1')} with {match.group('v2')}",
             }
 
         # hover(selector)
-        if match := re.match(r'hover\(["\']([^"\']*)["\'](.*?)\)', line):
+        if match := re.match(rf'hover\({_Q1}(.*?)\)', line):
             return {
                 "action": "Hover",
-                "selector": match.group(1),
-                "description": f"Hover over: {match.group(1)}",
+                "selector": match.group("v1"),
+                "description": f"Hover over: {match.group('v1')}",
             }
 
         # dblclick(selector)
-        if match := re.match(r'dblclick\(["\']([^"\']*)["\'](.*?)\)', line):
+        if match := re.match(rf'dblclick\({_Q1}(.*?)\)', line):
             return {
                 "action": "Double click",
-                "selector": match.group(1),
-                "description": f"Double-click: {match.group(1)}",
+                "selector": match.group("v1"),
+                "description": f"Double-click: {match.group('v1')}",
             }
 
         # press(selector, key)
         if match := re.match(
-            r'press\(["\']([^"\']*)["\'](.*?)["\']([^"\']*)["\'](.*?)\)', line
+            rf'press\({_Q1}(.*?){_Q2}(.*?)\)', line
         ):
             return {
                 "action": "Press key",
-                "selector": match.group(1),
-                "key": match.group(3),
-                "description": f"Press {match.group(3)} in {match.group(1)}",
+                "selector": match.group("v1"),
+                "key": match.group("v2"),
+                "description": f"Press {match.group('v2')} in {match.group('v1')}",
             }
 
         # wait_for_selector(selector)
-        if match := re.match(r'wait_for_selector\(["\']([^"\']*)["\'](.*?)\)', line):
+        if match := re.match(rf'wait_for_selector\({_Q1}(.*?)\)', line):
             return {
                 "action": "Wait for element",
-                "selector": match.group(1),
+                "selector": match.group("v1"),
                 "state": "visible",
-                "description": f"Wait for element: {match.group(1)}",
+                "description": f"Wait for element: {match.group('v1')}",
             }
 
         # expect(locator).to_contain_text(text)
         if match := re.match(
-            r'expect\(.*?locator\(["\']([^"\']*)["\'](.*?)\)\.to_contain_text\(["\']([^"\']*)["\'](.*?)\)',
+            rf'expect\(.*?locator\({_Q1}(.*?)\)\.to_contain_text\({_Q2}(.*?)\)',
             line,
         ):
             return {
                 "action": "Verify text",
-                "text": match.group(3),
-                "description": f"Verify text: {match.group(3)}",
+                "text": match.group("v2"),
+                "description": f"Verify text: {match.group('v2')}",
             }
 
         # screenshot()
