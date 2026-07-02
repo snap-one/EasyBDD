@@ -1678,6 +1678,107 @@ async def create_run(req: RunRequest):
     return {"run_id": run["id"], "name": run["name"], "link": _run_link(run["id"])}
 
 
+# --------------------------------------------------------------------------- #
+# Run monitoring — browse runs, drill into tests, push results                  #
+# --------------------------------------------------------------------------- #
+
+# TestRail built-in result statuses. 3 (Untested) is the initial state and
+# cannot be set via the API.
+_BASE_STATUSES = {1: "Passed", 2: "Blocked", 3: "Untested", 4: "Retest", 5: "Failed"}
+_status_cache: Optional[Dict[int, str]] = None
+
+
+def _status_map() -> Dict[int, str]:
+    """id -> label for result statuses; instance custom statuses included."""
+    global _status_cache
+    if _status_cache is None:
+        statuses = dict(_BASE_STATUSES)
+        try:
+            for s in _tr().get_statuses():
+                label = s.get("label") or s.get("name") or ""
+                if s.get("id") and label:
+                    statuses[int(s["id"])] = label
+        except Exception:
+            pass  # offline / older instance — the built-ins still apply
+        _status_cache = statuses
+    return _status_cache
+
+
+def _run_summary(r: Dict[str, Any]) -> Dict[str, Any]:
+    counts = {
+        k: int(r.get(f"{k}_count") or 0)
+        for k in ("passed", "blocked", "untested", "retest", "failed")
+    }
+    return {
+        "id": r["id"],
+        "name": r.get("name", ""),
+        "is_completed": bool(r.get("is_completed")),
+        "created_on": r.get("created_on"),
+        "completed_on": r.get("completed_on"),
+        "counts": counts,
+        "total": sum(counts.values()),
+        "url": _run_link(r["id"]),
+    }
+
+
+@app.get("/api/testrail/runs")
+async def testrail_runs(project_id: int = Query(...), limit: int = Query(50)):
+    runs = _tr_call(_tr().get_runs, project_id)
+    runs.sort(key=lambda r: r.get("created_on") or 0, reverse=True)
+    return [_run_summary(r) for r in runs[: max(1, min(limit, 200))]]
+
+
+@app.get("/api/testrail/run/{run_id}/tests")
+async def testrail_run_tests(run_id: int):
+    run = _tr_call(_tr().get_run, run_id)
+    tests = _tr_call(_tr().get_tests, run_id)
+    smap = _status_map()
+    return {
+        "run": _run_summary(run),
+        "statuses": [{"id": sid, "label": label} for sid, label in sorted(smap.items())],
+        "tests": [
+            {
+                "id": t["id"],
+                "case_id": t.get("case_id"),
+                "title": t.get("title", ""),
+                "status_id": t.get("status_id"),
+                "status": smap.get(t.get("status_id"), f"status {t.get('status_id')}"),
+            }
+            for t in tests
+        ],
+    }
+
+
+class RunResultsRequest(BaseModel):
+    case_ids: List[int]
+    status_id: int = 4  # Retest
+    comment: str = ""
+
+
+@app.post("/api/testrail/run/{run_id}/results")
+async def testrail_run_results(run_id: int, req: RunResultsRequest):
+    """Set a result (default: Retest) on the selected cases in a run."""
+    if not req.case_ids:
+        raise HTTPException(status_code=422, detail="Select at least one test.")
+    if req.status_id == 3:
+        raise HTTPException(status_code=422, detail="Untested is TestRail's initial state and cannot be set via the API.")
+    if req.status_id not in _status_map():
+        raise HTTPException(status_code=422, detail=f"Unknown status_id {req.status_id}.")
+    results = []
+    for cid in req.case_ids:
+        entry: Dict[str, Any] = {"case_id": cid, "status_id": req.status_id}
+        if req.comment.strip():
+            entry["comment"] = req.comment.strip()
+        results.append(entry)
+    _tr_call(_tr().add_results_for_cases, run_id, results)
+    return {
+        "updated": len(results),
+        "status_id": req.status_id,
+        "status": _status_map().get(req.status_id, ""),
+        "run_url": _run_link(run_id),
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
 
