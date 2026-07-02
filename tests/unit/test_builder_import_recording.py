@@ -174,7 +174,33 @@ KATALON = [
 ]
 
 
+# Katalon Recorder exports Selenium-IDE-style commands ("open", "type",
+# "waitForElementPresent", "assertText") — regression for the first "open"
+# step being silently dropped so imports started mid-flow with no URL.
+KATALON_RECORDER = [
+    {"command": "open", "target": "https://192.168.100.145/", "value": ""},
+    {"command": "click", "target": "id=login-usernameIpt", "value": ""},
+    {"command": "type", "target": "id=login-usernameIpt", "value": "araknis"},
+    {"command": "click", "target": "id=login-login-btn", "value": ""},
+    {"command": "waitForElementPresent", "target": "id=system-name-value", "value": ""},
+    {"command": "click", "target": "xpath=//button[@id='system-settings-save-btn']/span", "value": ""},
+    {"command": "assertText", "target": "xpath=//td[@id='systemLedChk']/label/span/span", "value": "ON"},
+]
+
+
 class TestKatalonImport:
+    def test_open_command_becomes_first_step(self):
+        r = _post(json.dumps(KATALON_RECORDER))
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["format"] == "katalon"
+        _assert_nodes_valid(body)
+        first = body["steps"][0]
+        assert first["action"] == "browser.open"
+        assert first["params"]["url"] == "https://192.168.100.145/"
+        # one step per command — nothing silently dropped
+        assert len(body["steps"]) == len(KATALON_RECORDER)
+
     def test_detects_and_converts(self):
         r = _post(json.dumps(KATALON))
         assert r.status_code == 200, r.text

@@ -1057,8 +1057,8 @@ class RecorderConverter:
         target = cmd.get("target", "")
         value = cmd.get("value", "")
 
-        # Navigation
-        if command == "openbrowser":
+        # Navigation — Katalon Recorder exports use Selenium IDE's "open"
+        if command in ("open", "openbrowser", "gotourl"):
             return {"action": "Open browser", "url": target}
         if command in ("navigate", "navigateto"):
             return {"action": "Open browser", "url": target}
