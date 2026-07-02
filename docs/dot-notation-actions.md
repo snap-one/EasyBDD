@@ -66,12 +66,12 @@ Examples:
 # Upload files
 - action: browser.upload
   selector: "#file-input"
-  file_path: "path/to/file.pdf"
+  file: "path/to/file.pdf"
 
 # Upload to iframe
 - action: browser.upload
   selector: "iframe >> #file-input"
-  file_path: "Firmware/${firmware_basename}"
+  file: "Firmware/${firmware_basename}"
 ```
 
 #### Selection & Dropdown
@@ -117,7 +117,7 @@ Examples:
 #### Screenshots
 ```yaml
 - action: browser.screenshot
-  name: "login_page"
+  filename: "login_page"
 ```
 
 #### Verification
@@ -146,29 +146,14 @@ Examples:
 
 # Get latest firmware
 - action: aws.get_latest
-  bucket_name: "my-bucket"
-  folder_prefix: "firmware/device-type"
-  file_extension: ".bin"
-  download_dir: "Firmware"
-  store_filename_as: "latest_fw"
-  store_version_as: "latest_version"
-
-# Get second-to-last firmware
-- action: aws.get_latest
-  bucket_name: "my-bucket"
-  folder_prefix: "firmware/device-type"
-  file_extension: ".bin"
-  download_dir: "Firmware"
-  get_second_to_last: true
-  store_filename_as: "older_fw"
-  store_version_as: "older_version"
+  store_as: "latest_fw"
 
 # Upload file to S3
 - action: aws.upload
   bucket_name: "my-bucket"
   file_path: "reports/test_results.html"
-  s3_key: "results/test_results.html"
-  public: true
+  key: "results/test_results.html"
+  store_as: "upload_result"
 
 # Delete S3 folder
 - action: aws.delete_folder
@@ -183,9 +168,9 @@ Examples:
 ```yaml
 # Connect to device
 - action: jsonrpc.connect
-  host: "${device_ip}"
-  username: "admin"
-  password: "password123"
+  url: "${device_ws_url}"
+  device_id: "${device_id}"
+  timeout: 10
 
 # Start receiving device updates
 - action: jsonrpc.start_updates
@@ -218,21 +203,14 @@ Examples:
   expression: "'firmware_version' in device_info"
   message: "Device info should contain firmware version"
 
-# Soft assertion (doesn't stop test)
-- action: test.assert
-  expression: "response_time < 1000"
-  message: "Response should be fast"
-  soft_assert: true
-
 # Assert JSON schema
 - action: test.assert_schema
   data: "${api_response}"
-  schema_file: "schemas/user.json"
+  schema: {type: object, required: [id], properties: {id: {type: integer}}}
 
 # Assert HTTP response
 - action: test.assert_response
-  response: "${api_response}"
-  status_code: 200
+  status: 200
   headers:
     content-type: "application/json"
 
@@ -280,11 +258,10 @@ The framework **fully supports the old format**, so your existing tests will con
 | `Fill form field` / `Fill field` | `browser.fill` |
 | `Upload file` | `browser.upload` |
 | `Take screenshot` | `browser.screenshot` |
-| `Wait` | `browser.wait` |
+| `Wait` / `Sleep` | `test.sleep` |
 | `Select option` | `browser.select` |
 | `AWS list firmware files` | `aws.list_files` |
 | `AWS get latest firmware` | `aws.get_latest` |
-| `AWS upload file` | `aws.upload` |
 | `JSONRPC connect` | `jsonrpc.connect` |
 | `JSONRPC get about` | `jsonrpc.get_about` |
 | `Assert` | `test.assert` |
@@ -299,12 +276,11 @@ To convert your existing tests:
    - `action: "Fill form field"` → `action: browser.fill`
    - `action: "Upload file"` → `action: browser.upload`
    - `action: "Take screenshot"` → `action: browser.screenshot`
-   - `action: "Wait"` → `action: browser.wait`
+   - `action: "Wait"` → `action: test.sleep`
 
 2. **AWS Actions**
    - `action: "AWS list firmware files"` → `action: aws.list_files`
    - `action: "AWS get latest firmware"` → `action: aws.get_latest`
-   - `action: "AWS upload file"` → `action: aws.upload`
 
 3. **JSON-RPC Actions**
    - `action: "JSONRPC connect"` → `action: jsonrpc.connect`
@@ -384,7 +360,7 @@ steps:
     timeout: 5000
   
   - action: browser.screenshot
-    name: "logged_in"
+    filename: "logged_in"
   
   - action: browser.verify_text
     text: "Welcome back"
@@ -401,11 +377,7 @@ variables:
 
 setup:
   - action: aws.get_latest
-    bucket_name: "${bucket_name}"
-    folder_prefix: "devices/model-x"
-    file_extension: ".bin"
-    download_dir: "Firmware"
-    store_filename_as: "firmware_file"
+    store_as: "firmware_file"
 
 steps:
   - action: browser.open
@@ -417,7 +389,7 @@ steps:
   
   - action: browser.upload
     selector: "iframe >> #firmware-file"
-    file_path: "Firmware/${firmware_file_basename}"
+    file: "Firmware/${firmware_file}"
   
   - action: browser.click
     selector: "iframe >> #upgrade-btn"
@@ -436,9 +408,8 @@ variables:
 
 setup:
   - action: jsonrpc.connect
-    host: "${device_ip}"
-    username: "admin"
-    password: "admin123"
+    url: "${device_ws_url}"
+    device_id: "${device_id}"
   
   - action: jsonrpc.get_about
     store_as: "device_info"

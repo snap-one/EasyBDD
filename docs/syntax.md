@@ -46,8 +46,7 @@ role: button
 name: Log In
 # 4. Assert login succeeded
 - test.assert:
-value: ${last_status_code}
-equals: 200
+expression: last_status_code == 200
 ```
 
 ### Flow-style format (recommended for complex params in TestRail)
@@ -56,7 +55,7 @@ Single-line flow style avoids indentation issues in TestRail's rich-text editor:
 
 ```
 - api.request: {method: POST, url: "${api_url}/system/login", body: {user: "${username}", password: "${password}"}}
-- test.assert: {value: ${last_status_code}, equals: 200}
+- test.assert: {expression: "last_status_code == 200"}
 - api.request: {method: GET, url: "${api_url}/system/status", headers: {Authorization: "Bearer ${token}"}}
 - test.assert: {expression: "'systemInfo' in last_json"}
 ```
@@ -74,8 +73,7 @@ url: ${base_url}/login
 selector: input[type="text"]
 value: ${username}
 - test.assert:
-value: ${last_status_code}
-equals: 200
+expression: last_status_code == 200
 ```
 
 ---
@@ -197,7 +195,7 @@ value: ${username}
 
 # Take screenshot
 - browser.screenshot:
-name: "login-page"
+filename: "login-page"
 
 # Wait for element
 - browser.wait_for:
@@ -212,7 +210,6 @@ text: "Welcome"
 # Verify element visibility
 - browser.verify_element:
 selector: ".dashboard"
-visible: true
 
 # Navigate
 - browser.back: {}
@@ -260,36 +257,33 @@ After any API step: `${last_status_code}` holds the HTTP status, `${last_respons
 
 ### Assertion Actions
 
+`test.assert` takes an `expression` (a Python expression string) and an optional `message`. There is no `value`/`equals`/`contains`/`in`/`greater_than`/`soft` shorthand — express the comparison directly in `expression`.
+
 ```
 # Equality check
 - test.assert:
-value: ${last_status_code}
-equals: 200
+expression: last_status_code == 200
+message: "Expected status 200"
 
 # Contains substring
 - test.assert:
-value: ${response_body}
-contains: "access_token"
+expression: "'access_token' in response_body"
 
 # Does not contain
 - test.assert:
-value: ${device.status}
-not_contains: error
+expression: "'error' not in device.status"
 
 # Non-empty
 - test.assert:
-value: ${fw_version}
-not_empty: true
+expression: "fw_version != ''"
 
 # Membership check
 - test.assert:
-value: ${last_status_code}
-in: [200, 201, 204]
+expression: "last_status_code in [200, 201, 204]"
 
 # Greater than
 - test.assert:
-value: ${process_count}
-greater_than: 0
+expression: process_count > 0
 
 # Expression-based assertion
 - test.assert:
@@ -298,14 +292,8 @@ message: Login should return errCode 0
 
 # JSON schema validation
 - test.assert_schema:
-value: ${device}
+data: ${device}
 schema: {type: object, required: [id, status], properties: {id: {type: integer}, status: {type: string}}}
-
-# Soft assertion (test continues; failures collected at end)
-- test.assert:
-value: ${metric}
-greater_than: 0
-soft: true
 
 # Flush soft assertions
 - test.check_assertions: {}
@@ -341,14 +329,14 @@ host: ${device_ip}
 username: ${device_user}
 password: ${device_pass}
 timeout: 30
-retry: 3
-retry_delay: 10
 
 - ssh.command:
+host: ${device_ip}
 command: cat /etc/firmware_version
 store_as: fw_version
 
-- ssh.disconnect: {}
+- ssh.disconnect:
+host: ${device_ip}
 ```
 
 ### Eval Actions
@@ -437,7 +425,7 @@ slow_mo: 1000             # Add 1000ms delay between actions (debug)
 then:
 - browser.upload:
   selector: "#firmware-input"
-  file_path: Firmware/${firmware_file}
+  file: Firmware/${firmware_file}
 - browser.click:
   role: button
   name: Upgrade
@@ -455,8 +443,7 @@ steps:
 - test.sleep:
   seconds: ${wait_seconds}
 - test.assert:
-  value: ${device.status}
-  equals: online
+  expression: device.status == 'online'
 ```
 
 Loop over a list of dicts:
@@ -478,7 +465,7 @@ steps:
 
 ```
 - while: "device_state != 'ready'"
-loop_limit: 30
+limit: 30
 steps:
 - api.get:
   url: ${base_url}/api/status

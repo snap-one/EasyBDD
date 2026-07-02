@@ -19,7 +19,7 @@ steps:
 - browser.open:
 url: ${site_url}
 - browser.screenshot:
-name: "homepage"
+filename: "homepage"
 - browser.verify_text:
 text: "Example Domain"
 ```
@@ -51,7 +51,7 @@ selector: ".dashboard"
 - browser.verify_text:
 text: "Welcome"
 - browser.screenshot:
-name: "dashboard"
+filename: "dashboard"
 ```
 
 ### API Login and Assert
@@ -69,8 +69,8 @@ url: ${api_url}/system/login
 body: {user: "${username}", password: "${password}"}
 store_as: login_response
 - test.assert:
-value: ${last_status_code}
-equals: 200
+expression: last_status_code == 200
+message: Expected status 200
 - eval.run:
 expression: "login_response.data.restful_res.token"
 store_as: token
@@ -91,7 +91,7 @@ These are copy-paste ready for the Preconditions field of a `Feature:` case.
 # 1. Login
 - api.request: {method: POST, url: "${url}/system/login", body: {user: "${username}", password: "${password}"}}
 # 2. Assert login succeeded
-- test.assert: {value: ${last_status_code}, equals: 200}
+- test.assert: {expression: "last_status_code == 200"}
 # 3. Extract token
 - eval.run: {expression: "last_json.restful_res.token", store_as: token}
 # 4. Authenticated GET
@@ -121,7 +121,7 @@ name: Log In
 - browser.wait_for_element:
 text: SYSTEM STATUS
 - browser.screenshot:
-name: post-login
+filename: post-login
 ```
 
 ### Feature: SSH — Firmware version check
@@ -133,18 +133,17 @@ host: ${device_ip}
 username: ${device_user}
 password: ${device_pass}
 timeout: 30
-retry: 3
-retry_delay: 10
 # 2. Read firmware version
 - ssh.command:
 command: cat /etc/firmware_version
 store_as: fw_version
 # 3. Assert version
 - test.assert:
-value: ${fw_version}
-contains: "2."
+expression: "'2.' in fw_version"
+message: Firmware version should contain '2.'
 # 4. Disconnect
-- ssh.disconnect: {}
+- ssh.disconnect:
+host: ${device_ip}
 ```
 
 ### Feature: AWS S3 — Firmware file discovery
@@ -203,7 +202,7 @@ selector: "#login-btn"
 - browser.verify_text:
 text: ${expected_menu}
 - browser.screenshot:
-name: "${username}-dashboard"
+filename: "${username}-dashboard"
 ```
 
 ### Multi-Device (Async)
@@ -233,11 +232,12 @@ timeout: 30
 command: cat /etc/firmware_version
 store_as: fw_version
 - test.assert:
-value: ${fw_version}
-not_empty: true
+expression: "fw_version not in (None, '')"
+message: Firmware version should not be empty
 - test.log:
 message: "${product} (${mac}) — firmware: ${fw_version}"
-- ssh.disconnect: {}
+- ssh.disconnect:
+host: ${mac}
 ```
 
 ### Parameterized API endpoints
@@ -262,8 +262,8 @@ steps:
 url: ${api_base}${endpoint}
 headers: {Authorization: "Bearer ${token}"}
 - test.assert:
-value: ${last_status_code}
-equals: ${expected_status}
+expression: "last_status_code == expected_status"
+message: Status code should match expected_status
 ```
 
 ---
@@ -295,8 +295,8 @@ url: ${api_url}/system/status
 headers: {Authorization: "Bearer ${token}"}
 store_as: status_response
 - test.assert:
-value: ${last_status_code}
-equals: 200
+expression: last_status_code == 200
+message: Expected status 200
 - test.assert:
 expression: "'systemInfo' in status_response.data"
 message: Response should contain systemInfo
@@ -353,7 +353,7 @@ setup:
 - browser.open:
 url: ${base_url}
 - browser.screenshot:
-name: start
+filename: start
 
 steps:
 - browser.click:
@@ -365,14 +365,14 @@ selector: ".settings-page"
 selector: "h1"
 text: Settings
 - browser.screenshot:
-name: settings-page
+filename: settings-page
 - browser.back: {}
 - browser.wait_for:
 selector: ".dashboard"
 
 cleanup:
 - browser.screenshot:
-name: final-state
+filename: final-state
 ```
 
 ### Form validation
@@ -408,7 +408,7 @@ selector: ".submit-btn"
 - browser.verify_text:
 text: ${expected_error}
 - browser.screenshot:
-name: "${test_case}-result"
+filename: "${test_case}-result"
 ```
 
 ---
@@ -430,7 +430,7 @@ file_extension: .bin
 store_as: firmware_files
 # 2. Pick latest
 - aws.get_latest:
-files: ${firmware_files}
+bucket_name: ${bucket_name}
 store_as: latest_firmware
 # 3. Connect to device
 - ssh.connect:
@@ -438,8 +438,6 @@ host: ${device_ip}
 username: ${device_user}
 password: ${device_pass}
 timeout: 30
-retry: 5
-retry_delay: 15
 # 4. Read current version
 - ssh.command:
 command: cat /etc/firmware_version
@@ -453,7 +451,7 @@ then:
   url: ${base_url}/firmware
 - browser.upload:
   selector: "iframe >> #firmware-input"
-  file_path: ${latest_firmware.local_path}
+  file: ${latest_firmware.local_path}
 - browser.click:
   role: button
   name: Upgrade
@@ -467,15 +465,15 @@ else:
 host: ${device_ip}
 username: ${device_user}
 password: ${device_pass}
-retry: 10
-retry_delay: 20
+# 7. Verify new version
 - ssh.command:
 command: cat /etc/firmware_version
 store_as: new_version
 - test.assert:
-value: ${new_version}
-equals: ${latest_firmware.version}
-- ssh.disconnect: {}
+expression: "new_version == latest_firmware.version"
+message: Device should be running the latest firmware version
+- ssh.disconnect:
+host: ${device_ip}
 ```
 
 ---

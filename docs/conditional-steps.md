@@ -211,7 +211,7 @@ setup:
   - action: API request
     method: GET
     url: "${api_url}/status"
-    store_response_as: "status_response"
+    store_response: "status_response"
 
 steps:
   # Check if API is healthy
@@ -321,8 +321,9 @@ steps:
 ```yaml
 variables:
   needs_upgrade: true  # Clear intent
-  
-- condition: "needs_upgrade"
+
+steps:
+  - condition: "needs_upgrade"
 ```
 
 ### 3. Add Comments

@@ -99,10 +99,6 @@ Device-specific configurations are automatically loaded:
 # test file
 name: "Device API Test"
 device_config: "araknis_206"  # Loads config/devices/araknis_206.yaml
-steps:
-  - action: "api get"
-    url: "http://192.168.100.206/api/v1/device/info"
-    device_id: "araknis_206"  # Uses device-specific auth config
 ```
 
 The framework automatically:

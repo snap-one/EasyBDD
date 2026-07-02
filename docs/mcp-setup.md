@@ -88,6 +88,40 @@ Code UI, or restart the app.
 
 ## Claude Desktop (macOS / Windows)
 
+There are two ways to connect Claude Desktop: install the packaged **`.mcpb` extension**
+(recommended — no manual JSON editing, prompts for TestRail/Ollama config in the UI), or
+edit `claude_desktop_config.json` by hand.
+
+### Option A — Install the `.mcpb` extension (recommended)
+
+The project ships a build script that packages the server, its manifest, and metadata
+into a single `.mcpb` file Claude Desktop can install directly:
+
+```bash
+make build-mcpb
+# or: python build_mcpb.py
+```
+
+This reads [`manifest.json`](../manifest.json) and zips up the `easybdd/` package plus
+project metadata (skipping anything listed in [`.mcpbignore`](../.mcpbignore) — build
+artifacts, the venv, firmware/docs/tests that aren't needed to run the server) into
+`easy-bdd-<version>.mcpb` at the project root.
+
+To install: open (or drag) `easy-bdd-1.0.0.mcpb` onto the Claude Desktop app. You'll be
+prompted for the `user_config` fields declared in `manifest.json` — TestRail URL/username/
+API key and the Ollama base URL/model — which get injected as environment variables into
+the server process (`TESTRAIL_URL`, `TESTRAIL_USERNAME`, `TESTRAIL_API_KEY`,
+`OLLAMA_BASE_URL`, `CRAWLER_AI_MODEL`). Leave any of them blank if you don't use that
+integration.
+
+Requires `uv` on the machine running Claude Desktop — the manifest launches the server
+with `uv run --directory <extension_dir> --extra mcp python -m easybdd mcp-serve`, so `uv`
+resolves and runs the Python environment itself; no separate venv setup needed.
+
+To rebuild after code changes, just re-run `make build-mcpb` and reinstall the `.mcpb`.
+
+### Option B — Manual config
+
 Edit `~/.claude/claude_desktop_config.json`:
 
 ```json
@@ -294,6 +328,36 @@ error, check:
 | `preview_fix` | Show auto-correctable fixes without writing |
 | `apply_fix` | Write fixes to disk (requires `confirmed=True`) |
 | `validate_testrail_case` | Validate BDD syntax in TestRail cases via API |
+| `probe_selector` | Test whether CSS/ARIA/text selectors resolve on a live page |
+| `fix_test_selectors` | Heal selector issues in a YAML file against a live page |
+| `fix_crawled_tests` | Batch-heal selector issues across multiple crawled test files |
+| `get_testrail_run_failures` | Fetch failed/retest cases from a TestRail run |
+| `repush_yaml_to_testrail` | Re-push a YAML file's steps to a TestRail case's Preconditions |
+| `import_playwright_recording` | Convert a Playwright recording to Easy BDD YAML test cases |
+| `ollama_chat` | Send a prompt directly to the configured Ollama model |
+| `ollama_analyze_test` | Ask Ollama to review an Easy BDD test case and suggest improvements |
+| `ollama_generate_tests` | Ask Ollama to generate new Easy BDD test cases for a feature |
+| `ollama_improve_testrail_case` | Fetch a TestRail case and improve its steps via Ollama |
+| `crawl_device` | Crawl a live device UI with Playwright and generate an Easy BDD/TestRail suite |
+
+## Available prompts (framework server)
+
+Prompts are packaged, multi-step workflows — invoke them from your MCP client's prompt
+picker (in Claude Desktop: the `+` menu next to the chat box) rather than asking for them
+in plain English.
+
+| Prompt | Arguments | What it does |
+|--------|-----------|---------------|
+| `generate_tests` | `module`, `description` | Generate complete YAML test cases for a module/feature |
+| `debug_failure` | `test_name`, `report_path` | Diagnose a failing test from its execution trace and suggest a fix |
+| `validate_and_fix` | `path` | Validate a test file and interactively apply suggested fixes |
+| `debug_testrail_run` | `run_id`, `auto_fix` | End-to-end triage of every failure in a TestRail run — validate local YAML, probe live selectors, and (if `auto_fix=true`) apply + re-push corrections |
+| `validate_testrail_suite` | `project_id`, `suite_id`, `fix` | Validate every case in a TestRail suite and produce a prioritised fix plan |
+| `create_test_from_description` | `feature_description`, `page_url`, `project_id`, `suite_id`, `count` | Generate tests from a plain-English description and optionally push them to TestRail |
+
+Example — debugging a whole failing run in one step:
+
+> Run the `debug_testrail_run` prompt with `run_id=196112`.
 
 ## Available tools (frontend server)
 

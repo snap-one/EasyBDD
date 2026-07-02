@@ -50,7 +50,8 @@
     { "name": "ollama_chat",              "description": "Send a prompt directly to the configured Ollama model" },
     { "name": "ollama_analyze_test",      "description": "Ask Ollama to review an Easy BDD test case and suggest improvements" },
     { "name": "ollama_generate_tests",    "description": "Ask Ollama to generate new Easy BDD test cases for a feature" },
-    { "name": "ollama_improve_testrail_case", "description": "Fetch a TestRail case and improve its steps via Ollama" }
+    { "name": "ollama_improve_testrail_case", "description": "Fetch a TestRail case and improve its steps via Ollama" },
+    { "name": "crawl_device",             "description": "Crawl a live device UI with Playwright and generate an Easy BDD/TestRail suite" }
   ],
   "tools_generated": false,
   "prompts": [
@@ -71,6 +72,24 @@
       "description": "Validate a test file and interactively apply suggested fixes",
       "arguments": ["path"],
       "text": "Validate the Easy BDD test file at '${arguments.path}', explain each issue found, and apply auto-fixable corrections after confirming with me."
+    },
+    {
+      "name": "debug_testrail_run",
+      "description": "End-to-end workflow to debug every failure in a TestRail run and optionally fix + re-push",
+      "arguments": ["run_id", "auto_fix"],
+      "text": "Debug every failing case in TestRail run R${arguments.run_id}: triage failures, validate the corresponding local YAML, probe live selectors, and (auto_fix=${arguments.auto_fix}) preview or apply and re-push fixes."
+    },
+    {
+      "name": "validate_testrail_suite",
+      "description": "Validate every case in a TestRail suite and produce a prioritised fix plan",
+      "arguments": ["project_id", "suite_id", "fix"],
+      "text": "Validate every Feature:/Shared: case in TestRail project ${arguments.project_id}, suite ${arguments.suite_id}. Summarise errors and warnings, then (fix=${arguments.fix}) propose or generate corrected YAML for each fixable issue."
+    },
+    {
+      "name": "create_test_from_description",
+      "description": "Generate Easy BDD tests from a plain-English feature description, optionally pushing them to TestRail",
+      "arguments": ["feature_description", "page_url", "project_id", "suite_id", "count"],
+      "text": "Generate ${arguments.count} Easy BDD test cases for: ${arguments.feature_description} (page: ${arguments.page_url}). Validate the YAML, then offer to push to TestRail project ${arguments.project_id} / suite ${arguments.suite_id} after confirmation."
     }
   ],
   "user_config": {

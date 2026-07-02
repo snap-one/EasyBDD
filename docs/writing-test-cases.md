@@ -125,11 +125,11 @@ value: ${username}
 | `browser.open` | `url` | — |
 | `browser.fill` | `value` + one of: `selector`, `label`, `role`+`name` | — |
 | `browser.click` | one of: `selector`, `role`+`name`, `label`, `text` | `exact` |
-| `browser.wait_for_element` | one of: `text`, `selector`, `role`+`name` | `timeout` |
+| `browser.wait_for` | — | `selector`, `timeout`, `state` |
 | `browser.verify_text` | `text` | — |
 | `browser.screenshot` | `filename` | — |
-| `browser.hover` | `selector` or `role`+`name` | — |
-| `browser.select_option` | `selector` or `label`, `value` | — |
+| `browser.hover` | `selector` | — |
+| `browser.select` | `selector` | `value`, `label`, `index` |
 | `browser.press_key` | `key` | `selector` |
 
 ### Login flow example
@@ -151,8 +151,8 @@ value: ${password}
 role: button
 name: Log In
 # 5. Confirm dashboard loaded
-- browser.wait_for_element:
-text: SYSTEM STATUS
+- browser.wait_for:
+selector: "text=SYSTEM STATUS"
 ```
 
 ### Clicking elements
@@ -193,17 +193,16 @@ If Playwright reports `strict mode violation: resolved to 2 elements`, either ad
 ### Waiting for elements
 
 ```
-- browser.wait_for_element:
-text: SYSTEM STATUS
+- browser.wait_for:
+selector: "text=SYSTEM STATUS"
 ```
 ```
-- browser.wait_for_element:
+- browser.wait_for:
 selector: "#devices__tab"
 ```
 ```
-- browser.wait_for_element:
-role: button
-name: Log In
+- browser.wait_for:
+selector: "role=button[name='Log In']"
 ```
 
 ### Test variables for browser behaviour

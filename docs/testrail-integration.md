@@ -548,17 +548,16 @@ All devices will run concurrently with up to 3 threads.
 
 ## Loops and Iteration
 
-### for_loop — iterate over a fixed list
+### for_each — iterate over a fixed list
 
 Use `for_each` with a Python list literal or expression:
 
 ```
-- for_loop:
-for_each: "[1, 124, 373, 475]"
+- for_each: "[1, 124, 373, 475]"
 loop_var: fault_delay
-loop_steps:
+steps:
   - wait:
-      time: ${fault_delay}
+      seconds: ${fault_delay}
   - fault.insert:
       type: power_cycle
   - ovrc.get about:
@@ -583,32 +582,29 @@ Optional loop parameters:
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `loop_var` | Variable name bound to each item | `item` |
-| `loop_limit` | Safety cap on iterations | `1000` |
+| `limit` | Safety cap on iterations | `1000` |
 | `break_if` | Python expression — exits the loop early if True | — |
 | `continue_if` | Python expression — skips to next iteration if True | — |
 
-### while_loop — repeat until a condition is false
+### while — repeat until a condition is false
 
 ```
-- while_loop:
-while_condition: retry_count < 10
-loop_limit: 10
-loop_steps:
+- while: retry_count < 10
+limit: 10
+break_if: device_info.status == "online"
+steps:
   - wait:
-      time: 5
+      seconds: 5
   - ovrc.get about:
       store_as: device_info
-  - break:
-      condition: device_info.status == "online"
 ```
 
-### Repeat N times (for_loop with range)
+### Repeat N times (for_each with range)
 
 ```
-- for_loop:
-for_each: "range(5)"
+- for_each: "range(5)"
 loop_var: attempt
-loop_steps:
+steps:
   - ovrc.connect:
       device_id: ${mac}
   - ovrc.get about:
@@ -622,18 +618,18 @@ loop_steps:
 
 ### sleep / wait
 
-Any action whose name contains `wait` sleeps for `time` seconds:
+The `wait` action (alias for `test.sleep`) sleeps for `seconds`:
 
 ```
 - wait:
-time: 30
+seconds: 30
 ```
 
 Or with a variable:
 
 ```
 - wait:
-time: ${fault_delay}
+seconds: ${fault_delay}
 ```
 
 ### Fault insertion at specific intervals (data array)
@@ -648,7 +644,7 @@ JSON:
 device_id: ${mac}
 
 - wait:
-time: ${fault_delay}
+seconds: ${fault_delay}
 
 - fault.insert:
 type: power_cycle
@@ -662,18 +658,17 @@ expression: device_info.status == "online"
 - ovrc.disconnect: {}
 ```
 
-### Fault insertion at specific non-uniform intervals (for_loop)
+### Fault insertion at specific non-uniform intervals (for_each)
 
 ```
 - ovrc.connect:
 device_id: ${mac}
 
-- for_loop:
-for_each: "[1, 124, 373, 475]"
+- for_each: "[1, 124, 373, 475]"
 loop_var: fault_delay
-loop_steps:
+steps:
   - wait:
-      time: ${fault_delay}
+      seconds: ${fault_delay}
   - fault.insert:
       type: power_cycle
   - ovrc.get about:
@@ -868,7 +863,7 @@ Required environment variables (or `.env` file):
 
 ```bash
 TESTRAIL_URL=https://yourcompany.testrail.io
-TESTRAIL_EMAIL=user@example.com
+TESTRAIL_USERNAME=user@example.com
 TESTRAIL_API_KEY=your_api_key_here
 ```
 
@@ -942,24 +937,24 @@ Always use `--dry-run` first when adding a new suite or section configuration to
 
 ## HTML Reports Attached to TestRail Results
 
-After each test completes, the HTML report is automatically uploaded to the TestRail result as an attachment via the `add_attachment_to_result` API. The report is then accessible directly from the TestRail result view — no need to dig through Jenkins artifacts.
+After all cases in the run finish, a single consolidated HTML report covering the whole run is automatically uploaded to the TestRail **run** as an attachment via the `add_attachment_to_run` API. The report is then accessible directly from the TestRail run view — no need to dig through Jenkins artifacts.
 
 Report filenames follow the pattern:
 
 ```
-{RunTitle}_build{BUILD_NUMBER}_{CaseTitle}_report_{timestamp}.html
+{RunTitle}_build{BUILD_NUMBER}_report_{timestamp}.html
 ```
 
 Example:
 ```
-EASY_BDD__WattBox_VPS_Smoke_Test_build47_VPS_FW_Upgrade_report_20260613_143022.html
+EASY_BDD__WattBox_VPS_Smoke_Test_build47_report_20260613_143022.html
 ```
 
 Notes:
 - Special characters in the name are replaced with underscores.
 - Name is capped at 80 characters.
-- When running standalone (no TestRail), the name falls back to the YAML file stem.
-- If the attachment upload fails (for example, due to API permissions), a warning is printed but the test result is not affected.
+- When running standalone (no TestRail), the report name falls back to the YAML file stem.
+- If the attachment upload fails (for example, due to API permissions), a warning is printed but the run result is not affected.
 
 ---
 

@@ -207,10 +207,9 @@ steps:
     role: textbox
     name: Name
     
-  - action: Get by role  
+  - action: Fill form field
     role: textbox
     name: Name
-    action_type: fill
     value: RX-D46A9121077B
     
   - action: Click element

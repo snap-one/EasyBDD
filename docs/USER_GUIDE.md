@@ -39,12 +39,12 @@ mac_for_report: AA:BB:CC:DD:EE:FF
 Put steps in the **Preconditions** field. Parameters can be flush-left — the runner re-indents them automatically:
 
 ```
-- api.request:
-method: GET
-url: '${url}/system/firmware-info'
+- websocket.send:
+method: dxGetAbout
+url: '${url}'
 store_as: last_response
 - test.assert:
-expression: last_response['status'] == 200
+expression: "'error' not in str(last_response)"
 ```
 
 ---

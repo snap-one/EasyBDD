@@ -55,8 +55,8 @@ steps:
     message: "Performing periodic cleanup"
   
   # Take screenshots periodically instead of keeping browser open
-  - action: browser.take_screenshot
-    name: "progress_checkpoint_1"
+  - action: browser.screenshot
+    name: "progress_checkpoint_1""
   
   # Continue with test...
 ```
@@ -88,16 +88,16 @@ steps:
   - action: log
     message: "Checkpoint 2 - 3 hours elapsed"
   
-  - action: browser.take_screenshot
-    name: "checkpoint_3h"
+  - action: browser.screenshot
+    name: "checkpoint_3h""
   
   # ... more operations ...
   
   - action: log
     message: "Checkpoint 3 - 6 hours elapsed"
   
-  - action: browser.take_screenshot
-    name: "checkpoint_6h"
+  - action: browser.screenshot
+    name: "checkpoint_6h""
   
   # ... final operations ...
   
@@ -133,7 +133,7 @@ steps:
     store_as: device_status
   
   - action: wait
-    time: 5
+    seconds: 5
   
   # Log resource usage
   - action: log
@@ -148,12 +148,12 @@ steps:
     url: https://example.com
   
   # Long-running operation with error handling
-  - action: browser.wait_for_selector
+  - action: browser.wait_for
     selector: ".completion-indicator"
     timeout: 32400000  # 9 hours in milliseconds (9 * 60 * 60 * 1000)
   
   # If operation completes, continue
-  - action: browser.assert_text_contains
+  - action: test.assert_text_contains
     selector: ".completion-indicator"
     text: "Complete"
 ```
@@ -168,16 +168,16 @@ steps:
   # Save state every hour
   - action: log
     message: "Hour 1 - Saving progress"
-  - action: browser.take_screenshot
-    name: "progress_hour_1"
+  - action: browser.screenshot
+    name: "progress_hour_1""
   
   - action: wait
-    time: 3600  # Wait 1 hour
+    seconds: 3600  # Wait 1 hour
   
   - action: log
     message: "Hour 2 - Saving progress"
-  - action: browser.take_screenshot
-    name: "progress_hour_2"
+  - action: browser.screenshot
+    name: "progress_hour_2""
   
   # Continue pattern...
 ```
@@ -244,7 +244,6 @@ ps aux | grep easybdd
 ```yaml
 # Add cleanup steps
 cleanup:
-  - action: browser.close
   - action: log
     message: "Cleaning up resources"
 ```

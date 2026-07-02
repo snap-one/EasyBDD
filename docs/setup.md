@@ -116,9 +116,9 @@ SLOW_MO=0
 Reference in tests:
 ```yaml
 variables:
-  app_url: "${STAGING_URL}"
-  username: "${TEST_USERNAME}"
-  password: "${TEST_PASSWORD}"
+  app_url: "{{STAGING_URL}}"
+  username: "{{TEST_USERNAME}}"
+  password: "{{TEST_PASSWORD}}"
 ```
 
 ## 🗂 Project Structure Setup
@@ -175,17 +175,17 @@ variables:
   website: "https://example.com"
   
 steps:
-  - action: Open browser
-    url: ${website}
-    description: Open the test website
+  - browser.open:
+      url: "{{website}}"
+      description: Open the test website
     
-  - action: Take screenshot
-    name: "homepage"
-    description: Capture homepage
+  - browser.screenshot:
+      filename: "homepage"
+      description: Capture homepage
     
-  - action: Verify text
-    text: "Example Domain"
-    description: Verify page loaded correctly
+  - browser.verify_text:
+      text: "Example Domain"
+      description: Verify page loaded correctly
 ```
 
 ### Run First Test
@@ -409,7 +409,7 @@ with sync_playwright() as p:
 
 1. **Check logs**: `reports/logs/test.log`
 2. **Enable debug mode**: Set `logging.level: DEBUG` in config
-3. **Run with verbose output**: `python -m easybdd run --verbose`
+3. **Run with debug logging**: Set `logging.level: DEBUG` in `config/framework.yaml`, then `python -m easybdd run`
 4. **Check documentation**: See other guides in `docs/`
 
 ---

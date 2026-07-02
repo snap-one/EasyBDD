@@ -31,6 +31,7 @@ A TestRail-first test automation framework for web UI, REST API, and firmware re
 - [Configuration](#configuration)
 - [Local YAML (supplemental)](#local-yaml-supplemental)
 - [Test Builder UI](#test-builder-ui)
+- [AI Assistant Integration (MCP)](#ai-assistant-integration-mcp)
 - [Migration Tools](#migration-tools)
 - [CLI Reference](#cli-reference)
 - [Project Structure](#project-structure)
@@ -147,24 +148,12 @@ base_url: https://staging-api.example.com
 device_id: 1001
 
 steps:
-- api.post:
-url: ${base_url}/auth/login
-body: {username: "${API_USERNAME}", password: "${API_PASSWORD}"}
-store_as: auth_response
-- test.assert:
-value: ${last_status_code}
-equals: 200
-- test.extract:
-from: ${auth_response}
-path: access_token
-store_as: token
-- api.get:
-url: ${base_url}/devices/${device_id}
-headers: {Authorization: "Bearer ${token}"}
+- websocket.send:
+url: "${base_url}/devices/${device_id}"
+method: GET
 store_as: device
 - test.assert:
-value: ${device.status}
-equals: online
+expression: "${device.status} == 'online'"
 - test.log:
 message: "Device ${device_id} is ${device.status}"
 ```
@@ -198,8 +187,8 @@ Variables defined inline are scoped to that case. Variables from `Var:` cases ar
 
 ```yaml
 variables:
-  password: ${DEVICE_PASSWORD}
-  api_key: ${API_GATEWAY_KEY}
+  password: "${DEVICE_PASSWORD}"
+  api_key: "${API_GATEWAY_KEY}"
 ```
 
 **Parameterized cases** — run the same steps against multiple data rows:
@@ -213,12 +202,13 @@ data:
 
 steps:
 - ssh.connect:
-host: ${mac}
-username: ${device_user}
-password: ${device_pass}
+host: "${mac}"
+username: "${device_user}"
+password: "${device_pass}"
 - test.log:
 message: "Testing ${product} at ${mac}"
-- ssh.disconnect: {}
+- ssh.disconnect:
+host: "${mac}"
 ```
 
 ### Running from the CLI
@@ -277,11 +267,11 @@ param: value
 | `browser.hover` | `selector` |
 | `browser.select` | `selector`, `value` |
 | `browser.press_key` | `selector`, `key` |
-| `browser.upload` | `selector`, `file_path` |
+| `browser.upload` | `selector`, `file` |
 | `browser.wait_for` | `selector`, `timeout` |
-| `browser.verify_text` | `selector`, `text` or `contains` |
-| `browser.verify_element` | `selector`, `visible` |
-| `browser.screenshot` | `name` |
+| `browser.verify_text` | `text`, `selector` |
+| `browser.verify_element` | `selector` |
+| `browser.screenshot` | `filename`, `path` |
 | `browser.scroll` | `selector` |
 | `browser.back` | — |
 | `browser.forward` | — |
@@ -292,10 +282,10 @@ param: value
 
 ```
 - browser.open:
-url: ${base_url}/login
+url: "${base_url}/login"
 - browser.fill:
 selector: "input[name=email]"
-value: ${username}
+value: "${username}"
 - browser.click:
 selector: "button[type=submit]"
 # Role-based selector (preferred — more resilient than CSS)
@@ -314,159 +304,153 @@ name: after-login
 # Target elements inside iframes
 - browser.upload:
 selector: "iframe >> #firmware-input"
-file_path: Firmware/update.bin
+file: Firmware/update.bin
 ```
 
 ### API
 
+There is no dedicated REST helper action in this framework. API/JSON-RPC testing is done
+over WebSocket via `websocket.send` / `websocket.receive` (see [WebSocket / OVRC / JSON-RPC](#websocket--ovrc--json-rpc)),
+and generic response assertions are done with `test.assert_response` / `test.assert_schema`.
+
 | Action | Key Parameters |
 |---|---|
-| `api.get` | `url`, `headers`, `store_as` |
-| `api.post` | `url`, `body`, `headers`, `store_as` |
-| `api.put` | `url`, `body`, `headers`, `store_as` |
-| `api.patch` | `url`, `body`, `headers`, `store_as` |
-| `api.delete` | `url`, `headers`, `store_as` |
-| `api.request` | `method`, `url`, `body`, `headers`, `store_as` |
+| `websocket.send` | `url`, `method`, `data`, `headers`, `store_as` |
+| `websocket.receive` | `url`, `wait_for`, `timeout`, `store_as` |
+| `test.assert_response` | `status`, `body`, `contains`, `schema`, `headers` |
+| `test.assert_schema` | `schema`, `data` |
 
 **Examples:**
 
 ```
-# POST with JSON body
-- api.post:
-url: ${base_url}/auth/login
-body: {username: "${username}", password: "${password}"}
-store_as: login_response
-- test.assert:
-value: ${last_status_code}
-equals: 200
-# GET with auth header
-- api.get:
-url: ${base_url}/devices/${device_id}
-headers: {Authorization: "Bearer ${token}"}
+# Send a JSON-RPC request over WebSocket
+- websocket.send:
+url: "${base_url}"
+method: dxGetAbout
+data:
+  deviceId: "${device_id}"
 store_as: device
-# Extract a value from the response
-- test.extract:
-from: ${login_response}
-path: access_token
-store_as: token
-# Expect a specific status (assertion built-in)
-- api.delete:
-url: ${base_url}/sessions/${session_id}
-headers: {Authorization: "Bearer ${token}"}
-expected_status: 204
+# Assert on the response
+- test.assert_response:
+status: 200
+contains: "online"
+# JSON schema validation
+- test.assert_schema:
+schema: {type: object, required: [id, status, name], properties: {id: {type: integer}, status: {type: string}, name: {type: string}}}
+data: "${device}"
 ```
-
-After any API step: `${last_status_code}` holds the HTTP status, `${last_response}` the raw body text, and `${last_response_dict}` the parsed JSON.
 
 ### SSH
 
-Stateful SSH sessions persist across steps within the same test. Use `ssh.*` for interactive sessions (firmware testing, device CLI).
+Persistent SSH connections are pooled by `host:port` across steps within the same test. Use `ssh.*` for interactive sessions (firmware testing, device CLI). Note that `ssh.command` still takes `host` on every call (it looks up the pooled connection for that host rather than an implicit "current session").
 
 | Action | Key Parameters |
 |---|---|
-| `ssh.connect` | `host`, `username`, `password`, `timeout`, `retry`, `retry_delay` |
-| `ssh.command` | `command`, `store_as`, `timeout`, `ignore_error` |
-| `ssh.disconnect` | — |
+| `ssh.connect` | `host`, `username`, `password`, `timeout` |
+| `ssh.command` | `host`, `command`, `store_as`, `timeout` |
+| `ssh.disconnect` | `host` |
 
 **Example:**
 
 ```
 - ssh.connect:
-host: ${device_ip}
-username: ${device_user}
-password: ${device_pass}
+host: "${device_ip}"
+username: "${device_user}"
+password: "${device_pass}"
 timeout: 30
-retry: 3
-retry_delay: 10
 - ssh.command:
+host: "${device_ip}"
 command: cat /etc/firmware_version
 store_as: fw_version
 - test.assert:
-value: ${fw_version}
-contains: "2."
-- ssh.disconnect: {}
+expression: "'2.' in ${fw_version}"
+- ssh.disconnect:
+host: "${device_ip}"
 ```
 
 For one-shot commands without session state, use `command.ssh`:
 
 ```
 - command.ssh:
-host: ${device_ip}
-username: ${device_user}
-password: ${device_pass}
+host: "${device_ip}"
+username: "${device_user}"
+password: "${device_pass}"
 command: "uptime"
 store_as: uptime
 ```
 
 ### Telnet
 
+`telnet.send` is a single stateless action that bundles connect + authenticate + send in one call.
+
 | Action | Key Parameters |
 |---|---|
-| `telnet.connect` | `host`, `port`, `username`, `password` |
-| `telnet.command` | `command`, `store_as`, `timeout` |
-| `telnet.send` | `data`, `store_as` |
-| `telnet.disconnect` | — |
+| `telnet.send` | `host`, `port`, `username`, `password`, `command`, `prompt`, `timeout`, `store_as` |
 
 **Example:**
 
 ```
-- telnet.connect:
-host: ${device_ip}
+- telnet.send:
+host: "${device_ip}"
 port: 23
-username: ${device_user}
-password: ${device_pass}
-- telnet.command:
+username: "${device_user}"
+password: "${device_pass}"
 command: "show version"
 store_as: version_output
 - test.assert:
-value: ${version_output}
-contains: ${expected_version}
-- telnet.disconnect: {}
+expression: "'${expected_version}' in ${version_output}"
 ```
 
 ### Serial
 
+`serial.send` is a single stateless action — port/baud rate are passed on each call.
+
 | Action | Key Parameters |
 |---|---|
-| `serial.connect` | `port`, `baudrate` |
-| `serial.send` | `data`, `store_as` |
-| `serial.disconnect` | — |
+| `serial.send` | `command`, `port`, `baud_rate`, `prompt`, `timeout`, `store_as` |
 
 **Example:**
 
 ```
-- serial.connect:
-port: COM3
-baudrate: 115200
 - serial.send:
-data: "?status\r\n"
+command: "?status\r\n"
+port: COM3
+baud_rate: 115200
 store_as: serial_response
 - test.assert:
-value: ${serial_response}
-contains: OK
+expression: "'OK' in ${serial_response}"
 ```
 
 ### WebSocket / OVRC / JSON-RPC
 
+`websocket.send` connects to a WebSocket endpoint and, when `method` is given, wraps `data` in a
+JSON-RPC 2.0 envelope — this is how OvrC/firmware JSON-RPC calls are made (see
+`docs/jsonrpc-websocket.md` for the full payload format). Many `ovrc.*` spellings are aliases for
+the equivalent `jsonrpc.*` action (e.g. `ovrc.connect` → `jsonrpc.connect`, `ovrc.call` → `jsonrpc.send`).
+
 | Action | Key Parameters |
 |---|---|
-| `websocket.send` | `url`, `data`, `store_as` |
+| `websocket.send` | `url`, `method`, `data`, `headers`, `timeout`, `wait_for`, `store_as` |
+| `websocket.receive` | `url`, `wait_for`, `timeout`, `store_as` |
 | `websocket.connect` | `url` |
-| `websocket.disconnect` | — |
-| `ovrc.connect` | `device_id`, `account_id` |
-| `ovrc.command` | `method`, `params`, `store_as` |
-| `jsonrpc.call` | `method`, `params`, `store_as` |
+| `websocket.disconnect` | `url` |
+| `jsonrpc.connect` (alias: `ovrc.connect`) | `url`, `device_id`, `timeout` |
+| `jsonrpc.send` (alias: `ovrc.call` / `ovrc.send`) | *(any additional parameters accepted)* |
+| `jsonrpc.get_about` (alias: `ovrc.get_about`) | `store_as` |
+| `jsonrpc.disconnect` (alias: `ovrc.disconnect`) | — |
 
 **Example:**
 
 ```
 - websocket.send:
-url: ${ws_url}
-data: {deviceId: "${mac}", version: 0}
+url: "${ws_url}"
+method: dxGetAbout
+data:
+  deviceId: "${mac}"
+  version: 0
 store_as: ws_response
 - test.assert:
-value: ${ws_response}
-not_contains: error
+expression: "'error' not in str(${ws_response})"
 ```
 
 ### AWS S3
@@ -474,8 +458,9 @@ not_contains: error
 | Action | Key Parameters |
 |---|---|
 | `aws.list_files` | `bucket_name`, `folder_prefix`, `file_extension`, `filename_pattern`, `store_as` |
-| `aws.get_latest` | `files`, `store_as` |
-| `aws.download` | `bucket_name`, `key`, `dest_path` |
+| `aws.get_latest` | `store_as` |
+| `aws.upload` | `bucket_name`, `file_path`, `key`, `store_as` |
+| `aws.delete_folder` | `bucket_name`, `folder_prefix` |
 
 **Example:**
 
@@ -486,7 +471,6 @@ folder_prefix: product-x/stable
 file_extension: .bin
 store_as: firmware_files
 - aws.get_latest:
-files: ${firmware_files}
 store_as: latest_firmware
 - test.log:
 message: "Latest firmware: ${latest_firmware.version} at ${latest_firmware.url}"
@@ -494,12 +478,19 @@ message: "Latest firmware: ${latest_firmware.version} at ${latest_firmware.url}"
 
 ### Assertions and extraction
 
+There is no dedicated `test.extract` action. Pull nested values out of a stored response with
+`eval.run` (a single Python expression) instead — see [Eval](#eval).
+
 | Action | Key Parameters |
 |---|---|
-| `test.assert` | `value`, `equals` / `contains` / `not_contains` / `not_empty` / `greater_than` / `in` |
-| `test.assert_schema` | `value`, `schema` (JSON Schema object) |
-| `test.assert_response` | `status`, `contains` |
-| `test.extract` | `from`, `path`, `store_as` |
+| `test.assert` | `expression` (Python-style boolean expression string), `message` |
+| `test.assert_schema` | `schema` (JSON Schema object), `data` |
+| `test.assert_response` | `status`, `body`, `contains`, `schema`, `headers` |
+| `test.assert_element_count` | `selector`, `count`, `timeout` |
+| `test.assert_element_visible` / `test.assert_element_not_visible` | `selector`, `timeout` |
+| `test.assert_element_enabled` / `test.assert_element_disabled` | `selector`, `timeout` |
+| `test.assert_text_contains` / `test.assert_text_equals` | `selector`, `text`, `timeout` |
+| `browser.assert_checked` / `browser.assert_unchecked` | `selector`, `timeout` |
 | `test.check_assertions` | — (flush soft assertions) |
 
 **Examples:**
@@ -507,43 +498,32 @@ message: "Latest firmware: ${latest_firmware.version} at ${latest_firmware.url}"
 ```
 # Equality
 - test.assert:
-value: ${last_status_code}
-equals: 200
+expression: "${last_status_code} == 200"
 # Contains substring
 - test.assert:
-value: ${response_body}
-contains: "access_token"
+expression: "'access_token' in ${response_body}"
 # Does not contain
 - test.assert:
-value: ${device.status}
-not_contains: error
+expression: "'error' not in ${device.status}"
 # Non-empty
 - test.assert:
-value: ${fw_version}
-not_empty: true
+expression: "${fw_version} != ''"
 # Membership in a list
 - test.assert:
-value: ${last_status_code}
-in: [200, 201, 204]
+expression: "${last_status_code} in [200, 201, 204]"
 # Greater than
 - test.assert:
-value: ${process_count}
-greater_than: 0
+expression: "${process_count} > 0"
+message: "Expected at least one running process"
 # JSON schema validation
 - test.assert_schema:
-value: ${device}
 schema: {type: object, required: [id, status, name], properties: {id: {type: integer}, status: {type: string}, name: {type: string}}}
-# Soft assertion — test continues; failures reported at end
-- test.assert:
-value: ${metric}
-greater_than: 0
-soft: true
+data: "${device}"
 # Flush soft assertions (fail the test if any soft assertion failed)
-- test.check_assertions: {}
-# Extract a nested value from a response dict
-- test.extract:
-from: ${login_response}
-path: data.user.id
+- test.check_assertions:
+# Extract a nested value from a stored response with eval.run
+- eval.run:
+expression: "login_response['data']['user']['id']"
 store_as: user_id
 ```
 
@@ -555,7 +535,6 @@ store_as: user_id
 | `test.log` | `message` |
 | `test.print` | `message` |
 | `test.run` | `path` (run a local YAML test as a step) |
-| `test.data` | inline data loop — see [Control Flow](#control-flow) |
 
 **Examples:**
 
@@ -575,8 +554,8 @@ Execute Python expressions in the test context. Use for complex data transformat
 
 | Action | Key Parameters |
 |---|---|
-| `eval.exec` | `code` (multi-line Python) |
-| `eval.run` | `expression` (single expression), `store_as` |
+| `eval.exec` | `code` (multi-line Python), `store_as` |
+| `eval.run` | `expression` (single expression), `store_as`, `code` |
 
 **Examples:**
 
@@ -584,11 +563,11 @@ Execute Python expressions in the test context. Use for complex data transformat
 # Extract nested value with Python
 - eval.exec:
 code: |
-  token = last_response_dict['data']['access_token']
-  expiry = last_response_dict['data']['expires_in']
+  token = auth_response['data']['access_token']
+  expiry = auth_response['data']['expires_in']
 # Evaluate an expression and store the result
 - eval.run:
-expression: "last_response_dict.get('firmware_version', 'unknown')"
+expression: "auth_response.get('firmware_version', 'unknown')"
 store_as: fw_version
 ```
 
@@ -600,98 +579,96 @@ Control flow constructs work in both TestRail `Feature:` cases and local YAML fi
 
 ### For each (loop over a list)
 
+`for_each` takes an `items:` list and a `steps:` block. Each item is available inside the loop as `${item}`.
+
 ```
-- for_each: [1, 10, 30, 60]
-loop_var: wait_seconds
-steps:
-- test.sleep:
-  seconds: ${wait_seconds}
-- test.assert:
-  value: ${device.status}
-  equals: online
+- for_each:
+  items: [1, 10, 30, 60]
+  steps:
+  - test.sleep:
+    seconds: "${item}"
+  - test.assert:
+    expression: "${device.status} == 'online'"
 ```
 
 Loop over a list of dicts:
 
 ```
-- for_each: [{mac: "D4:6A:91:29:0F:5A", product: "WB-800"}, {mac: "A8:3B:76:11:CC:22", product: "WB-250"}]
-loop_var: device
-steps:
-- ssh.connect:
-  host: ${device.mac}
-  username: ${device_user}
-  password: ${device_pass}
-- test.log:
-  message: "Connected to ${device.product}"
-- ssh.disconnect: {}
+- for_each:
+  items: [{mac: "D4:6A:91:29:0F:5A", product: "WB-800"}, {mac: "A8:3B:76:11:CC:22", product: "WB-250"}]
+  steps:
+  - ssh.connect:
+    host: "${item.mac}"
+    username: "${device_user}"
+    password: "${device_pass}"
+  - test.log:
+    message: "Connected to ${item.product}"
+  - ssh.disconnect:
+    host: "${item.mac}"
 ```
 
-### While loop
+### Repeat (poll / retry loop)
+
+There is no `while:` construct. Use `repeat:` with a fixed `count:` to poll — for example, waiting
+for a device to become ready:
 
 ```
-- while: "device_state != 'ready'"
-loop_limit: 30
-steps:
-- api.get:
-  url: ${base_url}/api/status
-  store_as: device_state
-- test.sleep:
-  seconds: 5
+- repeat:
+  count: 30
+  steps:
+  - websocket.send:
+    url: "${base_url}"
+    method: dxGetAbout
+    store_as: device_state
+  - test.sleep:
+    seconds: 5
 ```
 
-### Conditional (if / then / else)
+### Conditional (if / else)
+
+`if:` takes `condition:` + `steps:`, with an optional sibling `else:` list.
 
 ```
-- condition: "current_version != target_version"
-then:
-- browser.upload:
-  selector: "#firmware-input"
-  file_path: Firmware/${firmware_file}
-- browser.click:
-  role: button
-  name: Upgrade
-else:
-- test.log:
-  message: "Firmware already at target version — skipping"
+- if:
+  condition: "${current_version} != ${target_version}"
+  steps:
+  - browser.upload:
+    selector: "#firmware-input"
+    file: "Firmware/${firmware_file}"
+  - browser.click:
+    role: button
+    name: Upgrade
+  else:
+  - test.log:
+    message: "Firmware already at target version — skipping"
 ```
 
 ### Try / Except / Finally
 
+There is no `try:`/`except:`/`finally:` construct in this framework. Write the steps directly —
+if a step is expected to sometimes fail without aborting the test, that must be handled by the
+step itself (e.g. via soft assertions), not by a try/except wrapper:
+
 ```
-- try:
-- api.post:
-  url: ${base_url}/api/reboot
-except:
-- test.log:
-  message: "Reboot request failed — device may already be rebooting"
-finally:
+- ssh.command:
+  host: "${device_ip}"
+  command: "reboot"
 - test.sleep:
   seconds: 30
 ```
 
-### Inline data loop (test.data)
+### Parallel
 
-Run the same step block against multiple data rows within a single Feature: case:
+`parallel:` runs its `steps:` concurrently:
 
 ```
-- test.data:
-rows:
-- mac: D4:6A:91:29:0F:5A
-  product: WB-800
-- mac: A8:3B:76:11:CC:22
-  product: WB-250
-steps:
-- ssh.connect:
-  host: ${mac}
-  username: admin
-  password: ${DEVICE_PASSWORD}
-- ssh.command:
-  command: cat /etc/firmware_version
-  store_as: fw
-- test.assert:
-  value: ${fw}
-  not_empty: true
-- ssh.disconnect: {}
+- parallel:
+  steps:
+  - telnet.send:
+    host: "${device_ip}"
+    command: ping
+  - test.sleep:
+    seconds: 2
 ```
 
 ---
@@ -704,16 +681,17 @@ Create a case titled `Shared: <step_name>` and write the reusable steps in its P
 
 ```
 steps:
-- api.post:
-url: ${base_url}/auth/login
-body: {username: "${API_USERNAME}", password: "${API_PASSWORD}"}
+- websocket.send:
+url: "${base_url}"
+method: dxLogin
+data:
+  username: "${API_USERNAME}"
+  password: "${API_PASSWORD}"
 store_as: auth_response
 - test.assert:
-value: ${last_status_code}
-equals: 200
-- test.extract:
-from: ${auth_response}
-path: access_token
+expression: "'error' not in str(${auth_response})"
+- eval.run:
+expression: "auth_response['result']['access_token']"
 store_as: token
 ```
 
@@ -722,13 +700,13 @@ store_as: token
 ```
 steps:
 - shared_step: authenticate
-- api.get:
-url: ${base_url}/devices
+- websocket.send:
+url: "${base_url}"
+method: dxListDevices
 headers: {Authorization: "Bearer ${token}"}
 store_as: devices
 - test.assert:
-value: ${last_status_code}
-equals: 200
+expression: "'error' not in str(${devices})"
 ```
 
 The runner automatically syncs all `Shared:` cases in the run before executing `Feature:` cases.
@@ -798,18 +776,18 @@ tags: [smoke, browser]
 
 variables:
 base_url: https://staging.example.com
-username: ${STAGING_USER}
-password: ${STAGING_PASS}
+username: "${STAGING_USER}"
+password: "${STAGING_PASS}"
 
 steps:
 - browser.open:
-url: ${base_url}/login
+url: "${base_url}/login"
 - browser.fill:
 selector: "#username"
-value: ${username}
+value: "${username}"
 - browser.fill:
 selector: "#password"
-value: ${password}
+value: "${password}"
 - browser.click:
 role: button
 name: Sign In
@@ -820,14 +798,14 @@ selector: "h1"
 text: Dashboard
 ```
 
-Optional `setup` and `cleanup` sections run before/after `steps` regardless of pass/fail:
+Optional `setup` and `teardown` sections run before/after `steps` regardless of pass/fail:
 
 ```
 setup:
 - browser.open:
-url: ${base_url}
+url: "${base_url}"
 
-cleanup:
+teardown:
 - browser.screenshot:
 name: final-state
 ```
@@ -860,13 +838,15 @@ Global shared steps — `shared_steps.yaml` at the project root:
 authenticate:
 description: Log in and store auth token
 steps:
-- api.post:
-  url: ${base_url}/auth/login
-  body: {username: "${username}", password: "${password}"}
+- websocket.send:
+  url: "${base_url}"
+  method: dxLogin
+  data:
+    username: "${username}"
+    password: "${password}"
   store_as: auth_response
-- test.extract:
-  from: ${auth_response}
-  path: access_token
+- eval.run:
+  expression: "auth_response['result']['access_token']"
   store_as: token
 ```
 
@@ -917,11 +897,67 @@ What it does:
 
 - **Case types** — build any of the five case types; the correct title prefix is applied automatically.
 - **Step palette** — every action the runner supports (Browser, API, SSH, Telnet, Serial, WebSocket, OvrC, AWS, Eval, Test utilities…), searchable, with per-parameter forms, required-field markers, and help text.
-- **Control flow** — for-each / while / if-else / try-except blocks with nested steps.
+- **Control flow** — for_each / if-else / repeat / parallel blocks with nested steps.
 - **Shared steps** — call `Shared:` cases from the selected suite by picking them from a dropdown.
 - **Live preview + validation** — the Preconditions body is generated server-side and round-trip parsed with the runner's own parser before publishing, so what lands in TestRail is guaranteed to execute. Typos get "did you mean" suggestions.
 - **Publish & run** — create or update cases in a chosen section, then assemble selected cases into a run (run prefix added automatically) ready for `python -m easybdd testrail-run --run-id <id>`.
 - **Edit existing cases** — click any case in the suite browser to load it back into the editor. Legacy-format bodies load as a raw step with a warning instead of being silently dropped.
+
+---
+
+## AI Assistant Integration (MCP)
+
+Easy BDD exposes the framework to AI assistants (Claude, Cursor, GitHub Copilot Chat) via the **Model Context Protocol (MCP)**.
+
+### Claude Desktop & Cursor (recommended)
+
+Install the packaged `.mcpb` extension (no manual JSON editing required):
+
+```bash
+make build-mcpb   # creates easy-bdd-<version>.mcpb
+```
+
+Then open the `.mcpb` file with Claude Desktop or Cursor. You'll be prompted for optional credentials (TestRail URL/API key, Ollama base URL), which the server injects as environment variables.
+
+Requirements: `uv` must be installed on your machine (the extension uses `uv run` to launch the server).
+
+### Manual setup (Claude Code CLI, VS Code, other clients)
+
+Add to your MCP config (`.claude/settings.json` or equivalent):
+
+```json
+{
+  "mcpServers": {
+    "easy-bdd": {
+      "command": "/path/to/easybdd/.venv/bin/python",
+      "args": ["-m", "easybdd", "mcp-serve"],
+      "cwd": "/path/to/easybdd"
+    }
+  }
+}
+```
+
+### Available Tools & Prompts
+
+**Tools** — call these directly in your AI chat:
+- `list_tests`, `get_test`, `validate_test` — browse and validate YAML
+- `run_tests` — execute tests (dry-run by default)
+- `preview_fix`, `apply_fix` — auto-correct syntax errors
+- `get_failure_trace` — debug the last failure
+- `probe_selector`, `fix_test_selectors` — heal broken CSS/ARIA selectors on live pages
+- `get_testrail_run_failures`, `validate_testrail_case` — TestRail integration
+- `import_playwright_recording`, `ollama_generate_tests`, `ollama_analyze_test` — AI-powered test authoring
+- `crawl_device` — auto-generate tests from a live UI
+
+**Prompts** — use these via the MCP client's prompt picker (Claude Desktop `+` menu):
+- `generate_tests` — write YAML test cases for a module
+- `debug_failure` — diagnose why a test failed
+- `validate_and_fix` — interactively fix syntax errors
+- `debug_testrail_run` — triage every failure in a TestRail run
+- `validate_testrail_suite` — audit all cases in a suite for errors
+- `create_test_from_description` — generate tests from plain English + optionally push to TestRail
+
+See [MCP Setup Guide](docs/mcp-setup.md) for detailed setup, remote access (Streamable HTTP), and integration with all major IDEs.
 
 ---
 
@@ -941,7 +977,7 @@ python frontend/robot_migrator.py input.robot --output tests/cases/converted.yam
 | `Input Text locator value` | `browser.fill selector: locator value: value` |
 | `Click Element locator` | `browser.click selector: locator` |
 | `Sleep 5s` | `test.sleep seconds: 5` |
-| `GET ${url}` | `api.get url: ${url}` |
+| `GET ${url}` | `websocket.send url: ${url} method: GET` |
 | User-defined keywords | `shared_step: keyword_slug` |
 
 ### From Previous BDD Framework (mybdd / pytest-bdd)
@@ -957,13 +993,13 @@ python frontend/bdd_migrator.py --run-id <testrail_run_id>
 | `browser \| {"command": "open", "param": "url"} \|` | `browser.open url: url` |
 | `browser \| {"command": "click_by_role", ...} \|` | `browser.click role: button name: Apply` |
 | `sleep \| 15 \|` | `test.sleep seconds: 15` |
-| `telnet \| {"host": "h", "command": "cmd"} \|` | `telnet.command command: cmd` |
-| `ssh \| {"host": "h", "command": "cmd"} \|` | `ssh.command command: cmd` |
-| `webservice \| $url \| GET \| /path \| {} \|` | `api.get url: ${url}/path` |
+| `telnet \| {"host": "h", "command": "cmd"} \|` | `telnet.send host: h command: cmd` |
+| `ssh \| {"host": "h", "command": "cmd"} \|` | `ssh.command host: h command: cmd` |
+| `webservice \| $url \| GET \| /path \| {} \|` | `websocket.send url: ${url}/path method: GET` |
 | `webservice \| $url \| SEND \| method \| {...} \|` | `websocket.send data: {...}` |
-| `function \| {"name": "assert", ...} \|` | `test.assert value: ...` |
-| `\| value \| in response` | `test.assert value: ${last_response} contains: value` |
-| `response_code \| 200 \|` | `test.assert value: ${last_status_code} equals: 200` |
+| `function \| {"name": "assert", ...} \|` | `test.assert expression: ...` |
+| `\| value \| in response` | `test.assert expression: "value in ${last_response}"` |
+| `response_code \| 200 \|` | `test.assert expression: "${last_status_code} == 200"` |
 | `$variable` | `${variable}` |
 
 ---
@@ -1063,15 +1099,19 @@ python -m easybdd run tests/cases/my_test.yaml --headed
 
 **SSH connection refused after reboot**
 
-Use `retry` and `retry_delay` on `ssh.connect` to wait for the device to come back:
+`ssh.connect` has no built-in retry parameters. Wrap it in a `repeat:` block with a `test.sleep`
+between attempts to wait for the device to come back:
 
 ```
+- repeat:
+count: 5
+steps:
 - ssh.connect:
-host: ${device_ip}
-username: ${device_user}
-password: ${device_pass}
-retry: 5
-retry_delay: 15
+  host: "${device_ip}"
+  username: "${device_user}"
+  password: "${device_pass}"
+- test.sleep:
+  seconds: 15
 ```
 
 **TestRail `running_status_id` error**

@@ -322,7 +322,7 @@ Clicks on a web element.
 ```
 
 **Parameters:**
-- `selector` (required): CSS/XPath selector for the element
+- `selector` (optional): CSS/XPath selector for the element
 - `description` (optional): Step description
 
 **Selector Examples:**
@@ -345,8 +345,8 @@ Fills an input field with text.
 ```
 
 **Parameters:**
-- `field` (required): Selector for the input field
-- `value` (required): Text to enter
+- `field` (optional): Selector for the input field
+- `value` (optional): Text to enter
 - `description` (optional): Step description
 
 **Advanced Examples:**
@@ -389,14 +389,14 @@ Waits for an element to reach a specific state.
 - action: Wait for element
   selector: ".loading-spinner"
   state: "hidden"
-  timeout: 10000
+  timeout: 10
   description: Wait for loading to complete
 ```
 
 **Parameters:**
-- `selector` (required): Element selector
+- `selector` (optional): Element selector
 - `state` (optional): "visible" | "hidden" | "enabled" | "disabled" (default: "visible")
-- `timeout` (optional): Timeout in milliseconds (default: 5000)
+- `timeout` (optional): Timeout in seconds (default: 30)
 - `description` (optional): Step description
 
 **State Options:**
@@ -557,7 +557,7 @@ Selects an option from a dropdown.
 
 **Parameters:**
 - `selector` (required): Dropdown selector
-- `value` (required): Option text or value to select
+- `value` (optional): Option text or value to select
 - `description` (optional): Step description
 
 ### Upload File
@@ -623,8 +623,8 @@ Performs a swipe gesture.
 Uploads a file to AWS S3.
 
 ```yaml
-- action: AWS S3 upload
-  bucket: "test-bucket"
+- action: aws.upload
+  bucket_name: "test-bucket"
   key: "test-files/document.pdf"
   file_path: "./data/document.pdf"
   description: Upload test file to S3

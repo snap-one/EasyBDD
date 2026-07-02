@@ -116,7 +116,7 @@ setup:
   
   # System stabilization
   - action: Wait
-    time: 3
+    seconds: 3
     description: "Allow system to stabilize"
   
   # Initial state capture
@@ -148,7 +148,7 @@ cleanup:
   
   # Cooldown period
   - action: Wait
-    time: 1
+    seconds: 1
     description: "Brief pause before next test"
 ```
 
@@ -188,29 +188,32 @@ data:
 
 ### Dynamic Variable Generation
 
+There are no built-in `${timestamp}`/`${uuid}`/`${random}` variables — generate
+dynamic values at runtime with `eval.exec`. Any variable assigned in the code
+block is persisted and available to later steps via `${var_name}`:
+
 ```yaml
-variables:
-  timestamp: "${timestamp}"
-  uuid: "${uuid}"
-  random_email: "user-${random}@test.com"
-  
 steps:
+  - eval.exec:
+      code: "import time, uuid; ts = int(time.time()); run_uuid = str(uuid.uuid4())"
+
   - action: Take screenshot
-    name: "test-${timestamp}-${uuid}"
+    name: "test-${ts}-${run_uuid}"
 ```
 
 ### Environment-Specific Variables
 
 ```yaml
 variables:
-  # Use environment variables with defaults
-  base_url: "${BASE_URL:https://staging.example.com}"
-  api_key: "${API_KEY:default-test-key}"
-  timeout: "${TIMEOUT:5000}"
-  
+  # Read from OS environment variables (no built-in default-value syntax —
+  # the placeholder is left unresolved if the variable isn't set)
+  base_url: "${env.BASE_URL}"
+  api_key: "${env.API_KEY}"
+  timeout: "${env.TIMEOUT}"
+
   # Conditional variables
-  debug_mode: "${DEBUG:false}"
-  log_level: "${LOG_LEVEL:INFO}"
+  debug_mode: "${env.DEBUG}"
+  log_level: "${env.LOG_LEVEL}"
 ```
 
 ## 📊 Advanced Data Patterns

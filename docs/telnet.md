@@ -135,7 +135,7 @@ Reads buffered output from an open connection, optionally waiting until a prompt
 | `host` | Yes | — | Target host |
 | `port` | No | `23` | TCP port |
 | `prompt` | No | `""` | Wait until this string appears; if empty, returns available data |
-| `timeout` | No | `15.0` | Seconds to wait |
+| `timeout` | No | `45.0` | Seconds to wait |
 | `encoding` | No | `"utf-8"` | Character encoding |
 | `store_as` | No | — | Variable to store the received output |
 

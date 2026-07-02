@@ -736,7 +736,7 @@ def resource_docs_syntax() -> str:
         ```
 
         ## Variable references
-        Use `{{variable_name}}` anywhere in a string value.  Variables are
+        Use `${variable_name}` anywhere in a string value.  Variables are
         defined in the top-level `variables:` block or injected by actions
         that use `store_as`.
 

@@ -64,8 +64,8 @@ files match. The caller is responsible for asserting list length if needed.
 **Canonical usage:**
 ```yaml
 - action: aws.list_files
-  bucket: my-bucket
-  prefix: exports/
+  bucket_name: my-bucket
+  folder_prefix: exports/
   store_as: found_files
 
 - action: test.assert

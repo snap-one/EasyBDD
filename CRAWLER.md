@@ -115,9 +115,9 @@ python -m easybdd crawler convert-crx recordings/*.ts --output tests/cases/
 | `page.locator(sel)` | `browser.click/fill: {selector}` |
 | `page.frameLocator(fr).getBy*(...)` | `browser.click: {selector: 'frame >> inner'}` |
 | `page.keyboard.press(key)` | `browser.press_key: {key}` |
-| `page.getByRole(...).selectOption(v)` | `browser.select_option: {role, name, value}` |
-| `expect(loc).toBeVisible()` | `browser.wait_for_element: {state: visible}` |
-| `expect(loc).toHaveText(t)` | `browser.assert_text: {selector, text}` |
+| `page.getByRole(...).selectOption(v)` | `browser.select: {role, name, value}` |
+| `expect(loc).toBeVisible()` | `browser.wait_for: {state: visible}` |
+| `expect(loc).toHaveText(t)` | `browser.verify_text: {selector, text}` |
 | `page.screenshot()` | `browser.screenshot` |
 
 ---
@@ -232,7 +232,7 @@ steps:
   - browser.screenshot:
       name: after-login
 
-  - browser.assert_text:
+  - browser.verify_text:
       selector: h1
       text: Dashboard
 ```

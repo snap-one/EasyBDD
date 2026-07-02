@@ -178,20 +178,7 @@ The runner caches the token, injects it into every `api.request` as `Authorizati
 
 ## Usage in Tests
 
-```yaml
-name: "API Authentication Test"
-description: "Test API calls with different auth types"
-steps:
-  - action: "api_request"
-    method: "GET"
-    url: "https://api.example.com/users"
-    device_id: "device_1001"  # Uses device_1001 auth config
-    
-  - action: "api_request"
-    method: "POST"
-    url: "https://api.example.com/users"
-    device_id: "device_1002"  # Uses device_1002 auth config
-    json_data:
-      name: "John Doe"
-      email: "john@example.com"
-```
+Set `login_path`, `login_json`, and `token_path` in a `Var:` case (or the equivalent
+`variables:` block for local YAML) as shown above — the runner acquires and injects the
+token automatically, so individual test steps don't need to reference `device_id` or an
+`api_request`-style action.
