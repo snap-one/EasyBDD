@@ -273,9 +273,9 @@ def _parse_js_line(line: str) -> Optional[Dict[str, Any]]:
         selector = _resolve_locator(locator_expr)
 
         if assertion == "toBeVisible":
-            return {"action": "browser.assert_visible", "params": {"selector": selector}}
+            return {"action": "test.assert_element_visible", "params": {"selector": selector}}
         if assertion == "toBeHidden":
-            return {"action": "browser.assert_not_visible", "params": {"selector": selector}}
+            return {"action": "test.assert_element_not_visible", "params": {"selector": selector}}
         if assertion == "toContainText":
             text = _extract_string_arg(args_str)
             return {"action": "test.assert_text_contains", "params": {"selector": selector, "text": text}}
@@ -284,19 +284,19 @@ def _parse_js_line(line: str) -> Optional[Dict[str, Any]]:
             return {"action": "test.assert_text_equals", "params": {"selector": selector, "text": text}}
         if assertion == "toHaveValue":
             val = _extract_string_arg(args_str)
-            return {"action": "browser.assert_value", "params": {"selector": selector, "value": val}}
+            return {"action": "test.assert_value", "params": {"selector": selector, "value": val}}
         if assertion == "toHaveURL":
             url = _extract_string_arg(args_str)
-            return {"action": "browser.assert_url", "params": {"url": url}}
+            return {"action": "test.assert_url", "params": {"url": url}}
         if assertion == "toHaveTitle":
             title = _extract_string_arg(args_str)
-            return {"action": "browser.assert_text", "params": {"selector": "title", "text": title}}
+            return {"action": "test.assert_text_contains", "params": {"selector": "title", "text": title}}
         if assertion == "toBeChecked":
             return {"action": "browser.assert_checked", "params": {"selector": selector}}
         if assertion == "toBeEnabled":
-            return {"action": "browser.assert_enabled", "params": {"selector": selector}}
+            return {"action": "test.assert_element_enabled", "params": {"selector": selector}}
         if assertion == "toBeDisabled":
-            return {"action": "browser.assert_disabled", "params": {"selector": selector}}
+            return {"action": "test.assert_element_disabled", "params": {"selector": selector}}
         return None
 
     # General action: find the last .action( in the line (paren-aware)
@@ -315,7 +315,7 @@ def _parse_js_line(line: str) -> Optional[Dict[str, Any]]:
         return {"action": "browser.click", "params": {"selector": selector}}
 
     if action == "dblclick":
-        return {"action": "browser.dblclick", "params": {"selector": selector}}
+        return {"action": "browser.double_click", "params": {"selector": selector}}
 
     if action == "check":
         return {"action": "browser.check", "params": {"selector": selector}}
@@ -488,7 +488,7 @@ def _trace_event_to_step(event: Dict) -> Optional[Dict]:
         if method == "click":
             return {"action": "browser.click", "params": {"selector": selector}}
         if method == "dblclick":
-            return {"action": "browser.dblclick", "params": {"selector": selector}}
+            return {"action": "browser.double_click", "params": {"selector": selector}}
         if method in ("check", "setChecked"):
             return {"action": "browser.check", "params": {"selector": selector}}
         if method == "uncheck":
@@ -608,13 +608,13 @@ def _auto_description(step: Dict) -> str:
         return f"Select '{val}' from '{sel}'"
     if action == "browser.press_key":
         return f"Press {p.get('key', '')} on '{sel}'"
-    if action == "browser.assert_visible":
+    if action == "test.assert_element_visible":
         return f"Verify '{sel}' is visible"
     if action == "test.assert_text_contains":
         return f"Verify '{sel}' contains '{p.get('text', '')}'"
     if action == "test.assert_text_equals":
         return f"Verify '{sel}' equals '{p.get('text', '')}'"
-    if action == "browser.assert_url":
+    if action == "test.assert_url":
         return f"Verify URL is '{url}'"
     if action == "browser.wait_for":
         return f"Wait for '{sel}'"

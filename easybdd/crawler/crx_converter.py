@@ -245,7 +245,7 @@ class PlaywrightTsConverter:
         m = re.match(r"page\.waitForURL\(\s*" + self._STR, stmt)
         if m:
             url = (m.group(1) or m.group(2) or "").strip()
-            return {"browser.wait_for": {"selector": "body", "state": "visible"}}
+            return {"browser.wait_for_url": {"url": url}}
         return None
 
     # ── waitForSelector ───────────────────────────────────────────────────────
@@ -294,8 +294,12 @@ class PlaywrightTsConverter:
             m = re.match(r"toHaveTitle\(\s*" + self._STR, rest)
             if m:
                 title = (m.group(1) or m.group(2) or "").strip()
-                return {"browser.assert_text": {"selector": "title", "text": title}}
-            return None  # skip toHaveURL — implicit after navigation
+                return {"test.assert_text_contains": {"selector": "title", "text": title}}
+            m = re.match(r"toHaveURL\(\s*" + self._STR, rest)
+            if m:
+                url = (m.group(1) or m.group(2) or "").strip()
+                return {"test.assert_url": {"url": url}}
+            return None
 
         sel_fields = self._locator_expr_to_fields(locator_expr)
         if not sel_fields:
@@ -311,7 +315,7 @@ class PlaywrightTsConverter:
 
         # .toBeChecked()
         if rest.startswith("toBeChecked("):
-            return {"browser.assert_checked": sel_fields}
+            return {"browser.assert_checked": {"selector": self._fields_to_selector(sel_fields)}}
 
         # .toBeEnabled()
         if rest.startswith("toBeEnabled("):
@@ -328,7 +332,10 @@ class PlaywrightTsConverter:
                 m = re.match(self._STR, tail)
                 if m:
                     text_val = (m.group(1) or m.group(2) or "").strip()
-                    return {"browser.assert_text": {**sel_fields, "text": text_val}}
+                    return {"test.assert_text_contains": {
+                        "selector": self._fields_to_selector(sel_fields),
+                        "text": text_val,
+                    }}
 
         # .toHaveValue(value)
         if rest.startswith("toHaveValue("):
@@ -336,7 +343,10 @@ class PlaywrightTsConverter:
             m = re.match(self._STR, tail)
             if m:
                 val = (m.group(1) or m.group(2) or "").strip()
-                return {"browser.assert_text": {**sel_fields, "text": val}}
+                return {"test.assert_value": {
+                    "selector": self._fields_to_selector(sel_fields),
+                    "value": val,
+                }}
 
         return None
 
@@ -509,7 +519,8 @@ class PlaywrightTsConverter:
         if re.match(r"click\(", action_expr):
             return {"browser.click": fields}
         if re.match(r"dblclick\(", action_expr):
-            return {"browser.dblclick": fields}
+            # browser.double_click only understands selector (not role/name/label)
+            return {"browser.double_click": {"selector": self._fields_to_selector(fields)}}
 
         # .fill('value')
         m = re.match(r"fill\(\s*" + self._STR, action_expr)
@@ -523,9 +534,9 @@ class PlaywrightTsConverter:
             val = (m.group(1) or m.group(2) or "").strip()
             return {"browser.fill": {**fields, "value": val}}
 
-        # .clear()
+        # .clear()  — Easy BDD has no clear action; fill with empty value
         if re.match(r"clear\(", action_expr):
-            return {"browser.clear": fields}
+            return {"browser.fill": {**fields, "value": ""}}
 
         # .check()  .uncheck()
         if re.match(r"check\(", action_expr):
@@ -533,11 +544,14 @@ class PlaywrightTsConverter:
         if re.match(r"uncheck\(", action_expr):
             return {"browser.click": fields}
 
-        # .selectOption('value')
+        # .selectOption('value')  — browser.select requires a selector string
         m = re.match(r"selectOption\(\s*" + self._STR, action_expr)
         if m:
             val = (m.group(1) or m.group(2) or "").strip()
-            return {"browser.select_option": {**fields, "value": val}}
+            return {"browser.select": {
+                "selector": self._fields_to_selector(fields),
+                "value": val,
+            }}
 
         # .press('key')
         m = re.match(r"press\(\s*" + self._STR, action_expr)

@@ -1834,6 +1834,133 @@ class BrowserService:
         else:
             raise RuntimeError("No browser session active")
 
+    def assert_value(self, selector: str, value: str, timeout: int = 10000) -> None:
+        """Assert that an input/select/textarea has the expected value"""
+        if self.playwright_page:
+            try:
+                from playwright.sync_api import expect
+                if selector.startswith("label:"):
+                    locator = self.playwright_page.get_by_label(selector[len("label:"):].strip())
+                else:
+                    locator = self.playwright_page.locator(selector)
+                expect(locator).to_have_value(value, timeout=timeout)
+                print(f"      ✓ Asserted element '{selector}' has value '{value}'")
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' does not have value '{value}': {e}")
+        elif self.selenium_driver:
+            try:
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.common.by import By
+                element = WebDriverWait(self.selenium_driver, timeout // 1000).until(
+                    lambda d: d.find_element(By.CSS_SELECTOR, selector)
+                )
+                actual = element.get_attribute("value")
+                if actual != value:
+                    raise AssertionError(
+                        f"Element '{selector}' value mismatch. Expected: '{value}', Actual: '{actual}'"
+                    )
+                print(f"      ✓ Asserted element '{selector}' has value '{value}'")
+            except AssertionError:
+                raise
+            except Exception as e:
+                raise AssertionError(f"Element '{selector}' does not have value '{value}': {e}")
+        else:
+            raise RuntimeError("No browser session active")
+
+    def assert_url(self, url: str, timeout: int = 10000, exact: bool = False) -> None:
+        """Assert the current page URL.
+
+        exact=False (default) treats *url* as a substring / glob pattern;
+        exact=True requires the full URL to match exactly.
+        """
+        if self.playwright_page:
+            try:
+                import fnmatch as _fnmatch
+                import re as _re
+                from playwright.sync_api import expect
+                if exact:
+                    expected = url
+                elif "*" in url:
+                    # Glob pattern (e.g. **/dashboard) → regex
+                    expected = _re.compile(_fnmatch.translate(url))
+                else:
+                    # Substring semantics — partial URLs / path fragments work
+                    expected = _re.compile(_re.escape(url))
+                expect(self.playwright_page).to_have_url(expected, timeout=timeout)
+                print(f"      ✓ Asserted URL matches '{url}'")
+            except Exception as e:
+                raise AssertionError(f"Current URL does not match '{url}': {e}")
+        elif self.selenium_driver:
+            try:
+                from selenium.webdriver.support.ui import WebDriverWait
+                plain = url.replace("*", "")
+                if exact:
+                    WebDriverWait(self.selenium_driver, timeout // 1000).until(
+                        lambda d: d.current_url == url
+                    )
+                else:
+                    WebDriverWait(self.selenium_driver, timeout // 1000).until(
+                        lambda d: plain in d.current_url
+                    )
+                print(f"      ✓ Asserted URL matches '{url}'")
+            except Exception as e:
+                current = getattr(self.selenium_driver, "current_url", "?")
+                raise AssertionError(f"Current URL '{current}' does not match '{url}': {e}")
+        else:
+            raise RuntimeError("No browser session active")
+
+    def wait_for_url(self, url: str = None, timeout: int = None) -> None:
+        """Wait for the page URL to match *url* (glob/substring).
+
+        With no url, waits for the current navigation to complete
+        (page load state) — the closest equivalent of waitForNavigation.
+        """
+        timeout = timeout or 30000
+        if self.playwright_page:
+            if not url:
+                self.playwright_page.wait_for_load_state("load", timeout=timeout)
+                print("      ✓ Page navigation complete")
+                return
+            pattern = url if ("*" in url or url.startswith("http")) else f"**{url}**"
+            self.playwright_page.wait_for_url(pattern, timeout=timeout)
+            print(f"      ✓ URL matches '{url}'")
+        elif self.selenium_driver:
+            from selenium.webdriver.support.ui import WebDriverWait
+            if not url:
+                WebDriverWait(self.selenium_driver, timeout // 1000).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+                print("      ✓ Page navigation complete")
+                return
+            plain = url.replace("*", "")
+            WebDriverWait(self.selenium_driver, timeout // 1000).until(
+                lambda d: plain in d.current_url
+            )
+            print(f"      ✓ URL matches '{url}'")
+        else:
+            raise RuntimeError("No browser session active")
+
+    def scroll(self, selector: str = None, x: int = None, y: int = None) -> None:
+        """Scroll an element into view (selector) or the window to (x, y)"""
+        if self.playwright_page:
+            if selector:
+                self.playwright_page.locator(selector).first.scroll_into_view_if_needed()
+                print(f"      ✓ Scrolled '{selector}' into view")
+            else:
+                self.playwright_page.evaluate(f"window.scrollTo({int(x or 0)}, {int(y or 0)})")
+                print(f"      ✓ Scrolled window to ({int(x or 0)}, {int(y or 0)})")
+        elif self.selenium_driver:
+            if selector:
+                from selenium.webdriver.common.by import By
+                element = self.selenium_driver.find_element(By.CSS_SELECTOR, selector)
+                self.selenium_driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+                print(f"      ✓ Scrolled '{selector}' into view")
+            else:
+                self.selenium_driver.execute_script(f"window.scrollTo({int(x or 0)}, {int(y or 0)});")
+                print(f"      ✓ Scrolled window to ({int(x or 0)}, {int(y or 0)})")
+        else:
+            raise RuntimeError("No browser session active")
+
     def refresh_browser(self) -> None:
         """Refresh the current page"""
         if self.playwright_page:

@@ -88,6 +88,36 @@ class RecorderConverter:
         action = step.get("action", "")
         params = {k: v for k, v in step.items() if k not in ("action", "description")}
 
+        # Actions with no 1:1 registered equivalent — translate params too
+        if action == "Clear field":
+            # No browser.clear action — fill with an empty value
+            return {"browser.fill": {**params, "value": ""}}
+        if action == "Select option":
+            # browser.select requires a selector string (label here is the
+            # element's accessible name, not an <option> label)
+            sel = params.get("selector")
+            if not sel and params.get("role"):
+                name = params.get("name")
+                sel = f'role={params["role"]}[name="{name}"]' if name else f'role={params["role"]}'
+            elif not sel and params.get("text"):
+                sel = f'text={params["text"]}'
+            elif not sel and params.get("label"):
+                sel = f'[aria-label="{params["label"]}"]'
+            return {"browser.select": {"selector": sel or "select", "value": params.get("value", "")}}
+        if action == "Drag and drop":
+            return {"browser.drag_and_drop": {
+                "source_selector": params.get("source", ""),
+                "target_selector": params.get("target", ""),
+            }}
+        if action == "Switch frame":
+            # No frame-switching action — selectors address frames directly
+            # via the 'iframe_sel >> inner_sel' syntax
+            sel = params.get("selector", "")
+            return {"test.log": {
+                "message": f"TODO: recording switched to frame '{sel}' — "
+                           f"prefix the following selectors with '{sel} >> '",
+            }}
+
         ACTION_MAP = {
             "Open browser":    "browser.open",
             "Click element":   "browser.click",
@@ -98,11 +128,7 @@ class RecorderConverter:
             "Wait for element":"browser.wait_for_element",
             "Take screenshot": "browser.screenshot",
             "Verify text":     "browser.verify_text",
-            "Select option":   "browser.select_option",
             "Scroll":          "browser.scroll",
-            "Switch frame":    "browser.switch_frame",
-            "Clear field":     "browser.clear",
-            "Drag and drop":   "browser.drag_and_drop",
         }
 
         browser_action = ACTION_MAP.get(action)

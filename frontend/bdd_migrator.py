@@ -11,7 +11,7 @@ Input can be:
 
 Key syntax being migrated
 ─────────────────────────
-  browser | {"command": "open", "param": "url"} |   → browser.navigate
+  browser | {"command": "open", "param": "url"} |   → browser.open
   sleep | 15 |                                       → browser.wait
   telnet | {"host":"h","command":"cmd"} |            → telnet.send
   ssh | {"host":"h","command":"cmd"} |               → command.ssh
@@ -359,7 +359,7 @@ def _map_browser(cmd_dict: Dict) -> Dict:
     if cmd in ("open",):
         step = {"action": "browser.open", "url": param or target}
     elif cmd in ("goto", "navigate"):
-        step = {"action": "browser.navigate", "url": param or target}
+        step = {"action": "browser.open", "url": param or target}
     elif cmd in ("close",):
         step = {"action": "browser.close"}
     elif cmd in ("refresh",):
@@ -420,7 +420,7 @@ def _map_browser(cmd_dict: Dict) -> Dict:
             s["selector"] = param or target
         step = s
     elif cmd in ("validate_checkbox_disabled", "assert_not_checked", "assert_unchecked"):
-        s = {"action": "browser.assert_not_checked"}
+        s = {"action": "browser.assert_unchecked"}
         if param or target:
             s["selector"] = param or target
         step = s
@@ -448,15 +448,17 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         store = cmd_dict.get("store_as", "page_title")
         step = {"action": "browser.get_title", "store_as": store}
     elif cmd in ("assert_value", "assertvalue"):
-        s = {"action": "browser.assert_value", "value": value or text}
+        s = {"action": "test.assert_value", "value": value or text}
         if param or target:
             s["selector"] = param or target
         step = s
     elif cmd in ("waitfornavigation", "wait_for_navigation", "wait_for_load"):
-        step = {"action": "browser.wait_for_navigation"}
+        # browser.wait_for_url with no url waits for the page load state
+        step = {"action": "browser.wait_for_url"}
     elif cmd in ("dragdrop", "drag_drop", "drag_and_drop"):
-        step = {"action": "browser.drag_drop", "source": target or param,
-                "destination": cmd_dict.get("destination", "")}
+        step = {"action": "browser.drag_and_drop",
+                "source_selector": target or param,
+                "target_selector": _sub_vars(str(cmd_dict.get("destination", "")))}
     elif cmd in ("setlocalStorage", "set_localstorage", "localstorage"):
         step = {"action": "eval.exec",
                 "code": f"localStorage.setItem({cmd_dict.get('key','key')!r}, {cmd_dict.get('value',value)!r})"}

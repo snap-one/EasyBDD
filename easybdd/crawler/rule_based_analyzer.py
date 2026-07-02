@@ -368,7 +368,7 @@ def _build_login_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTestCa
         happy_steps.append(_step("browser.click", submit_el, {}, "Click login button"))
     happy_steps.append(_screenshot_step("after-login"))
     happy_steps.append(
-        GeneratedStep(action="browser.assert_text",
+        GeneratedStep(action="test.assert_text_contains",
                       params={"selector": "body", "text": "${expected_title}"},
                       description="Verify successful login")
     )
@@ -462,12 +462,12 @@ def _build_nav_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTestCase
             _open_step(url),
             _step("browser.click", el, {}, f"Click '{label}' navigation link"),
             GeneratedStep(
-                action="browser.wait_for_url_change",
+                action="browser.wait_for_url",
                 params={"timeout": 5000},
                 description="Wait for page navigation to complete",
             ),
             GeneratedStep(
-                action="browser.assert_visible",
+                action="test.assert_element_visible",
                 params={"selector": "h1, h2, main, [role='main']"},
                 description="Verify page content loaded after navigation",
             ),
@@ -528,7 +528,7 @@ def _build_settings_cases(pattern: _PatternMatch, url: str) -> List[GeneratedTes
                 GeneratedStep(action="browser.open", params={"url": "${base_url}"}, description="Reload page to verify persistence")
             )
             field_steps.append(
-                _step("browser.assert_value", el, {"value": test_val}, f"Verify '{label}' value persisted after save")
+                _step("test.assert_value", el, {"value": test_val}, f"Verify '{label}' value persisted after save")
             )
 
         cases.append(GeneratedTestCase(
@@ -730,7 +730,7 @@ def _build_generic_button_cases(pattern: _PatternMatch, url: str) -> List[Genera
         else:
             # Generic: assert page has no JS error banner
             steps.append(GeneratedStep(
-                action="browser.assert_not_visible",
+                action="test.assert_element_not_visible",
                 params={"selector": ".error, .alert-danger, [role='alertdialog']"},
                 description="Verify no error appeared after action",
             ))
@@ -764,7 +764,7 @@ def _build_generic_input_cases(pattern: _PatternMatch, url: str) -> List[Generat
             val = _infer_test_value(el)
             fill_steps.append(_step("browser.fill", el, {"value": val}, f"Fill '{label}' with '{val}'"))
     fill_steps.append(GeneratedStep(
-        action="browser.assert_not_visible",
+        action="test.assert_element_not_visible",
         params={"selector": _ERROR_SELECTOR},
         description="Verify no validation errors appeared after filling fields",
     ))
@@ -879,13 +879,13 @@ def analyze_snapshot_rules(snapshot: PageSnapshot) -> List[GeneratedTestCase]:
         expected = (heading_el.text or "").strip() if heading_el else (snapshot.title or snapshot.path or "")
         assert_step = (
             GeneratedStep(
-                action="browser.assert_text",
+                action="test.assert_text_contains",
                 params={"selector": "h1, h2, title", "text": expected},
                 description=f"Verify page heading: '{expected}'",
             )
             if expected
             else GeneratedStep(
-                action="browser.assert_url",
+                action="test.assert_url",
                 params={"url": url},
                 description="Verify expected URL loaded",
             )

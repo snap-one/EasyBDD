@@ -135,6 +135,9 @@ ACTION_SCHEMA: Dict[str, Dict] = {
     # browser.*
     "browser.open":         {"required": ["url"], "optional": []},
     "open browser":         {"alias_of": "browser.open"},
+    "browser.navigate":     {"alias_of": "browser.open"},
+    "browser.close":        {"required": [], "optional": []},
+    "close browser":        {"alias_of": "browser.close"},
     "browser.click":        {"required": [], "optional": ["selector", "text", "button", "role", "name", "label"]},
     "click element":        {"alias_of": "browser.click"},
     "browser.fill":         {"required": [], "optional": [
@@ -159,11 +162,17 @@ ACTION_SCHEMA: Dict[str, Dict] = {
     "test.assert_element_enabled":    {"required": ["selector"], "optional": ["timeout"]},
     "test.assert_element_disabled":   {"required": ["selector"], "optional": ["timeout"]},
     "test.assert_element_count":      {"required": ["selector", "count"], "optional": ["timeout"]},
+    "test.assert_value":              {"required": ["selector", "value"], "optional": ["timeout"]},
+    "browser.assert_value":           {"alias_of": "test.assert_value"},
+    "test.assert_url":                {"required": ["url"], "optional": ["timeout", "exact"]},
+    "browser.assert_url":             {"alias_of": "test.assert_url"},
     "browser.screenshot":   {"required": [], "optional": ["filename", "path"]},
     "take screenshot":      {"alias_of": "browser.screenshot"},
     "browser.wait":         {"required": [], "optional": ["selector", "timeout"]},
     "browser.wait_for":     {"required": [], "optional": ["selector", "timeout", "state"]},
     "wait for element":     {"alias_of": "browser.wait_for"},
+    # No url/pattern → waits for the page load state (navigation complete)
+    "browser.wait_for_url": {"required": [], "optional": ["url", "pattern", "timeout"]},
     "browser.verify_text":  {"required": ["text"], "optional": ["selector"]},
     "verify text":          {"alias_of": "browser.verify_text"},
     "browser.verify_element": {"required": ["selector"], "optional": []},
@@ -172,6 +181,7 @@ ACTION_SCHEMA: Dict[str, Dict] = {
     "select option":        {"alias_of": "browser.select"},
     "browser.hover":        {"required": ["selector"], "optional": []},
     "hover element":        {"alias_of": "browser.hover"},
+    "browser.scroll":       {"required": [], "optional": ["selector", "x", "y"]},
     "browser.press_key":    {"required": ["key"], "optional": ["selector"]},
     "press key":            {"alias_of": "browser.press_key"},
     "browser.refresh":      {"required": [], "optional": []},
@@ -182,7 +192,7 @@ ACTION_SCHEMA: Dict[str, Dict] = {
     "navigate forward":     {"alias_of": "browser.forward"},
     "browser.double_click": {"required": [], "optional": ["selector", "text"]},
     "double click element": {"alias_of": "browser.double_click"},
-    "browser.upload":       {"required": ["selector", "file"], "optional": []},
+    "browser.upload":       {"required": ["selector"], "optional": ["file", "file_path"]},
     "upload file":          {"alias_of": "browser.upload"},
 
     # Additional browser actions for element retrieval and interaction
