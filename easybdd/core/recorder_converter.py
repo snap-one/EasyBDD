@@ -83,7 +83,7 @@ class RecorderConverter:
             "Fill form field": "browser.fill",
             "Hover":           "browser.hover",
             "Press key":       "browser.press_key",
-            "Wait for element":"browser.wait_for_element",
+            "Wait for element":"browser.wait_for",
             "Take screenshot": "browser.screenshot",
             "Verify text":     "browser.verify_text",
             "Select option":   "browser.select_option",
@@ -95,9 +95,31 @@ class RecorderConverter:
 
         browser_action = ACTION_MAP.get(action)
         if browser_action:
+            if browser_action == "browser.wait_for":
+                params = self._wait_for_params(params)
             return {browser_action: params} if params else {browser_action: None}
         # Unknown action — pass through unchanged
         return step
+
+    @staticmethod
+    def _wait_for_params(params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        browser.wait_for only accepts selector/state/timeout (see validator
+        ACTION_PARAMS and the runner's wait_for handler).  Recorder sources can
+        emit role/name, text or label fields instead — fold those into a
+        Playwright selector-engine string.
+        """
+        out = {k: v for k, v in params.items() if k in ("selector", "state", "timeout")}
+        if not out.get("selector"):
+            if params.get("role"):
+                role = params["role"]
+                name = params.get("name")
+                out["selector"] = f'role={role}[name="{name}"]' if name else f"role={role}"
+            elif params.get("text"):
+                out["selector"] = f'text={params["text"]}'
+            elif params.get("label"):
+                out["selector"] = f'[aria-label="{params["label"]}"]'
+        return out
 
     def _parse_playwright_line(self, line: str) -> Optional[Dict[str, Any]]:
         """Parse individual Playwright code line to Easy BDD step"""
@@ -481,6 +503,8 @@ class RecorderConverter:
             step = {"action": "Wait for element", "state": raw.get("visible", True) and "visible" or "hidden"}
             if sel and sel.startswith("aria/"):
                 step["label"] = sel[len("aria/"):]
+            elif sel and sel.startswith("text/"):
+                step["text"] = sel[len("text/"):]
             elif sel:
                 step["selector"] = sel
             return step
