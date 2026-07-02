@@ -398,6 +398,52 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
   </div>
 </div>
 
+<!-- ============ import recording modal ============ -->
+<div class="modal-back" id="import-back">
+  <div class="modal" style="width:760px; max-height:85vh">
+    <div class="modal-head">
+      <h2>Import recorded steps</h2>
+      <button class="icon-btn" data-close="import-back">✕</button>
+    </div>
+    <div class="modal-body" style="display:flex; flex-direction:column; gap:10px; min-height:0">
+      <div class="dim" style="font-size:12.5px">
+        Paste the output of a UI recorder — Playwright codegen (JS/TS or Python),
+        Chrome DevTools Recorder JSON, Selenium IDE .side, Katalon, Cypress or
+        Puppeteer exports. Steps are converted to framework actions you can edit
+        like any other step.
+      </div>
+      <div style="display:flex; gap:10px; align-items:flex-end">
+        <div>
+          <label class="small">Format</label>
+          <select id="import-format" class="compact">
+            <option value="auto">Auto-detect</option>
+            <option value="playwright-js">Playwright codegen — JS/TS</option>
+            <option value="playwright-python">Playwright codegen — Python</option>
+            <option value="chrome-devtools">Chrome DevTools Recorder (JSON)</option>
+            <option value="selenium">Selenium IDE (.side JSON)</option>
+            <option value="katalon">Katalon (JSON)</option>
+            <option value="playwright">Playwright test generator (JSON)</option>
+            <option value="cypress">Cypress (JSON)</option>
+            <option value="puppeteer">Puppeteer (JSON)</option>
+          </select>
+        </div>
+        <button class="btn ghost" id="btn-import-clip" title="Read the recording straight from your clipboard">📋 Paste from clipboard</button>
+        <label class="small" style="margin-left:auto; display:flex; align-items:center; gap:5px; cursor:pointer">
+          <input type="checkbox" id="import-logs"> include log narration steps
+        </label>
+      </div>
+      <textarea id="import-text" rows="10" spellcheck="false"
+        placeholder="await page.goto('https://example.com');&#10;await page.getByRole('button', { name: 'Sign in' }).click();&#10;…"
+        style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12.5px; resize:vertical"></textarea>
+      <div id="import-result" style="min-height:0; overflow-y:auto; max-height:220px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close="import-back">Cancel</button>
+      <button class="btn primary" id="btn-import-add" disabled>Add steps</button>
+    </div>
+  </div>
+</div>
+
 <div id="toasts"></div>
 
 <script>
@@ -767,7 +813,12 @@ function renderEditor() {
   renderStepList(S.model.steps, stepsWrap, { allowControl: true });
   const addBtn = el("button", { class: "big-add", onclick: () => openPalette(S.model.steps, { allowControl: true }) },
     "＋ Add step — pick a framework tool");
-  body.appendChild(sectionBox("Steps", "Executed top to bottom.", el("div", {}, stepsWrap, el("div", { id: "add-step-row" }, addBtn))));
+  const importBtn = el("button", {
+    class: "big-add", style: "flex:0 0 auto",
+    title: "Paste Playwright codegen, Chrome DevTools Recorder, Selenium IDE, Katalon… output and convert it to steps",
+    onclick: openImportModal,
+  }, "📋 Paste recording");
+  body.appendChild(sectionBox("Steps", "Executed top to bottom.", el("div", {}, stepsWrap, el("div", { id: "add-step-row" }, addBtn, importBtn))));
 }
 
 function sectionBox(title, hint, content) {
@@ -1390,6 +1441,115 @@ $("#tab-preview").addEventListener("click", () => switchTab("preview"));
 $("#tab-issues").addEventListener("click", () => switchTab("issues"));
 $("#btn-copy").addEventListener("click", () => {
   navigator.clipboard.writeText($("#preview-body").textContent).then(() => toast("Copied Preconditions body.", "ok"));
+});
+
+/* ============================== import recording ============================== */
+let importResult = null;
+let importTimer = null;
+
+function openImportModal() {
+  importResult = null;
+  $("#import-text").value = "";
+  $("#import-result").innerHTML = "";
+  const add = $("#btn-import-add");
+  add.disabled = true;
+  add.textContent = "Add steps";
+  $("#import-back").classList.add("open");
+  $("#import-text").focus();
+}
+
+function stepSummary(node) {
+  if (node.kind === "raw") return { icon: "📄", label: "raw YAML", detail: node.yaml_text || "" };
+  const def = S.actionsById[node.action] || {};
+  const detail = Object.entries(node.params || {})
+    .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
+    .join("  ");
+  return { icon: def.icon || "⚙️", label: node.action, detail };
+}
+
+function renderImportResult(r) {
+  const box = $("#import-result");
+  box.innerHTML = "";
+  box.appendChild(el("div", { class: "dim", style: "font-size:12px; margin-bottom:6px" },
+    `Detected: ${r.format}` + (r.name ? ` — “${r.name}”` : "")));
+  for (const w of r.warnings || []) {
+    box.appendChild(el("div", { style: "color: var(--yellow, #d7a53f); font-size:12px; margin-bottom:4px" }, `⚠ ${w}`));
+  }
+  const list = el("div", { style: "display:flex; flex-direction:column; gap:2px" });
+  r.steps.forEach((n, i) => {
+    const s = stepSummary(n);
+    list.appendChild(el("div", {
+      style: "display:flex; gap:8px; align-items:baseline; font-size:12.5px; padding:3px 6px; border-radius:5px; background: var(--bg-hover, rgba(255,255,255,.04))",
+    },
+      el("span", { class: "dim", style: "flex:0 0 18px; text-align:right" }, String(i + 1)),
+      el("span", {}, s.icon),
+      el("span", { style: "font-weight:600; white-space:nowrap" }, s.label),
+      el("span", { class: "dim", style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, s.detail),
+    ));
+  });
+  box.appendChild(list);
+}
+
+async function previewImport() {
+  const text = $("#import-text").value.trim();
+  const box = $("#import-result");
+  const add = $("#btn-import-add");
+  importResult = null;
+  add.disabled = true;
+  add.textContent = "Add steps";
+  if (!text) { box.innerHTML = ""; return; }
+  try {
+    const r = await api("/api/import/recording", { method: "POST", body: {
+      text, format: $("#import-format").value, include_logs: $("#import-logs").checked,
+    }});
+    importResult = r;
+    renderImportResult(r);
+    add.disabled = false;
+    add.textContent = `Add ${r.steps.length} step${r.steps.length === 1 ? "" : "s"}`;
+  } catch (e) {
+    box.innerHTML = "";
+    box.appendChild(el("div", { style: "color: var(--red, #e5484d); font-size:12.5px" }, e.message));
+  }
+}
+
+function scheduleImportPreview() {
+  clearTimeout(importTimer);
+  importTimer = setTimeout(previewImport, 350);
+}
+
+$("#import-text").addEventListener("input", scheduleImportPreview);
+$("#import-format").addEventListener("change", previewImport);
+$("#import-logs").addEventListener("change", previewImport);
+
+$("#btn-import-clip").addEventListener("click", async () => {
+  try {
+    const t = await navigator.clipboard.readText();
+    if (!t.trim()) { toast("Clipboard is empty.", "err"); return; }
+    $("#import-text").value = t;
+    previewImport();
+  } catch {
+    toast("Couldn't read the clipboard — paste into the text box instead (Ctrl/⌘+V).", "err");
+    $("#import-text").focus();
+  }
+});
+
+$("#btn-import-add").addEventListener("click", () => {
+  if (!importResult) return;
+  S.model.steps = S.model.steps || [];
+  S.model.steps.push(...importResult.steps);
+  // Merge recorder-derived variables (e.g. base_url) without clobbering
+  const existing = new Set((S.model.variables || []).map(v => v.key));
+  for (const v of importResult.variables || []) {
+    if (!existing.has(v.key)) S.model.variables.push(v);
+  }
+  if (!S.model.name && importResult.name) {
+    S.model.name = importResult.name;
+    $("#case-name").value = importResult.name;
+  }
+  markDirty();
+  renderEditor();
+  $("#import-back").classList.remove("open");
+  toast(`Imported ${importResult.steps.length} steps (${importResult.format}).`, "ok");
 });
 document.querySelectorAll("[data-close]").forEach(b =>
   b.addEventListener("click", () => $("#" + b.dataset.close).classList.remove("open")));
