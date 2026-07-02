@@ -55,6 +55,10 @@ tests/features/*.feature
 *.swo
 *~
 
+# Claude Code — local-only state (worktrees, local settings)
+.claude/worktrees/
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db
