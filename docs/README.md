@@ -10,6 +10,7 @@ Easy BDD is a YAML-based test framework that runs test cases authored directly i
 |-----|----------------|
 | [testrail-integration.md](./testrail-integration.md) | **Core reference.** Case taxonomy, variable injection, auto-auth, data-driven tests, Setup:/Teardown:, scheduling, HTML reports |
 | [writing-test-cases.md](./writing-test-cases.md) | Writing steps in TestRail — syntax rules, flush-left YAML, common pitfalls |
+| [testrail-templates.md](./testrail-templates.md) | Copy-paste Var:/Shared:/Feature: templates for common workflows — telnet/SSH validation, WebSocket API calls, firmware upgrade orchestration, fault-injection and data-driven loops |
 | [SYNTAX_CHEATSHEET.md](./SYNTAX_CHEATSHEET.md) | Quick lookup for all action syntax |
 | [troubleshooting.md](./troubleshooting.md) | Common errors and fixes |
 
