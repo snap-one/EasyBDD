@@ -4348,6 +4348,8 @@ class TestRunner:
         # Map dot notation to legacy action names for backward compatibility
         action_map = {
             "browser.open": "open browser",
+            "browser.navigate": "open browser",
+            "browser.close": "close browser",
             "browser.click": "click element",
             "browser.fill": "fill field",
             "browser.upload": "upload file",
@@ -4672,7 +4674,10 @@ class TestRunner:
 
             elif hasattr(service, "upload_file") and "upload" in action:
                 selector = self._get_param(step_params, "selector", "")
-                file_path = self._get_param(step_params, "file_path", "")
+                file_path = (
+                    self._get_param(step_params, "file_path", "")
+                    or self._get_param(step_params, "file", "")
+                )
                 service.upload_file(selector, file_path)
                 return True
 
@@ -4758,6 +4763,57 @@ class TestRunner:
                 variables["last_response"] = title
                 if store_as:
                     variables[store_as] = title
+                return True
+
+            elif action in ("test.assert_value", "browser.assert_value") and hasattr(service, "assert_value"):
+                selector = self._get_param(step_params, "selector", "")
+                value = self._get_param(step_params, "value", "")
+                timeout = self._get_param(step_params, "timeout", 10000)
+                print(f"      Asserting element '{selector}' has value '{value}'")
+                service.assert_value(selector, value, timeout=timeout)
+                return True
+
+            elif action in ("test.assert_url", "browser.assert_url") and hasattr(service, "assert_url"):
+                url = self._get_param(step_params, "url", "")
+                timeout = self._get_param(step_params, "timeout", 10000)
+                exact = self._get_param(step_params, "exact", False)
+                print(f"      Asserting URL matches '{url}'")
+                service.assert_url(url, timeout=timeout, exact=exact)
+                return True
+
+            elif action == "browser.wait_for_url" and hasattr(service, "wait_for_url"):
+                url = (
+                    self._get_param(step_params, "url", "")
+                    or self._get_param(step_params, "pattern", "")
+                )
+                timeout = self._get_param(step_params, "timeout", None)
+                print(f"      Waiting for URL '{url}'" if url else "      Waiting for navigation to complete")
+                service.wait_for_url(url or None, timeout=timeout)
+                return True
+
+            elif action in ("browser.scroll",) and hasattr(service, "scroll"):
+                selector = self._get_param(step_params, "selector", "")
+                x = self._get_param(step_params, "x", None)
+                y = self._get_param(step_params, "y", None)
+                service.scroll(selector or None, x=x, y=y)
+                return True
+
+            elif action in ("browser.drag_and_drop", "drag and drop") and hasattr(service, "drag_and_drop"):
+                source = (
+                    self._get_param(step_params, "source_selector", "")
+                    or self._get_param(step_params, "source", "")
+                )
+                target = (
+                    self._get_param(step_params, "target_selector", "")
+                    or self._get_param(step_params, "target", "")
+                )
+                print(f"      Dragging '{source}' onto '{target}'")
+                service.drag_and_drop(source, target)
+                return True
+
+            elif action in ("browser.close", "close browser") and hasattr(service, "close_browser"):
+                print("      Closing browser")
+                service.close_browser()
                 return True
 
             elif "wait" in action:

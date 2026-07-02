@@ -269,6 +269,7 @@ param: value
 | `browser.press_key` | `selector`, `key` |
 | `browser.upload` | `selector`, `file` |
 | `browser.wait_for` | `selector`, `timeout` |
+| `browser.wait_for_url` | `url` (substring or glob), `timeout`; no `url` waits for page load |
 | `browser.verify_text` | `text`, `selector` |
 | `browser.verify_element` | `selector` |
 | `browser.screenshot` | `filename`, `path` |
@@ -490,6 +491,8 @@ There is no dedicated `test.extract` action. Pull nested values out of a stored 
 | `test.assert_element_visible` / `test.assert_element_not_visible` | `selector`, `timeout` |
 | `test.assert_element_enabled` / `test.assert_element_disabled` | `selector`, `timeout` |
 | `test.assert_text_contains` / `test.assert_text_equals` | `selector`, `text`, `timeout` |
+| `test.assert_value` | `selector`, `value`, `timeout` (input/select current value) |
+| `test.assert_url` | `url` (substring or glob), `exact`, `timeout` |
 | `browser.assert_checked` / `browser.assert_unchecked` | `selector`, `timeout` |
 | `test.check_assertions` | — (flush soft assertions) |
 

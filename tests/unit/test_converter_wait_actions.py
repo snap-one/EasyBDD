@@ -43,13 +43,20 @@ test('sample', async ({ page }) => {
     def test_wait_steps_are_valid_and_have_selector(self):
         result = PlaywrightTsConverter().convert(self.CODE, "sample")
         waits = [s for s in result["steps"] if "browser.wait_for" in s]
-        assert len(waits) == 6
+        assert len(waits) == 5
         for step in waits:
             _assert_valid_action("browser.wait_for")
             params = step["browser.wait_for"]
             assert params.get("selector"), f"wait step missing selector: {params}"
             # No stray locator fields the runner would silently ignore
             assert not set(params) - {"selector", "state", "timeout"}
+
+    def test_wait_for_url_keeps_url_pattern(self):
+        result = PlaywrightTsConverter().convert(self.CODE, "sample")
+        url_waits = [s for s in result["steps"] if "browser.wait_for_url" in s]
+        assert len(url_waits) == 1
+        _assert_valid_action("browser.wait_for_url")
+        assert url_waits[0]["browser.wait_for_url"]["url"] == "**/dashboard"
 
     def test_role_locator_becomes_role_selector(self):
         result = PlaywrightTsConverter().convert(self.CODE, "sample")

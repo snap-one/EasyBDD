@@ -39,6 +39,9 @@ Examples:
 
 - action: browser.refresh
   # Reload current page
+
+- action: browser.close
+  # Close the browser session
 ```
 
 #### Element Interaction
@@ -99,6 +102,14 @@ Examples:
 - action: browser.press_key
   key: "Enter"
   selector: "#search"  # Optional
+
+# Scroll an element into view, or the window to coordinates
+- action: browser.scroll
+  selector: "#footer"
+
+- action: browser.scroll
+  x: 0
+  y: 500
 ```
 
 #### Waiting
@@ -112,6 +123,14 @@ Examples:
   selector: "#loading"
   state: "hidden"
   timeout: 5000
+
+# Wait for the URL to match (substring or glob pattern)
+- action: browser.wait_for_url
+  url: "**/dashboard"
+  timeout: 10000
+
+# Without url, waits for the current navigation to complete
+- action: browser.wait_for_url
 ```
 
 #### Screenshots
@@ -129,6 +148,15 @@ Examples:
 - action: browser.verify_element
   selector: "#success-message"
   soft_assert: true
+
+# Assert an input/select's current value
+- action: test.assert_value
+  selector: "#hostname"
+  value: "router-01"
+
+# Assert the current page URL (substring or glob; exact: true for full match)
+- action: test.assert_url
+  url: "/dashboard"
 ```
 
 ---
