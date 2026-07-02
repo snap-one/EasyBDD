@@ -239,9 +239,11 @@ class TestRuleBasedAnalyzerActions:
 
 class TestRecorderConverterActions:
     # One representative raw step per recorder action.
-    # NOTE: "Wait for element" is intentionally absent — its browser.wait_for
-    # mapping lands in a parallel change; add it here once that merges.
     RAW_STEPS = [
+        {"action": "Wait for element", "selector": "#spinner", "state": "hidden"},
+        {"action": "Wait for element", "role": "link", "name": "Devices", "state": "visible"},
+        {"action": "Wait for element", "label": "Email"},
+        {"action": "Wait for element", "text": "Welcome"},
         {"action": "Open browser", "url": "https://example.com"},
         {"action": "Click element", "role": "button", "name": "Save"},
         {"action": "Double click", "selector": "#row"},
@@ -274,6 +276,19 @@ class TestRecorderConverterActions:
             params = conv._to_browser_step(dict(raw))["browser.select"]
             assert params.get("selector"), f"select missing selector: {params}"
             assert not set(params) & {"role", "name", "label"}
+
+    def test_wait_for_element_folds_locator_fields_to_selector(self):
+        conv = RecorderConverter()
+        for raw in self.RAW_STEPS:
+            if raw["action"] != "Wait for element":
+                continue
+            step = conv._to_browser_step(dict(raw))
+            assert "browser.wait_for" in step, f"expected browser.wait_for, got {step}"
+            params = step["browser.wait_for"]
+            assert params.get("selector"), f"wait_for missing selector: {params}"
+            assert not set(params) - {"selector", "state", "timeout"}, (
+                f"wait_for leaked fields the runner ignores: {params}"
+            )
 
     def test_drag_and_drop_param_names(self):
         conv = RecorderConverter()
