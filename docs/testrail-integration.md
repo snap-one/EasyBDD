@@ -554,16 +554,15 @@ Use `for_each` with a Python list literal or expression:
 
 ```
 - for_each: "[1, 124, 373, 475]"
-loop_var: fault_delay
-steps:
-  - wait:
-      seconds: ${fault_delay}
-  - fault.insert:
-      type: power_cycle
-  - ovrc.get about:
-      store_as: device_info
-  - test.assert:
-      expression: device_info.status == "online"
+  loop_var: fault_delay
+  steps:
+    - wait:
+        seconds: ${fault_delay}
+    - jsonrpc.reset_device:
+    - ovrc.get about:
+        store_as: device_info
+    - test.assert:
+        expression: device_info.status == "online"
 ```
 
 **Iteration order:** iteration 1 runs completely (1s delay), then iteration 2 (124s), then 3 (373s), then 4 (475s). Each iteration runs all loop steps before the next begins.
@@ -644,18 +643,17 @@ JSON:
 device_id: ${mac}
 
 - wait:
-seconds: ${fault_delay}
+    seconds: ${fault_delay}
 
-- fault.insert:
-type: power_cycle
+- jsonrpc.reset_device:
 
 - ovrc.get about:
-store_as: device_info
+    store_as: device_info
 
 - test.assert:
-expression: device_info.status == "online"
+    expression: device_info.status == "online"
 
-- ovrc.disconnect: {}
+- ovrc.disconnect:
 ```
 
 ### Fault insertion at specific non-uniform intervals (for_each)
@@ -665,19 +663,18 @@ expression: device_info.status == "online"
 device_id: ${mac}
 
 - for_each: "[1, 124, 373, 475]"
-loop_var: fault_delay
-steps:
-  - wait:
-      seconds: ${fault_delay}
-  - fault.insert:
-      type: power_cycle
-  - ovrc.get about:
-      store_as: device_info
-  - test.assert:
-      expression: device_info.status == "online"
-      message: Device should recover after fault at ${fault_delay}s
+  loop_var: fault_delay
+  steps:
+    - wait:
+        seconds: ${fault_delay}
+    - jsonrpc.reset_device:
+    - ovrc.get about:
+        store_as: device_info
+    - test.assert:
+        expression: device_info.status == "online"
+        message: Device should recover after reset at ${fault_delay}s
 
-- ovrc.disconnect: {}
+- ovrc.disconnect:
 ```
 
 The difference from the data array approach: here the device connects **once** and faults are inserted in sequence within a single session. With the data array, each row is a completely independent test run (connect → wait → fault → disconnect).

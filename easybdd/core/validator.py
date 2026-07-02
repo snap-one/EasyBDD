@@ -185,6 +185,36 @@ ACTION_SCHEMA: Dict[str, Dict] = {
     "browser.upload":       {"required": ["selector", "file"], "optional": []},
     "upload file":          {"alias_of": "browser.upload"},
 
+    # Additional browser actions for element retrieval and interaction
+    "browser.get_by_placeholder": {"required": ["placeholder"], "optional": []},
+    "get by placeholder":         {"alias_of": "browser.get_by_placeholder"},
+    "browser.get_by_test_id":     {"required": ["test_id"], "optional": []},
+    "get by test id":             {"alias_of": "browser.get_by_test_id"},
+    "browser.get_by_label":       {"required": ["label"], "optional": []},
+    "get by label":               {"alias_of": "browser.get_by_label"},
+    "browser.drag_and_drop":      {"required": ["source_selector", "target_selector"], "optional": []},
+    "drag and drop":              {"alias_of": "browser.drag_and_drop"},
+    "browser.type_text":          {"required": ["text"], "optional": ["selector"]},
+    "type text":                  {"alias_of": "browser.type_text"},
+    "browser.check":              {"required": ["selector"], "optional": []},
+    "check checkbox":             {"alias_of": "browser.check"},
+    "browser.uncheck":            {"required": ["selector"], "optional": []},
+    "uncheck checkbox":           {"alias_of": "browser.uncheck"},
+    "browser.wait_for_text":      {"required": ["text"], "optional": ["timeout"]},
+    "wait for text":              {"alias_of": "browser.wait_for_text"},
+    "browser.get_text":           {"required": ["selector"], "optional": ["store_as"]},
+    "get element text":           {"alias_of": "browser.get_text"},
+    "browser.get_attribute":      {"required": ["selector", "attribute"], "optional": ["store_as"]},
+    "get element attribute":      {"alias_of": "browser.get_attribute"},
+    "browser.execute_script":     {"required": ["script"], "optional": ["store_as"]},
+    "execute script":             {"alias_of": "browser.execute_script"},
+    "browser.set_viewport":       {"required": ["width", "height"], "optional": []},
+    "set viewport":               {"alias_of": "browser.set_viewport"},
+    "browser.add_cookie":         {"required": ["name", "value"], "optional": ["domain", "path", "expires", "httpOnly", "secure"]},
+    "add cookie":                 {"alias_of": "browser.add_cookie"},
+    "browser.clear_cookies":      {"required": [], "optional": []},
+    "clear cookies":              {"alias_of": "browser.clear_cookies"},
+
     # aws.*
     "aws.list_files": {
         # mirrors aws_service.list_firmware_files signature
@@ -209,6 +239,38 @@ ACTION_SCHEMA: Dict[str, Dict] = {
         "required": ["bucket_name"],
         "optional": ["folder_prefix"],
     },
+
+    # api.* — HTTP requests
+    "api.get": {
+        "required": ["url"],
+        "optional": ["headers", "timeout", "status", "store_as", "store_response"],
+    },
+    "api.post": {
+        "required": ["url"],
+        "optional": ["body", "json_data", "data", "headers", "timeout", "status", "store_as", "store_response"],
+    },
+    "api.put": {
+        "required": ["url"],
+        "optional": ["body", "json_data", "data", "headers", "timeout", "status", "store_as", "store_response"],
+    },
+    "api.patch": {
+        "required": ["url"],
+        "optional": ["body", "json_data", "data", "headers", "timeout", "status", "store_as", "store_response"],
+    },
+    "api.delete": {
+        "required": ["url"],
+        "optional": ["headers", "timeout", "status", "store_as", "store_response"],
+    },
+    "api.request": {
+        "required": ["url", "method"],
+        "optional": ["body", "json_data", "data", "headers", "timeout", "status", "store_as", "store_response"],
+    },
+    "api request":  {"alias_of": "api.request"},
+    "api get":      {"alias_of": "api.get"},
+    "api post":     {"alias_of": "api.post"},
+    "api put":      {"alias_of": "api.put"},
+    "api patch":    {"alias_of": "api.patch"},
+    "api delete":   {"alias_of": "api.delete"},
 
     # jsonrpc.* / ovrc.*
     "jsonrpc.connect":        {"required": ["url"], "optional": ["device_id", "timeout"]},

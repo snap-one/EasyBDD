@@ -125,6 +125,7 @@ _PREFIX_ACTIONS: list = [
     ("aws.",        "_dispatch_aws"),
     ("aws",         "_dispatch_aws"),
     ("s3.",         "_dispatch_aws"),
+    ("api.",        "_dispatch_api"),
     ("pagerduty.",  "_dispatch_pagerduty"),
     ("pagerduty",   "_dispatch_pagerduty"),
     ("pd.",         "_dispatch_pagerduty"),
@@ -1465,6 +1466,9 @@ class TestRunner:
 
     def _dispatch_aws(self, action, step_params, variables, sam=None):
         return self._handle_aws_action(action, step_params, variables)
+
+    def _dispatch_api(self, action, step_params, variables, sam=None):
+        return self._handle_api_action(action, step_params, variables)
 
     def _dispatch_pagerduty(self, action, step_params, variables, sam=None):
         return self._handle_pagerduty_action(action, step_params, variables)
@@ -4021,6 +4025,79 @@ class TestRunner:
                 return None
 
         return current
+
+    def _handle_api_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle API/HTTP actions (api.get, api.post, api.put, api.patch, api.delete)."""
+        from ..services.api_service import APIService
+
+        action_lower = action.lower()
+        params_dict = self._get_params(step_params)
+
+        # Supported HTTP methods
+        if any(m in action_lower for m in ("get", "post", "put", "patch", "delete", "request")):
+            try:
+                api_service = APIService(self.config)
+
+                # Determine HTTP method from action name
+                method = "GET"
+                if "post" in action_lower:
+                    method = "POST"
+                elif "put" in action_lower:
+                    method = "PUT"
+                elif "patch" in action_lower:
+                    method = "PATCH"
+                elif "delete" in action_lower:
+                    method = "DELETE"
+
+                # Get method from params if specified
+                method = params_dict.get("method", method).upper()
+
+                # Get URL and other parameters
+                url = params_dict.get("url", "")
+                body = params_dict.get("body") or params_dict.get("json_data") or params_dict.get("data")
+                headers = params_dict.get("headers", {})
+                timeout = params_dict.get("timeout", 30)
+                store_as = params_dict.get("store_as") or params_dict.get("store_response")
+
+                if not url:
+                    raise ValueError("api action requires 'url' parameter")
+
+                # Make the request
+                response = api_service.request(
+                    method=method,
+                    url=url,
+                    data=body,
+                    headers=headers,
+                    timeout=timeout
+                )
+
+                # Store response if requested
+                if store_as:
+                    variables[store_as] = response
+                    print(f"      Stored response as: {store_as!r}")
+
+                # Always store in last_response
+                variables["last_response"] = response
+
+                # Check status code if provided
+                expected_status = params_dict.get("status")
+                if expected_status:
+                    actual_status = response.get("status_code") if isinstance(response, dict) else getattr(response, "status_code", 0)
+                    if actual_status != expected_status:
+                        print(f"      ❌ Expected status {expected_status}, got {actual_status}")
+                        return False
+
+                return True
+
+            except Exception as e:
+                print(f"      ❌ API request failed: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
+
+        raise ValueError(f"Unknown api action: {action}")
 
     def _handle_aws_action(
         self, action: str, step_params: dict, variables: dict
