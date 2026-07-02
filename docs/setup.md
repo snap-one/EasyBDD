@@ -20,7 +20,7 @@ Complete guide to setting up the Easy BDD Testing Framework.
 ### Step 1: Clone Repository
 ```bash
 git clone <repository-url>
-cd Automation-Framework
+cd Easy_BDD
 ```
 
 ### Step 2: Create Virtual Environment
@@ -125,7 +125,7 @@ variables:
 
 ### Recommended Directory Layout
 ```
-Automation-Framework/
+Easy_BDD/
 ├── config/                 # Configuration files
 │   ├── framework.yaml     # Main framework config
 │   └── environments/      # Environment-specific configs
@@ -217,14 +217,14 @@ Add to `.vscode/settings.json`:
 {
   "python.defaultInterpreterPath": "./.venv/bin/python",
   "python.terminal.activateEnvironment": true,
-  "yaml.schemas": {
-    "./docs/schema/test-schema.json": "tests/cases/*.yaml"
-  },
   "files.associations": {
     "*.yaml": "yaml"
   }
 }
 ```
+
+> There's no bundled JSON Schema for `tests/cases/*.yaml` — syntax is validated at
+> runtime via `make validate` / `python -m easybdd validate`, not by an IDE schema.
 
 ### IntelliJ/PyCharm Setup
 1. Open project directory
@@ -235,43 +235,28 @@ Add to `.vscode/settings.json`:
 ## 🚀 Advanced Setup
 
 ### Docker Support
-Create `Dockerfile`:
+The repo already ships a `Dockerfile` at the project root — no need to create one.
 
-```dockerfile
-FROM mcr.microsoft.com/playwright/python:v1.40.0-focal
-
-# Set working directory
-WORKDIR /app
-
-# Copy requirements
-COPY requirements.txt .
-
-# Install dependencies
-RUN pip install -r requirements.txt
-
-# Copy application
-COPY . .
-
-# Install framework
-RUN pip install -e .
-
-# Set entrypoint
-ENTRYPOINT ["python", "-m", "easybdd"]
-```
-
-Build and run:
 ```bash
 # Build image
-docker build -t easy-bdd .
+docker build -t easy-bdd-framework .
 
-# Run tests
-docker run -v $(pwd)/reports:/app/reports easy-bdd run tests/cases/
+# Run tests (default CMD runs everything in tests/cases/)
+docker run -v $(pwd)/reports:/app/reports easy-bdd-framework
+
+# Or override the command
+docker run -v $(pwd)/reports:/app/reports easy-bdd-framework python -m easybdd run tests/cases/ --tags smoke
 ```
+
+Alternatively, `make run` on the CLI target is usually simpler for local dev — Docker is
+mainly useful for reproducing CI-exact browser dependencies.
 
 ### CI/CD Integration
 
-#### GitHub Actions
-Create `.github/workflows/tests.yml`:
+This repo's CI already lives in the `Jenkinsfile*` files at the root (see
+[ONBOARDING.md](../ONBOARDING.md#7-cicd--jenkins-pipelines) for what each one does) plus
+one GitHub Actions workflow, `.github/workflows/create-smoke-run.yml`. Adding a new
+GitHub Actions workflow follows the same shape:
 
 ```yaml
 name: Easy BDD Tests
@@ -281,70 +266,41 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v3
-    
+    - uses: actions/checkout@v4
+
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
-        
+        python-version: '3.11'
+
     - name: Install dependencies
       run: |
         pip install -e .
-        playwright install --with-deps
-        
+        playwright install --with-deps chromium
+
     - name: Run tests
       run: |
         python -m easybdd run tests/cases/ --tags smoke
-        
+
     - name: Upload test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: test-results
         path: reports/
 ```
 
-#### Jenkins Pipeline
-Create `Jenkinsfile`:
+See [docs/ci-cd-integration.md](./ci-cd-integration.md) for TestRail-run-creation details.
 
-```groovy
-pipeline {
-    agent any
-    
-    stages {
-        stage('Setup') {
-            steps {
-                sh 'python -m venv venv'
-                sh 'source venv/bin/activate && pip install -e .'
-                sh 'source venv/bin/activate && playwright install'
-            }
-        }
-        
-        stage('Test') {
-            steps {
-                sh 'source venv/bin/activate && python -m easybdd run tests/cases/'
-            }
-        }
-        
-        stage('Results') {
-            steps {
-                archiveArtifacts artifacts: 'reports/**/*', fingerprint: true
-                publishHTML([
-                    allowMissing: false,
-                    alwaysLinkToLastBuild: true,
-                    keepAll: true,
-                    reportDir: 'reports',
-                    reportFiles: 'index.html',
-                    reportName: 'Test Report'
-                ])
-            }
-        }
-    }
-}
-```
+#### Jenkins Pipeline
+The repo already has multiple `Jenkinsfile.*` pipelines at the root — see
+[ONBOARDING.md](../ONBOARDING.md#7-cicd--jenkins-pipelines) for what each covers. There's
+no need to author a new one for standard test runs; point a Jenkins job at the existing
+`Jenkinsfile` (or one of the `Jenkinsfile.testrail-*` variants) and supply the required
+credentials/parameters. Only write a new `Jenkinsfile.<name>` if you need a genuinely new
+pipeline shape.
 
 ## 🔍 Troubleshooting Setup
 
@@ -379,7 +335,7 @@ sudo playwright install-deps
 #### Import Issues
 ```bash
 # Reinstall in development mode
-pip uninstall easy-bdd
+pip uninstall easy-bdd-framework
 pip install -e .
 
 # Clear Python cache
