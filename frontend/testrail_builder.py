@@ -1379,6 +1379,149 @@ async def testrail_case(case_id: int):
     return result
 
 
+# ---------------------------------------------------------------------------
+# Import recorded steps (clipboard paste)
+# ---------------------------------------------------------------------------
+
+# Formats accepted by /api/import/recording.  JSON exports route through
+# RecorderConverter.detect_format; raw code routes by language heuristics.
+RECORDING_FORMATS = [
+    "auto", "playwright-js", "playwright-python", "chrome-devtools",
+    "selenium", "katalon", "playwright", "codegen", "cypress", "puppeteer",
+]
+
+_JS_CODE_RE = re.compile(
+    r"getBy[A-Z]|waitFor[A-Z]|toHave[A-Z]|toBe[A-Z]|frameLocator\(|"
+    r"@playwright/test|\bawait\s+expect\(|=>"
+)
+_PY_CODE_RE = re.compile(
+    r"\bget_by_\w+|\bwait_for_\w+|sync_playwright|async_playwright|"
+    r"to_be_\w+|to_have_\w+"
+)
+
+
+def convert_recording_text(raw: str, format_hint: str = "auto") -> Dict[str, Any]:
+    """Convert clipboard-pasted recorder output to Easy BDD test data.
+
+    Accepts JSON recorder exports (Chrome DevTools Recorder, Selenium IDE
+    .side, Katalon, Playwright test-generator, Cypress, Puppeteer) and raw
+    Playwright codegen source (JS/TS or Python).
+
+    Returns the converter's test-data dict plus a "format" label.
+    Raises ValueError when the text can't be recognized or converted.
+    """
+    import json
+
+    from easybdd.core.recorder_converter import RecorderConverter
+    from easybdd.crawler.crx_converter import PlaywrightTsConverter
+
+    text = (raw or "").strip()
+    if not text:
+        raise ValueError("Nothing to import — paste a recording first.")
+    fmt = (format_hint or "auto").strip().lower()
+    if fmt not in RECORDING_FORMATS:
+        raise ValueError(f"Unknown format '{format_hint}'. Supported: {', '.join(RECORDING_FORMATS)}")
+
+    converter = RecorderConverter()
+
+    # ── JSON recorder exports ──────────────────────────────────────────────
+    data = None
+    if text.startswith(("{", "[")):
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            if fmt in converter.converters:
+                raise ValueError(f"'{fmt}' expects a JSON export, but the text is not valid JSON: {exc}")
+            data = None
+    if data is not None:
+        detected = fmt if fmt in converter.converters else converter.detect_format(data)
+        if not detected:
+            raise ValueError(
+                "Could not recognize this JSON as a known recorder export. "
+                "Pick the format explicitly (chrome-devtools, selenium, katalon, "
+                "playwright, cypress, puppeteer)."
+            )
+        try:
+            if detected == "codegen":
+                # "codegen" JSON is a wrapper around raw code lines — its
+                # converter takes a code string, not (data, path)
+                code = "\n".join(str(s) for s in data.get("steps", []))
+                result = converter.convert_playwright_native_code(code)
+            else:
+                result = converter.convert(data, detected, Path("clipboard.json"))
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError(f"Failed to convert '{detected}' recording: {exc}")
+        result["format"] = detected
+        return result
+
+    # ── Raw code: Playwright codegen JS/TS vs Python ───────────────────────
+    if fmt == "playwright-js" or (fmt == "auto" and _JS_CODE_RE.search(text)):
+        result = PlaywrightTsConverter().convert(text, "clipboard")
+        result["format"] = "playwright-js"
+        return result
+    if fmt in ("playwright-python", "codegen") or (
+        fmt == "auto" and (_PY_CODE_RE.search(text) or "page." in text)
+    ):
+        result = converter.convert_playwright_native_code(text)
+        result["format"] = "playwright-python"
+        return result
+
+    raise ValueError(
+        "Could not recognize the pasted text as a recording. Supported: "
+        "Playwright codegen (JS/TS or Python), Chrome DevTools Recorder JSON, "
+        "Selenium IDE .side, Katalon, Cypress and Puppeteer JSON exports."
+    )
+
+
+class ImportRecordingRequest(BaseModel):
+    text: str
+    format: str = "auto"
+    include_logs: bool = False  # keep the auto-generated test.log narration steps
+
+
+@app.post("/api/import/recording")
+async def import_recording(req: ImportRecordingRequest):
+    """Convert clipboard-pasted recorder output into builder step nodes."""
+    try:
+        result = convert_recording_text(req.text, req.format)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    raw_steps = [s for s in result.get("steps") or [] if isinstance(s, dict)]
+    if not req.include_logs:
+        # The recorder pipeline interleaves a test.log narration step before
+        # each browser step — noise as separate rows in the builder.
+        raw_steps = [s for s in raw_steps if set(s) != {"test.log"}]
+
+    nodes = [_dict_to_node(s) for s in raw_steps]
+    warnings: List[str] = []
+    for i, node in enumerate(nodes, 1):
+        _sanitize_node(node)
+        if node.kind == "action" and not _schema_for(node.action or ""):
+            warnings.append(f"Step {i}: action '{node.action}' is not in the runner's action registry.")
+        elif node.kind == "raw":
+            warnings.append(f"Step {i} could not be mapped to a form — kept as raw YAML.")
+    if not nodes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Recognized the recording as {result['format']}, but found no convertible steps in it.",
+        )
+
+    variables = [
+        {"key": str(k), "value": v}
+        for k, v in (result.get("variables") or {}).items()
+    ]
+    return {
+        "format": result["format"],
+        "name": result.get("name") or "",
+        "steps": [n.model_dump() for n in nodes],
+        "variables": variables,
+        "warnings": warnings,
+    }
+
+
 @app.post("/api/preview")
 async def preview(model: CaseModel):
     try:

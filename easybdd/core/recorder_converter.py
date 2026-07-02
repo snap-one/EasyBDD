@@ -97,6 +97,10 @@ class RecorderConverter:
                 "source_selector": params.get("source", ""),
                 "target_selector": params.get("target", ""),
             }}
+        if action == "Verify title":
+            return {"test.assert_text_contains": {
+                "selector": "title", "text": params.get("title", ""),
+            }}
         if action == "Switch frame":
             # No frame-switching action — selectors address frames directly
             # via the 'iframe_sel >> inner_sel' syntax
@@ -117,6 +121,7 @@ class RecorderConverter:
             "Take screenshot": "browser.screenshot",
             "Verify text":     "browser.verify_text",
             "Scroll":          "browser.scroll",
+            "Wait":            "browser.wait",
         }
 
         browser_action = ACTION_MAP.get(action)
