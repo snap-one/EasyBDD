@@ -1421,6 +1421,7 @@ class TestRunner:
             self._get_param(step_params, "seconds")
             or self._get_param(step_params, "duration")
             or self._get_param(step_params, "timeout")
+            or self._get_param(step_params, "value")
             or 1
         )
         if isinstance(raw, str):
