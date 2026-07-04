@@ -119,10 +119,11 @@ textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
 .step-card.control { border-left: 3px solid var(--purple); }
 .step-card.shared-card { border-left: 3px solid #b98cff; }
 .step-card.dragging { opacity: 0.5; box-shadow: 0 6px 18px rgba(0,0,0,.3); }
-.step-head { display: flex; align-items: center; gap: 9px; padding: 9px 12px; cursor: pointer; }
-.drag-handle { cursor: grab; color: var(--text-faint); flex-shrink: 0; user-select: none; }
-.drag-handle:hover { color: var(--text); }
-.step-card.dragging .drag-handle { cursor: grabbing; }
+.step-head { display: flex; align-items: center; gap: 9px; padding: 9px 12px; cursor: grab; user-select: none; }
+.drag-handle { color: var(--text-faint); flex-shrink: 0; }
+.step-head:hover .drag-handle { color: var(--text); }
+.step-card.dragging .step-head { cursor: grabbing; }
+.steps-toolbar { display: flex; gap: 6px; margin-bottom: 8px; }
 .step-head .num {
   font-family: var(--mono); font-size: 11px; color: var(--text-faint);
   background: var(--bg-input); border-radius: 4px; padding: 1px 6px; flex-shrink: 0;
@@ -286,6 +287,8 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
       </div>
       <div style="display:flex; gap:6px; margin:10px 12px 4px">
         <input id="case-search" class="compact" placeholder="Filter cases…" style="margin:0; flex:1">
+        <button class="btn ghost" id="btn-expand-sections" title="Expand all sections" style="padding:5px 8px; font-size:12.5px">▾</button>
+        <button class="btn ghost" id="btn-collapse-sections" title="Collapse all sections" style="padding:5px 8px; font-size:12.5px">▸</button>
         <button class="btn ghost" id="btn-lint" title="Validate every case in this suite with the runner's parser — catches hand-edits made in TestRail's raw text field" style="padding:5px 10px; font-size:12.5px">🩺</button>
       </div>
       <div id="case-list"><div class="empty-note" style="padding:12px">Select a project to browse cases.</div></div>
@@ -487,21 +490,44 @@ const S = {
   paletteTarget: null,  // {list: array, allowControl: bool, onAdd: fn}
   previewTimer: null,
   collapsedSections: new Set(),  // sidebar section ids the user collapsed
+  stepsExpanded: true,  // default expand/collapse state for newly-rendered step cards
 };
 
 let dragCtx = null;  // {list, fromIndex, card, container, pointerY, rafId} of the step drag in progress, or null
+let suppressStepClick = false;  // swallows the synthetic click mouseup fires after an actual drag
 
 // Pointer-based (not native HTML5 DnD) so we get reliable cross-browser behavior
-// and can drive auto-scroll of #editor-body ourselves while dragging.
-function startStepDrag(e, list, index, card) {
+// and can drive auto-scroll of #editor-body ourselves while dragging. Grabbing the
+// whole header (rather than a tiny handle glyph) needs a move threshold so a plain
+// click still reaches the collapse/expand toggle instead of always starting a drag.
+function beginStepHeadDrag(e, list, index, card) {
   if (e.button !== 0) return;
   e.preventDefault();
-  dragCtx = { list, fromIndex: index, card, container: card.parentElement, pointerY: e.clientY, rafId: null };
-  card.classList.add("dragging");
-  document.body.style.cursor = "grabbing";
-  document.addEventListener("mousemove", onStepDragMove);
-  document.addEventListener("mouseup", onStepDragEnd);
-  autoScrollStepDrag();
+  const startX = e.clientX, startY = e.clientY;
+  let moved = false;
+
+  const onMove = (ev) => {
+    if (!moved) {
+      if (Math.abs(ev.clientY - startY) < 4 && Math.abs(ev.clientX - startX) < 4) return;
+      moved = true;
+      suppressStepClick = true;
+      dragCtx = { list, fromIndex: index, card, container: card.parentElement, pointerY: ev.clientY, rafId: null };
+      card.classList.add("dragging");
+      document.body.style.cursor = "grabbing";
+      autoScrollStepDrag();
+    }
+    dragCtx.pointerY = ev.clientY;
+    reorderStepDragCard();
+  };
+
+  const onUp = () => {
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+    if (moved) finishStepDrag();
+  };
+
+  document.addEventListener("mousemove", onMove);
+  document.addEventListener("mouseup", onUp);
 }
 
 function reorderStepDragCard() {
@@ -516,12 +542,6 @@ function reorderStepDragCard() {
   else if (container.lastElementChild !== card) container.appendChild(card);
 }
 
-function onStepDragMove(e) {
-  if (!dragCtx) return;
-  dragCtx.pointerY = e.clientY;
-  reorderStepDragCard();
-}
-
 function autoScrollStepDrag() {
   if (!dragCtx) return;
   const editorBody = $("#editor-body");
@@ -534,10 +554,8 @@ function autoScrollStepDrag() {
   dragCtx.rafId = requestAnimationFrame(autoScrollStepDrag);
 }
 
-function onStepDragEnd() {
+function finishStepDrag() {
   if (!dragCtx) return;
-  document.removeEventListener("mousemove", onStepDragMove);
-  document.removeEventListener("mouseup", onStepDragEnd);
   document.body.style.cursor = "";
   cancelAnimationFrame(dragCtx.rafId);
   const { list, fromIndex, card, container } = dragCtx;
@@ -664,6 +682,7 @@ function saveState() {
       dirty: S.dirty,
       model: S.model,
       caseSearch: $("#case-search").value || "",
+      stepsExpanded: S.stepsExpanded,
     }));
   } catch (_) {}
 }
@@ -687,6 +706,7 @@ async function boot() {
   S.model = (saved && saved.model) || newModel("feature");
   S.editingCaseId = saved ? saved.editingCaseId : null;
   S.dirty = saved ? !!saved.dirty : false;
+  if (saved && typeof saved.stepsExpanded === "boolean") S.stepsExpanded = saved.stepsExpanded;
   if (saved && saved.caseSearch) $("#case-search").value = saved.caseSearch;
   renderTypeRow(); renderEditor(); schedulePreview();
   if (S.editingCaseId) $("#publish-status").textContent = `Editing C${S.editingCaseId} — publishing will update it.`;
@@ -915,7 +935,7 @@ function renderEditor() {
     body.appendChild(sectionBox(
       "Steps (step-based Var: case)",
       "Runs before the tests — store_as results become run variables.",
-      el("div", {}, stepsWrap,
+      el("div", {}, stepsToolbar(), stepsWrap,
         el("button", { class: "big-add", onclick: () => openPalette(S.model.steps, { allowControl: true }) },
           "＋ Add step"))));
     return;
@@ -949,7 +969,14 @@ function renderEditor() {
     title: "Paste Playwright codegen, Chrome DevTools Recorder, Selenium IDE, Katalon… output and convert it to steps",
     onclick: openImportModal,
   }, "📋 Paste recording");
-  body.appendChild(sectionBox("Steps", "Executed top to bottom.", el("div", {}, stepsWrap, el("div", { id: "add-step-row" }, addBtn, importBtn))));
+  body.appendChild(sectionBox("Steps", "Executed top to bottom.", el("div", {}, stepsToolbar(), stepsWrap, el("div", { id: "add-step-row" }, addBtn, importBtn))));
+}
+
+function stepsToolbar() {
+  return el("div", { class: "steps-toolbar" },
+    el("button", { class: "icon-btn", title: "Expand all steps", onclick: () => { S.stepsExpanded = true; saveState(); renderEditor(); } }, "▾ Expand all"),
+    el("button", { class: "icon-btn", title: "Collapse all steps — compact view", onclick: () => { S.stepsExpanded = false; saveState(); renderEditor(); } }, "▸ Collapse all"),
+  );
 }
 
 function sectionBox(title, hint, content) {
@@ -1018,21 +1045,23 @@ function stepCard(node, list, index, opts) {
     : node.kind === "for_each" ? "For each" : node.kind === "while" ? "While"
     : node.kind === "condition" ? "If / Else" : node.kind === "try" ? "Try / Except" : "Raw YAML";
 
-  let bodyVisible = true;
-  const bodyEl = el("div", { class: "step-body" });
-  const summaryEl = el("span", { class: "summary" }, "");
+  let bodyVisible = S.stepsExpanded;
+  const bodyEl = el("div", { class: "step-body", style: bodyVisible ? "" : "display:none" });
+  const summaryEl = el("span", { class: "summary" }, bodyVisible ? "" : stepSummary(node));
 
-  const dragHandle = el("span", {
-    class: "drag-handle", title: "Drag to reorder",
-    onmousedown: (e) => startStepDrag(e, list, index, card),
-  }, "⠿");
+  const dragHandle = el("span", { class: "drag-handle", title: "Drag to reorder" }, "⠿");
 
-  const head = el("div", { class: "step-head", onclick: (e) => {
-      if (e.target.closest(".controls") || e.target.closest(".drag-handle")) return;
+  const head = el("div", {
+    class: "step-head",
+    onmousedown: (e) => { if (!e.target.closest(".controls")) beginStepHeadDrag(e, list, index, card); },
+    onclick: (e) => {
+      if (suppressStepClick) { suppressStepClick = false; return; }
+      if (e.target.closest(".controls")) return;
       bodyVisible = !bodyVisible;
       bodyEl.style.display = bodyVisible ? "" : "none";
       summaryEl.textContent = bodyVisible ? "" : stepSummary(node);
-    } },
+    },
+  },
     dragHandle,
     el("span", { class: "num" }, String(index + 1)),
     el("span", { class: "icon" }, icon),
@@ -1559,6 +1588,8 @@ async function runLint() {
 
 /* ============================== wire up ============================== */
 $("#btn-lint").addEventListener("click", runLint);
+$("#btn-expand-sections").addEventListener("click", () => { S.collapsedSections.clear(); renderCaseList(); });
+$("#btn-collapse-sections").addEventListener("click", () => { for (const s of S.sections) S.collapsedSections.add(s.id); renderCaseList(); });
 $("#sel-project").addEventListener("change", onProjectChange);
 $("#sel-suite").addEventListener("change", onSuiteChange);
 $("#case-search").addEventListener("input", () => { renderCaseList(); saveState(); });
