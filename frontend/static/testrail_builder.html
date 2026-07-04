@@ -118,11 +118,11 @@ textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
 }
 .step-card.control { border-left: 3px solid var(--purple); }
 .step-card.shared-card { border-left: 3px solid #b98cff; }
-.step-card.dragging { opacity: 0.4; }
-.step-card.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
+.step-card.dragging { opacity: 0.5; box-shadow: 0 6px 18px rgba(0,0,0,.3); }
 .step-head { display: flex; align-items: center; gap: 9px; padding: 9px 12px; cursor: pointer; }
-.drag-handle { cursor: grab; color: var(--text-faint); flex-shrink: 0; }
+.drag-handle { cursor: grab; color: var(--text-faint); flex-shrink: 0; user-select: none; }
 .drag-handle:hover { color: var(--text); }
+.step-card.dragging .drag-handle { cursor: grabbing; }
 .step-head .num {
   font-family: var(--mono); font-size: 11px; color: var(--text-faint);
   background: var(--bg-input); border-radius: 4px; padding: 1px 6px; flex-shrink: 0;
@@ -489,7 +489,67 @@ const S = {
   collapsedSections: new Set(),  // sidebar section ids the user collapsed
 };
 
-let dragStep = null;  // {list, index} of the step currently being dragged, or null
+let dragCtx = null;  // {list, fromIndex, card, container, pointerY, rafId} of the step drag in progress, or null
+
+// Pointer-based (not native HTML5 DnD) so we get reliable cross-browser behavior
+// and can drive auto-scroll of #editor-body ourselves while dragging.
+function startStepDrag(e, list, index, card) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  dragCtx = { list, fromIndex: index, card, container: card.parentElement, pointerY: e.clientY, rafId: null };
+  card.classList.add("dragging");
+  document.body.style.cursor = "grabbing";
+  document.addEventListener("mousemove", onStepDragMove);
+  document.addEventListener("mouseup", onStepDragEnd);
+  autoScrollStepDrag();
+}
+
+function reorderStepDragCard() {
+  const { container, card, pointerY } = dragCtx;
+  const siblings = Array.from(container.children).filter((c) => c !== card && c.classList.contains("step-card"));
+  let target = null;
+  for (const sib of siblings) {
+    const r = sib.getBoundingClientRect();
+    if (pointerY < r.top + r.height / 2) { target = sib; break; }
+  }
+  if (target) { if (target.previousElementSibling !== card) container.insertBefore(card, target); }
+  else if (container.lastElementChild !== card) container.appendChild(card);
+}
+
+function onStepDragMove(e) {
+  if (!dragCtx) return;
+  dragCtx.pointerY = e.clientY;
+  reorderStepDragCard();
+}
+
+function autoScrollStepDrag() {
+  if (!dragCtx) return;
+  const editorBody = $("#editor-body");
+  const rect = editorBody.getBoundingClientRect();
+  const margin = 56, maxSpeed = 16;
+  let dy = 0;
+  if (dragCtx.pointerY < rect.top + margin) dy = -maxSpeed * Math.min(1, (rect.top + margin - dragCtx.pointerY) / margin);
+  else if (dragCtx.pointerY > rect.bottom - margin) dy = maxSpeed * Math.min(1, (dragCtx.pointerY - (rect.bottom - margin)) / margin);
+  if (dy) { editorBody.scrollTop += dy; reorderStepDragCard(); }
+  dragCtx.rafId = requestAnimationFrame(autoScrollStepDrag);
+}
+
+function onStepDragEnd() {
+  if (!dragCtx) return;
+  document.removeEventListener("mousemove", onStepDragMove);
+  document.removeEventListener("mouseup", onStepDragEnd);
+  document.body.style.cursor = "";
+  cancelAnimationFrame(dragCtx.rafId);
+  const { list, fromIndex, card, container } = dragCtx;
+  card.classList.remove("dragging");
+  const newIndex = Array.from(container.children).indexOf(card);
+  dragCtx = null;
+  if (newIndex !== -1 && newIndex !== fromIndex) {
+    const [moved] = list.splice(fromIndex, 1);
+    list.splice(newIndex, 0, moved);
+    markDirty(); renderEditor();
+  }
+}
 
 const ROLE_ORDER = ["var", "setup", "shared", "feature", "teardown", "test", "other"];
 const ROLE_LABEL = { var: "Var — run variables", setup: "Setup", shared: "Shared — reusable steps",
@@ -946,27 +1006,6 @@ function stepSummary(node) {
 function stepCard(node, list, index, opts) {
   const isControl = ["for_each", "while", "condition", "try"].includes(node.kind);
   const card = el("div", { class: "step-card" + (isControl ? " control" : "") + (node.kind === "shared" ? " shared-card" : "") });
-  card.addEventListener("dragover", (e) => {
-    if (!dragStep || dragStep.list !== list) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    card.classList.add("drag-over");
-  });
-  card.addEventListener("dragleave", (e) => {
-    if (!card.contains(e.relatedTarget)) card.classList.remove("drag-over");
-  });
-  card.addEventListener("drop", (e) => {
-    if (!dragStep || dragStep.list !== list) return;
-    e.preventDefault();
-    e.stopPropagation();
-    card.classList.remove("drag-over");
-    const from = dragStep.index;
-    dragStep = null;
-    if (from === index) return;
-    const [moved] = list.splice(from, 1);
-    list.splice(from < index ? index - 1 : index, 0, moved);
-    markDirty(); renderEditor();
-  });
   const def = node.kind === "action" ? S.actionsById[node.action] : null;
   const icon = def ? def.icon
     : node.kind === "action" ? "⚠️"
@@ -984,19 +1023,8 @@ function stepCard(node, list, index, opts) {
   const summaryEl = el("span", { class: "summary" }, "");
 
   const dragHandle = el("span", {
-    class: "drag-handle", title: "Drag to reorder", draggable: "true",
-    ondragstart: (e) => {
-      dragStep = { list, index };
-      e.dataTransfer.effectAllowed = "move";
-      try { e.dataTransfer.setData("text/plain", String(index)); } catch (_) {}
-      try { e.dataTransfer.setDragImage(card, 12, 12); } catch (_) {}
-      card.classList.add("dragging");
-    },
-    ondragend: () => {
-      dragStep = null;
-      card.classList.remove("dragging");
-      document.querySelectorAll(".step-card.drag-over").forEach((c) => c.classList.remove("drag-over"));
-    },
+    class: "drag-handle", title: "Drag to reorder",
+    onmousedown: (e) => startStepDrag(e, list, index, card),
   }, "⠿");
 
   const head = el("div", { class: "step-head", onclick: (e) => {
