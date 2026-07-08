@@ -21,6 +21,7 @@ Start with:  python frontend/start_testrail_builder.py   (default port 8091)
 from __future__ import annotations
 
 import difflib
+import json
 import os
 import re
 import sys
@@ -463,8 +464,20 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class ChatCaseContext(BaseModel):
+    """The case currently open in the builder editor, sent with every chat
+    turn so the assistant doesn't need the user to paste a case ID it can
+    already see on screen."""
+    case_id: Optional[int] = None
+    title: Optional[str] = None
+    body: Optional[str] = None
+    errors: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
+    case_context: Optional[ChatCaseContext] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -1319,9 +1332,153 @@ CHAT_SYSTEM_PROMPT = (
     "list below as ground truth — don't invent actions or syntax that aren't in them. "
     "This model runs on CPU with no GPU, so keep answers short (a few sentences or "
     "a short snippet) — long answers take a long time to generate.\n\n"
+    "If the user has a case open in the builder, its title, Preconditions YAML, and "
+    "current validation errors/warnings are provided in a separate 'Currently open "
+    "test case' message on every turn — treat that as ground truth about what they're "
+    "looking at, and don't ask them to paste a case ID that's already given there. "
+    "When TestRail access is configured you also have tools: `get_testrail_case` to "
+    "read any other case by ID, and `update_testrail_case` to write a title/Preconditions "
+    "change directly to TestRail. Only call `update_testrail_case` when the user has "
+    "explicitly asked you to save, apply, or publish a change — never write proactively.\n\n"
     "# Framework syntax reference\n\n" + _load_framework_doc() + "\n\n"
     "# Available builder actions (id and required params)\n\n" + _action_reference_markdown()
 )
+
+# Tool schema handed to Ollama for models with function-calling support (qwen2.5-coder
+# does). Kept to exactly the two operations the builder UI itself performs on a case
+# (read one, write title/Preconditions) — same TestRailService + .env credentials the
+# rest of this app and frontend/mcp_server.py's TestRail tools use, so the assistant's
+# read/write reach matches what the human already has through this app.
+TESTRAIL_CHAT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_testrail_case",
+            "description": (
+                "Look up any TestRail case by numeric ID and return its title and "
+                "Preconditions body. Use this for cases other than the one currently "
+                "open in the builder (that one is already given as context)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case_id": {
+                        "type": "integer",
+                        "description": "Numeric TestRail case ID, e.g. 18761858 for C18761858",
+                    }
+                },
+                "required": ["case_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_testrail_case",
+            "description": (
+                "Write a title and/or Preconditions change directly to a TestRail case. "
+                "This is a real write to the shared TestRail instance — only call it when "
+                "the user has explicitly asked you to save, apply, or publish a change."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "integer", "description": "Numeric TestRail case ID to update"},
+                    "title": {"type": "string", "description": "New case title (omit to leave unchanged)"},
+                    "preconditions": {
+                        "type": "string",
+                        "description": "New full Preconditions field YAML body (omit to leave unchanged)",
+                    },
+                },
+                "required": ["case_id"],
+            },
+        },
+    },
+]
+
+MAX_CHAT_TOOL_ROUNDS = 4
+
+
+def _testrail_configured() -> bool:
+    return bool(
+        os.getenv("TESTRAIL_URL") and os.getenv("TESTRAIL_USERNAME") and os.getenv("TESTRAIL_API_KEY")
+    )
+
+
+def _run_chat_tool(name: str, args: Dict[str, Any]) -> str:
+    """Execute a tool call the chat model requested, returning a JSON string
+    (never raises — errors are reported back to the model as tool output)."""
+    try:
+        if name == "get_testrail_case":
+            case_id = int(args["case_id"])
+            case = _tr().get_case(case_id)
+            body = strip_html_to_text(str(case.get("custom_preconds") or ""))
+            return json.dumps({"case_id": case_id, "title": case.get("title", ""), "preconditions": body})
+        if name == "update_testrail_case":
+            case_id = int(args["case_id"])
+            payload: Dict[str, Any] = {}
+            if args.get("title") is not None:
+                payload["title"] = args["title"]
+            if args.get("preconditions") is not None:
+                payload["custom_preconds"] = args["preconditions"]
+            if not payload:
+                return json.dumps({"error": "Nothing to update — provide title and/or preconditions."})
+            case = _tr().update_case(case_id, **payload)
+            return json.dumps({"ok": True, "case_id": case_id, "title": case.get("title", "")})
+        return json.dumps({"error": f"Unknown tool '{name}'"})
+    except TestRailError as exc:
+        return json.dumps({"error": f"TestRail error: {exc}"})
+    except Exception as exc:  # noqa: BLE001 - reported to the model, not raised
+        return json.dumps({"error": str(exc)})
+
+
+_TESTRAIL_TOOL_NAMES = {t["function"]["name"] for t in TESTRAIL_CHAT_TOOLS}
+
+
+def _parse_pseudo_tool_call(content: str) -> Optional[tuple]:
+    """qwen2.5-coder:7b (unlike larger tool-tuned models) doesn't reliably
+    populate Ollama's structured `message.tool_calls` — it often writes the
+    call as plain JSON text instead, e.g. {"name": "get_testrail_case",
+    "arguments": {"case_id": 123}}. Detect that shape as a fallback so tool
+    calling still works with this model."""
+    text = (content or "").strip()
+    if not text:
+        return None
+    if text.startswith("```"):
+        text = text.strip("`")
+        if "\n" in text:
+            text = text.split("\n", 1)[1]
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    name = obj.get("name")
+    if name not in _TESTRAIL_TOOL_NAMES:
+        return None
+    args = obj.get("arguments", {})
+    if not isinstance(args, dict):
+        return None
+    return name, args
+
+
+def _case_context_message(ctx: Optional[ChatCaseContext]) -> Optional[Dict[str, str]]:
+    if not ctx or not (ctx.case_id or ctx.title or ctx.body):
+        return None
+    lines = ["# Currently open test case in the builder",
+             "(unpublished edits — may not match TestRail yet)"]
+    if ctx.case_id:
+        lines.append(f"TestRail case ID: C{ctx.case_id}")
+    if ctx.title:
+        lines.append(f"Title: {ctx.title}")
+    if ctx.errors:
+        lines.append("Validation errors:\n" + "\n".join(f"- {e}" for e in ctx.errors))
+    if ctx.warnings:
+        lines.append("Validation warnings:\n" + "\n".join(f"- {w}" for w in ctx.warnings))
+    if ctx.body:
+        lines.append("Current Preconditions YAML:\n```yaml\n" + ctx.body + "\n```")
+    return {"role": "system", "content": "\n\n".join(lines)}
 
 
 def _ollama_base_url() -> str:
@@ -1365,22 +1522,59 @@ async def chat_status():
 async def chat(req: ChatRequest):
     base = _ollama_base_url()
     messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+    case_msg = _case_context_message(req.case_context)
+    if case_msg:
+        messages.append(case_msg)
     messages += [{"role": m.role, "content": m.content} for m in req.messages]
+
+    use_tools = _testrail_configured()
+    payload: Dict[str, Any] = {
+        "model": _chat_model(),
+        "stream": False,
+        "keep_alive": _chat_keep_alive(),
+        "options": {
+            "num_ctx": _chat_num_ctx(),
+            "num_predict": _chat_max_tokens(),
+        },
+    }
+    if use_tools:
+        payload["tools"] = TESTRAIL_CHAT_TOOLS
+
     try:
         async with httpx.AsyncClient(timeout=240) as client:
-            resp = await client.post(
-                f"{base}/api/chat",
-                json={
-                    "model": _chat_model(),
-                    "messages": messages,
-                    "stream": False,
-                    "keep_alive": _chat_keep_alive(),
-                    "options": {
-                        "num_ctx": _chat_num_ctx(),
-                        "num_predict": _chat_max_tokens(),
-                    },
-                },
-            )
+            for _ in range(MAX_CHAT_TOOL_ROUNDS):
+                resp = await client.post(f"{base}/api/chat", json={**payload, "messages": messages})
+                resp.raise_for_status()
+                data = resp.json()
+                message = data.get("message", {}) or {}
+                tool_calls = list(message.get("tool_calls") or [])
+                pseudo_call = None
+                if not tool_calls and use_tools:
+                    pseudo_call = _parse_pseudo_tool_call(message.get("content", ""))
+                if not tool_calls and not pseudo_call:
+                    return {"reply": message.get("content", "")}
+
+                messages.append(message)
+                if pseudo_call:
+                    name, args = pseudo_call
+                    result = _run_chat_tool(name, args)
+                    messages.append({"role": "tool", "content": result})
+                else:
+                    for call in tool_calls:
+                        fn = call.get("function", {}) or {}
+                        name = fn.get("name", "")
+                        args = fn.get("arguments") or {}
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except ValueError:
+                                args = {}
+                        result = _run_chat_tool(name, args)
+                        messages.append({"role": "tool", "content": result})
+            # Ran out of tool-call rounds — ask once more without tools so the
+            # model has to answer in plain text instead of looping forever.
+            final_payload = {k: v for k, v in payload.items() if k != "tools"}
+            resp = await client.post(f"{base}/api/chat", json={**final_payload, "messages": messages})
             resp.raise_for_status()
             data = resp.json()
     except httpx.TimeoutException:

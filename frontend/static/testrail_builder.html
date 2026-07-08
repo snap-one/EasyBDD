@@ -164,9 +164,9 @@ textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
   font-size: 11px; font-weight: 700; background: var(--red); color: #fff;
 }
 #right-tabs button .badge.warn { background: var(--amber); color: #201500; }
-#preview-pane, #issues-pane, #chat-pane { flex: 1; overflow-y: auto; padding: 12px; display: none; min-height: 0; }
+#preview-pane, #issues-pane, #chat-pane { flex: 1; overflow-y: auto; padding: 12px; display: none; flex-direction: column; min-height: 0; }
 #preview-pane.active, #issues-pane.active, #chat-pane.active { display: flex; }
-#chat-pane { flex-direction: column; padding: 0; }
+#chat-pane { padding: 0; }
 #chat-status { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-dim); padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 #chat-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
 #chat-status.ok .dot { background: var(--green); }
@@ -188,7 +188,7 @@ textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
 }
 .copy-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .copy-row .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); }
-.issue { display: flex; gap: 8px; padding: 8px 10px; border-radius: 7px; margin-bottom: 7px; font-size: 13px; }
+.issue { display: flex; gap: 8px; padding: 8px 10px; border-radius: 7px; margin-bottom: 7px; font-size: 13px; flex-shrink: 0; word-break: break-word; }
 .issue.error { background: rgba(231,76,92,.1); color: #f297a3; }
 .issue.warning { background: rgba(240,168,50,.1); color: #f0c37c; }
 .issue.okline { background: rgba(46,204,113,.1); color: #7bdfa5; }
@@ -510,6 +510,7 @@ const S = {
   editingCaseId: null,  // TestRail case id when editing existing
   dirty: false,
   valid: false,
+  lastIssues: { errors: [], warnings: [] },
   paletteTarget: null,  // {list: array, allowControl: bool, onAdd: fn}
   previewTimer: null,
   collapsedSections: new Set(),  // sidebar section ids the user collapsed
@@ -1385,6 +1386,7 @@ async function runPreview() {
 
 function renderIssues(val) {
   S.valid = val.valid;
+  S.lastIssues = { errors: val.errors || [], warnings: val.warnings || [] };
   const pane = $("#issues-pane");
   pane.innerHTML = "";
   const badge = $("#issue-badge");
@@ -1971,6 +1973,21 @@ function renderChatMessage(role, content) {
   return node;
 }
 
+// Snapshot of the case currently open in the editor, sent with every chat
+// turn so the assistant already knows what the user is looking at instead
+// of needing a case ID pasted into the message.
+function currentCaseContext() {
+  const hasCase = S.editingCaseId || ($("#case-name").value || "").trim() || (S.model && S.model.steps || []).length;
+  if (!hasCase) return null;
+  return {
+    case_id: S.editingCaseId || null,
+    title: $("#preview-title").textContent || (S.model && S.model.name) || null,
+    body: $("#preview-body").textContent || null,
+    errors: S.lastIssues.errors,
+    warnings: S.lastIssues.warnings,
+  };
+}
+
 async function sendChatMessage() {
   const input = $("#chat-input");
   const text = input.value.trim();
@@ -1985,7 +2002,10 @@ async function sendChatMessage() {
     ? "Thinking… the first reply loads framework context into the model and can take a couple of minutes. Later replies in this conversation will be much faster."
     : "Thinking…");
   try {
-    const res = await api("/api/chat", { method: "POST", body: { messages: S.chatMessages } });
+    const res = await api("/api/chat", {
+      method: "POST",
+      body: { messages: S.chatMessages, case_context: currentCaseContext() },
+    });
     S.chatMessages.push({ role: "assistant", content: res.reply });
     thinking.remove();
     renderChatMessage("assistant", res.reply);
