@@ -113,6 +113,23 @@ _EXACT_ACTIONS: dict = {
     "data":                   "_dispatch_data",
     "test.data":              "_dispatch_data",
     "data_loop":              "_dispatch_data",
+    # Declarative list/text helpers — non-programmer alternatives to eval.exec
+    # for the handful of operations (pick a list item, replace text, pull a
+    # regex group, build a string from variables) that come up constantly in
+    # firmware/version-parsing style cases.
+    "list.pick":              "_dispatch_list_pick",
+    "text.replace":           "_dispatch_text_replace",
+    "text.regex_extract":     "_dispatch_text_regex_extract",
+    "text.format":            "_dispatch_text_format",
+    # Renamed non-code eval.* actions — these never execute arbitrary Python,
+    # they're plain get/set/extract operations that were just misfiled under
+    # the scary "eval." prefix. Routed at the OLD names (eval.extract_version,
+    # eval.set, eval.get, eval.clear) via the "eval." prefix entry below, so
+    # both spellings work; new cases should use these names.
+    "text.extract_version":   "_dispatch_eval",
+    "state.set":              "_dispatch_eval",
+    "state.get":              "_dispatch_eval",
+    "state.clear":            "_dispatch_eval",
 }
 
 # Prefix entries are checked in order; first match wins.
@@ -158,6 +175,8 @@ _RERAISE_EXACT: frozenset = frozenset({
     "assert json schema", "test.assert_schema",
     "assert response", "test.assert_response",
     "test.extract", "extract",
+    "list.pick", "text.replace", "text.regex_extract", "text.format",
+    "text.extract_version", "state.set", "state.get", "state.clear",
 })
 
 
@@ -1462,6 +1481,18 @@ class TestRunner:
     def _dispatch_extract(self, action, step_params, variables, sam=None):
         return self._handle_extract_action(step_params, variables)
 
+    def _dispatch_list_pick(self, action, step_params, variables, sam=None):
+        return self._handle_list_pick_action(step_params, variables)
+
+    def _dispatch_text_replace(self, action, step_params, variables, sam=None):
+        return self._handle_text_replace_action(step_params, variables)
+
+    def _dispatch_text_regex_extract(self, action, step_params, variables, sam=None):
+        return self._handle_text_regex_extract_action(step_params, variables)
+
+    def _dispatch_text_format(self, action, step_params, variables, sam=None):
+        return self._handle_text_format_action(step_params, variables)
+
     def _dispatch_ovrc(self, action, step_params, variables, sam=None):
         return self._handle_ovrc_action(action, step_params, variables)
 
@@ -2038,6 +2069,149 @@ class TestRunner:
                 raise AssertionError(msg)
             print(f"      ✅ {field!r} contains {contains_str!r}")
 
+        return True
+
+    def _handle_list_pick_action(self, step_params: dict, variables: dict) -> bool:
+        """Handle list.pick — get one item from a list variable by index.
+
+        Parameters
+        ----------
+        from_var : name of the list-valued variable to index into
+        index    : integer index (negative counts from the end, same as Python)
+        store_as : variable name to store the picked item under
+        """
+        params = self._get_params(step_params)
+        from_var = str(params.get("from_var", ""))
+        store_as = str(params.get("store_as", ""))
+        if not from_var:
+            raise ValueError("list.pick requires 'from_var'")
+        if not store_as:
+            raise ValueError("list.pick requires 'store_as'")
+        try:
+            index = int(params.get("index", 0))
+        except (TypeError, ValueError):
+            raise ValueError(f"list.pick: 'index' must be an integer, got {params.get('index')!r}")
+
+        source = variables.get(from_var)
+        if not isinstance(source, list):
+            raise ValueError(
+                f"list.pick: variable '{from_var}' is not a list (got {type(source).__name__})"
+            )
+        try:
+            value = source[index]
+        except IndexError:
+            raise IndexError(
+                f"list.pick: index {index} out of range for '{from_var}' (length {len(source)})"
+            )
+
+        variables[store_as] = value
+        if hasattr(self.config, "set_variable"):
+            self.config.set_variable(store_as, value, "runtime_data")
+        print(f"      📌 list.pick: {from_var}[{index}] → {store_as!r} = {value!r}")
+        return True
+
+    def _handle_text_replace_action(self, step_params: dict, variables: dict) -> bool:
+        """Handle text.replace — substring or regex replace.
+
+        Parameters
+        ----------
+        value        : source text (already ${var}-substituted)
+        find         : substring, or regex pattern when regex: true
+        replace_with : replacement text (default: '')
+        regex        : treat 'find' as a regex pattern instead of a literal
+                       substring (default: false)
+        store_as     : variable name to store the result under
+        """
+        import re as _re
+
+        params = self._get_params(step_params)
+        value = str(params.get("value", ""))
+        find = params.get("find", "")
+        replace_with = str(params.get("replace_with", ""))
+        use_regex = bool(params.get("regex", False))
+        store_as = str(params.get("store_as", ""))
+
+        if not find:
+            raise ValueError("text.replace requires a non-empty 'find'")
+        if not store_as:
+            raise ValueError("text.replace requires 'store_as'")
+
+        if use_regex:
+            try:
+                result = _re.sub(str(find), replace_with, value)
+            except _re.error as exc:
+                raise ValueError(f"text.replace: invalid regex {find!r}: {exc}")
+        else:
+            result = value.replace(str(find), replace_with)
+
+        variables[store_as] = result
+        if hasattr(self.config, "set_variable"):
+            self.config.set_variable(store_as, result, "runtime_data")
+        print(f"      🔤 text.replace: {value!r} → {result!r} (stored as {store_as!r})")
+        return True
+
+    def _handle_text_regex_extract_action(self, step_params: dict, variables: dict) -> bool:
+        """Handle text.regex_extract — extract a regex group from a string.
+
+        Parameters
+        ----------
+        value    : source text (already ${var}-substituted)
+        pattern  : regex pattern to search for
+        group    : capture group index to extract (default: 0 = whole match)
+        default  : value to store if the pattern doesn't match (default: '')
+        store_as : variable name to store the result under
+        """
+        import re as _re
+
+        params = self._get_params(step_params)
+        value = str(params.get("value", ""))
+        pattern = str(params.get("pattern", ""))
+        store_as = str(params.get("store_as", ""))
+        default = params.get("default", "")
+        try:
+            group = int(params.get("group", 0))
+        except (TypeError, ValueError):
+            raise ValueError(f"text.regex_extract: 'group' must be an integer, got {params.get('group')!r}")
+
+        if not pattern:
+            raise ValueError("text.regex_extract requires 'pattern'")
+        if not store_as:
+            raise ValueError("text.regex_extract requires 'store_as'")
+
+        try:
+            match = _re.search(pattern, value)
+        except _re.error as exc:
+            raise ValueError(f"text.regex_extract: invalid regex {pattern!r}: {exc}")
+
+        result = match.group(group) if match else default
+
+        variables[store_as] = result
+        if hasattr(self.config, "set_variable"):
+            self.config.set_variable(store_as, result, "runtime_data")
+        print(f"      🔍 text.regex_extract: {pattern!r} on {value!r} → {store_as!r} = {result!r}")
+        return True
+
+    def _handle_text_format_action(self, step_params: dict, variables: dict) -> bool:
+        """Handle text.format — store a ${var}-substituted template string as a
+        new variable. The template's ${var} placeholders are already resolved
+        by the runner's generic step-param substitution before this handler
+        runs; this action just gives that result a name via store_as.
+
+        Parameters
+        ----------
+        template : text containing ${var} placeholders
+        store_as : variable name to store the formatted result under
+        """
+        params = self._get_params(step_params)
+        template = str(params.get("template", ""))
+        store_as = str(params.get("store_as", ""))
+        if not store_as:
+            raise ValueError("text.format requires 'store_as'")
+
+        variables[store_as] = template
+        if hasattr(self.config, "set_variable"):
+            self.config.set_variable(store_as, template, "runtime_data")
+        print(f"      📝 text.format: → {store_as!r} = {template!r}")
         return True
 
     def _ensure_ovrc_connection(
@@ -3504,15 +3678,22 @@ class TestRunner:
     def _handle_eval_action(
         self, action: str, step_params: dict, variables: dict
     ) -> bool:
-        """Handle session-stateful Python eval/exec actions.
+        """Handle session-stateful eval/exec/state actions.
+
+        Only eval.run/eval.exec actually execute arbitrary Python — the rest
+        are plain get/set/extract operations that happened to be filed under
+        the same "eval." prefix historically. New test cases should use the
+        renamed forms (left); the old "eval." names (right) keep working as
+        aliases dispatched to the same branches below via substring match on
+        the action name, so nothing published under the old names breaks.
 
         Actions:
-          eval.run             — evaluate an expression, store result
-          eval.exec            — execute a code block (state mutations persist)
-          eval.set             — set a key in shared eval state
-          eval.get             — read a key from shared eval state into variables
-          eval.clear           — clear the entire eval state
-          eval.extract_version — extract version string from a URL/filename/list
+          eval.run             — evaluate an expression, store result (unchanged — real code execution)
+          eval.exec            — execute a code block, state mutations persist (unchanged — real code execution)
+          state.set             (was eval.set)             — set a key in shared eval state
+          state.get             (was eval.get)             — read a key from shared eval state into variables
+          state.clear           (was eval.clear)           — clear the entire eval state
+          text.extract_version  (was eval.extract_version) — extract version string from a URL/filename/list
         """
         import math, re as _re, json as _json, datetime as _datetime, collections as _collections
 

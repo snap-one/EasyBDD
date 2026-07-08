@@ -83,19 +83,43 @@ ACTION_SCHEMA: Dict[str, Dict] = {
     },
     "assert response": {"alias_of": "test.assert_response"},
 
-    # eval.*
+    # eval.* — eval.exec/eval.run are the only ones that actually execute
+    # arbitrary Python. eval.set/get/clear/extract_version were plain
+    # get/set/extract operations filed under the same scary "eval." prefix;
+    # renamed below to state.*/text.extract_version. The old names are kept
+    # as aliases (runner.py dispatches both identically) so nothing published
+    # under them breaks.
     "eval.exec": {"required": ["code"], "optional": ["store_as"]},
     "eval.run":  {"required": ["expression"], "optional": ["store_as", "code"]},
-    "eval.set":  {"required": ["key"], "optional": ["value"]},
-    "eval.get":  {"required": ["key"], "optional": ["store_as"]},
-    "eval.clear": {"required": [], "optional": []},
-    "eval.extract_version": {
+    "eval.set":  {"alias_of": "state.set"},
+    "eval.get":  {"alias_of": "state.get"},
+    "eval.clear": {"alias_of": "state.clear"},
+    "eval.extract_version": {"alias_of": "text.extract_version"},
+
+    "state.set":  {"required": ["key"], "optional": ["value"]},
+    "state.get":  {"required": ["key"], "optional": ["store_as"]},
+    "state.clear": {"required": [], "optional": []},
+    "text.extract_version": {
         "required": [],
         "optional": [
             "from", "url", "source", "from_var", "list_var", "index",
             "pattern", "store_as", "run_name", "append_to_run_name",
         ],
     },
+
+    # list.* / text.* — declarative alternatives to eval.exec for the handful
+    # of operations (pick a list item, replace text, pull a regex group,
+    # build a string from variables) that don't need arbitrary Python.
+    "list.pick": {"required": ["from_var", "store_as"], "optional": ["index"]},
+    "text.replace": {
+        "required": ["value", "find", "store_as"],
+        "optional": ["replace_with", "regex"],
+    },
+    "text.regex_extract": {
+        "required": ["value", "pattern", "store_as"],
+        "optional": ["group", "default"],
+    },
+    "text.format": {"required": ["template", "store_as"], "optional": []},
 
     # telnet.*
     "telnet.send": {
