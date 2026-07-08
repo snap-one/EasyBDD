@@ -176,6 +176,7 @@ textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
 .chat-msg { max-width: 88%; padding: 8px 11px; border-radius: 10px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 .chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
 .chat-msg.assistant { align-self: flex-start; background: var(--bg-card); border: 1px solid var(--border); color: var(--text); }
+.chat-msg.assistant.thinking { color: var(--text-dim); font-style: italic; }
 #chat-input-row { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
 #chat-input { flex: 1; resize: none; height: 38px; font-size: 13px; }
 #chat-send:disabled { opacity: 0.5; }
@@ -1963,25 +1964,33 @@ async function checkChatStatus() {
 }
 
 function renderChatMessage(role, content) {
-  $("#chat-messages").appendChild(el("div", { class: `chat-msg ${role}` }, content));
+  const node = el("div", { class: `chat-msg ${role}` }, content);
+  $("#chat-messages").appendChild(node);
   const pane = $("#chat-messages");
   pane.scrollTop = pane.scrollHeight;
+  return node;
 }
 
 async function sendChatMessage() {
   const input = $("#chat-input");
   const text = input.value.trim();
   if (!text || S.chatBusy) return;
+  const isFirstTurn = S.chatMessages.length === 0;
   input.value = "";
   S.chatMessages.push({ role: "user", content: text });
   renderChatMessage("user", text);
   S.chatBusy = true;
   $("#chat-send").disabled = true;
+  const thinking = renderChatMessage("assistant thinking", isFirstTurn
+    ? "Thinking… the first reply loads framework context into the model and can take a couple of minutes. Later replies in this conversation will be much faster."
+    : "Thinking…");
   try {
     const res = await api("/api/chat", { method: "POST", body: { messages: S.chatMessages } });
     S.chatMessages.push({ role: "assistant", content: res.reply });
+    thinking.remove();
     renderChatMessage("assistant", res.reply);
   } catch (e) {
+    thinking.remove();
     toast("Assistant error: " + e.message, "err");
   } finally {
     S.chatBusy = false;

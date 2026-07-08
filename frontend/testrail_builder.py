@@ -1260,11 +1260,67 @@ async def get_catalog():
     return {"categories": categories, "case_types": CASE_PREFIXES}
 
 
+# Section headers (verbatim, minus the "## " markdown prefix) to keep from
+# docs/writing-test-cases.md. The full doc runs ~2500 words; on the CPU-only
+# Ollama host this app talks to (~20 tok/s prompt processing, ~5.5 tok/s
+# generation — measured, no GPU), that alone would cost 2+ minutes of prompt
+# processing before the model can even start replying. These sections cover
+# the naming/format/assertion rules that are wrong most often; the full
+# per-action browser table is skipped in favor of the compact CATALOG-derived
+# list below, which already gives per-action required params.
+_FRAMEWORK_DOC_SECTIONS = (
+    "1. Case Naming",
+    "2. Var: Cases",
+    "3. Preconditions Field Format",
+    "6. Assertions",
+    "10. Selector Strategies",
+)
+
+
+def _load_framework_doc() -> str:
+    try:
+        text = (ROOT / "docs" / "writing-test-cases.md").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    kept = [
+        "## " + section
+        for section in text.split("\n## ")[1:]
+        if section.startswith(_FRAMEWORK_DOC_SECTIONS)
+    ]
+    return "\n\n".join(kept).strip()
+
+
+def _action_reference_markdown() -> str:
+    """Compact action list (id + required params only, no descriptions) grouped
+    by category, generated from the same CATALOG the builder's step palette
+    uses — keeps the assistant's knowledge of available actions in sync with
+    what the UI actually offers, without spending tokens on prose."""
+    by_category: Dict[str, List[str]] = {}
+    for action_id, definition in sorted(CATALOG.items()):
+        params = definition.get("parameters") or {}
+        required = [name for name, cfg in params.items() if cfg.get("required")]
+        entry = f"- `{action_id}`"
+        if required:
+            entry += f" (required: {', '.join(required)})"
+        by_category.setdefault(definition.get("category", "Other"), []).append(entry)
+
+    lines: List[str] = []
+    for category in sorted(by_category):
+        lines.append(f"### {category}")
+        lines.extend(by_category[category])
+    return "\n".join(lines)
+
+
 CHAT_SYSTEM_PROMPT = (
     "You are the AI assistant embedded in the Easy BDD TestRail Test Builder. "
     "You help the user author BDD-style TestRail test cases (Var:, Shared:, Setup:, "
     "Teardown:, Feature:), pick the right builder actions, and troubleshoot the "
-    "Preconditions YAML the app generates. Keep answers concise and practical."
+    "Preconditions YAML the app generates. Use the framework reference and action "
+    "list below as ground truth — don't invent actions or syntax that aren't in them. "
+    "This model runs on CPU with no GPU, so keep answers short (a few sentences or "
+    "a short snippet) — long answers take a long time to generate.\n\n"
+    "# Framework syntax reference\n\n" + _load_framework_doc() + "\n\n"
+    "# Available builder actions (id and required params)\n\n" + _action_reference_markdown()
 )
 
 
@@ -1274,6 +1330,23 @@ def _ollama_base_url() -> str:
 
 def _chat_model() -> str:
     return os.getenv("BUILDER_CHAT_MODEL", "qwen2.5-coder:7b")
+
+
+def _chat_num_ctx() -> int:
+    return int(os.getenv("BUILDER_CHAT_NUM_CTX", "4096"))
+
+
+def _chat_max_tokens() -> int:
+    # Caps worst-case generation time on the CPU-only host (~5.5 tok/s measured).
+    return int(os.getenv("BUILDER_CHAT_MAX_TOKENS", "350"))
+
+
+def _chat_keep_alive() -> str:
+    # Keep the model resident between turns so a mid-conversation pause doesn't
+    # evict it — that would force reprocessing the whole ~3k-token system
+    # prompt from scratch (~2.5 min) instead of the cached-prefix fast path
+    # (~10-30s, measured) that later turns in the same conversation get.
+    return os.getenv("BUILDER_CHAT_KEEP_ALIVE", "30m")
 
 
 @app.get("/api/chat/status")
@@ -1294,10 +1367,19 @@ async def chat(req: ChatRequest):
     messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
     messages += [{"role": m.role, "content": m.content} for m in req.messages]
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=240) as client:
             resp = await client.post(
                 f"{base}/api/chat",
-                json={"model": _chat_model(), "messages": messages, "stream": False},
+                json={
+                    "model": _chat_model(),
+                    "messages": messages,
+                    "stream": False,
+                    "keep_alive": _chat_keep_alive(),
+                    "options": {
+                        "num_ctx": _chat_num_ctx(),
+                        "num_predict": _chat_max_tokens(),
+                    },
+                },
             )
             resp.raise_for_status()
             data = resp.json()
