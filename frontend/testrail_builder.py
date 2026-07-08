@@ -1463,6 +1463,16 @@ def _parse_pseudo_tool_call(content: str) -> Optional[tuple]:
     return name, args
 
 
+# The base system prompt (framework doc + action list) already runs ~3.5k
+# tokens on its own — see the num_ctx comment below. A case with a large
+# Preconditions body or dozens of validation issues (e.g. many duplicate-key
+# warnings) can otherwise inflate the per-turn prompt past what this CPU-only
+# host can process inside one request's timeout, so everything past this
+# cap is dropped rather than sent to the model.
+MAX_CASE_CONTEXT_ISSUES = 8
+MAX_CASE_CONTEXT_BODY_CHARS = 3000
+
+
 def _case_context_message(ctx: Optional[ChatCaseContext]) -> Optional[Dict[str, str]]:
     if not ctx or not (ctx.case_id or ctx.title or ctx.body):
         return None
@@ -1473,11 +1483,18 @@ def _case_context_message(ctx: Optional[ChatCaseContext]) -> Optional[Dict[str, 
     if ctx.title:
         lines.append(f"Title: {ctx.title}")
     if ctx.errors:
-        lines.append("Validation errors:\n" + "\n".join(f"- {e}" for e in ctx.errors))
+        shown = ctx.errors[:MAX_CASE_CONTEXT_ISSUES]
+        suffix = f"\n- ...and {len(ctx.errors) - len(shown)} more" if len(ctx.errors) > len(shown) else ""
+        lines.append("Validation errors:\n" + "\n".join(f"- {e}" for e in shown) + suffix)
     if ctx.warnings:
-        lines.append("Validation warnings:\n" + "\n".join(f"- {w}" for w in ctx.warnings))
+        shown = ctx.warnings[:MAX_CASE_CONTEXT_ISSUES]
+        suffix = f"\n- ...and {len(ctx.warnings) - len(shown)} more" if len(ctx.warnings) > len(shown) else ""
+        lines.append("Validation warnings:\n" + "\n".join(f"- {w}" for w in shown) + suffix)
     if ctx.body:
-        lines.append("Current Preconditions YAML:\n```yaml\n" + ctx.body + "\n```")
+        body = ctx.body
+        if len(body) > MAX_CASE_CONTEXT_BODY_CHARS:
+            body = body[:MAX_CASE_CONTEXT_BODY_CHARS] + f"\n... (truncated, {len(ctx.body)} chars total)"
+        lines.append("Current Preconditions YAML:\n```yaml\n" + body + "\n```")
     return {"role": "system", "content": "\n\n".join(lines)}
 
 
@@ -1490,7 +1507,10 @@ def _chat_model() -> str:
 
 
 def _chat_num_ctx() -> int:
-    return int(os.getenv("BUILDER_CHAT_NUM_CTX", "4096"))
+    # The system prompt (framework doc + action list) alone runs ~3.5k tokens,
+    # and the "currently open case" context message adds more on top of that —
+    # 4096 left almost no headroom and caused real prompts to overflow/stall.
+    return int(os.getenv("BUILDER_CHAT_NUM_CTX", "8192"))
 
 
 def _chat_max_tokens() -> int:
@@ -1541,7 +1561,12 @@ async def chat(req: ChatRequest):
         payload["tools"] = TESTRAIL_CHAT_TOOLS
 
     try:
-        async with httpx.AsyncClient(timeout=240) as client:
+        # A single round with a full case-context prompt (~4.5k tokens) has been
+        # measured at ~130s on this CPU-only host; 240s cut it close for the
+        # heaviest real cases (many validation issues + a large body), so this
+        # leaves more headroom. Each round in the tool-call loop gets its own
+        # budget — a multi-round turn can legitimately take several minutes.
+        async with httpx.AsyncClient(timeout=300) as client:
             for _ in range(MAX_CHAT_TOOL_ROUNDS):
                 resp = await client.post(f"{base}/api/chat", json={**payload, "messages": messages})
                 resp.raise_for_status()
@@ -1578,7 +1603,11 @@ async def chat(req: ChatRequest):
             resp.raise_for_status()
             data = resp.json()
     except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Ollama request timed out")
+        raise HTTPException(
+            status_code=504,
+            detail="Ollama request timed out — the prompt may be too large for this CPU-only "
+                   "host, or the model is busy. Try again, or ask a shorter question.",
+        )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Ollama error: {exc}")
     return {"reply": data.get("message", {}).get("content", "")}

@@ -177,6 +177,9 @@ textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
 .chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
 .chat-msg.assistant { align-self: flex-start; background: var(--bg-card); border: 1px solid var(--border); color: var(--text); }
 .chat-msg.assistant.thinking { color: var(--text-dim); font-style: italic; }
+.chat-msg.assistant.error { border-color: rgba(231,76,92,.4); background: rgba(231,76,92,.08); color: #f297a3; }
+.chat-error-actions { margin-top: 8px; }
+.chat-error-actions .btn { padding: 4px 12px; font-size: 12.5px; }
 #chat-input-row { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
 #chat-input { flex: 1; resize: none; height: 38px; font-size: 13px; }
 #chat-send:disabled { opacity: 0.5; }
@@ -1988,14 +1991,26 @@ function currentCaseContext() {
   };
 }
 
-async function sendChatMessage() {
-  const input = $("#chat-input");
-  const text = input.value.trim();
-  if (!text || S.chatBusy) return;
-  const isFirstTurn = S.chatMessages.length === 0;
-  input.value = "";
-  S.chatMessages.push({ role: "user", content: text });
-  renderChatMessage("user", text);
+function renderChatError(message, onRetry) {
+  const node = el("div", { class: "chat-msg assistant error" }, "⚠ " + message);
+  const actions = el("div", { class: "chat-error-actions" });
+  actions.appendChild(el("button", {
+    class: "btn ghost",
+    onclick: () => { node.remove(); onRetry(); },
+  }, "↻ Retry"));
+  node.appendChild(actions);
+  $("#chat-messages").appendChild(node);
+  const pane = $("#chat-messages");
+  pane.scrollTop = pane.scrollHeight;
+  return node;
+}
+
+// Sends whatever is currently in S.chatMessages (the pending user turn is
+// already appended) and renders the result — split out from sendChatMessage
+// so a failed turn's Retry button can resend without duplicating the user
+// message or re-reading the input box.
+async function submitChatTurn() {
+  const isFirstTurn = !S.chatMessages.some((m) => m.role === "assistant");
   S.chatBusy = true;
   $("#chat-send").disabled = true;
   const thinking = renderChatMessage("assistant thinking", isFirstTurn
@@ -2011,11 +2026,21 @@ async function sendChatMessage() {
     renderChatMessage("assistant", res.reply);
   } catch (e) {
     thinking.remove();
-    toast("Assistant error: " + e.message, "err");
+    renderChatError(e.message, submitChatTurn);
   } finally {
     S.chatBusy = false;
     $("#chat-send").disabled = false;
   }
+}
+
+async function sendChatMessage() {
+  const input = $("#chat-input");
+  const text = input.value.trim();
+  if (!text || S.chatBusy) return;
+  input.value = "";
+  S.chatMessages.push({ role: "user", content: text });
+  renderChatMessage("user", text);
+  await submitChatTurn();
 }
 
 $("#tab-chat").addEventListener("click", () => switchTab("chat"));
