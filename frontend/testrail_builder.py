@@ -38,6 +38,7 @@ try:
 except ImportError:
     pass
 
+import httpx
 import yaml
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -455,6 +456,15 @@ class RunRequest(BaseModel):
     name: str
     case_ids: List[int]
     description: Optional[str] = None
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
 
 
 # --------------------------------------------------------------------------- #
@@ -1248,6 +1258,54 @@ async def get_catalog():
             {"id": action_id, **definition}
         )
     return {"categories": categories, "case_types": CASE_PREFIXES}
+
+
+CHAT_SYSTEM_PROMPT = (
+    "You are the AI assistant embedded in the Easy BDD TestRail Test Builder. "
+    "You help the user author BDD-style TestRail test cases (Var:, Shared:, Setup:, "
+    "Teardown:, Feature:), pick the right builder actions, and troubleshoot the "
+    "Preconditions YAML the app generates. Keep answers concise and practical."
+)
+
+
+def _ollama_base_url() -> str:
+    return os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+
+
+def _chat_model() -> str:
+    return os.getenv("BUILDER_CHAT_MODEL", "qwen2.5-coder:7b")
+
+
+@app.get("/api/chat/status")
+async def chat_status():
+    base = _ollama_base_url()
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{base}/api/tags")
+            resp.raise_for_status()
+    except httpx.HTTPError:
+        return {"configured": False, "model": _chat_model()}
+    return {"configured": True, "model": _chat_model()}
+
+
+@app.post("/api/chat")
+async def chat(req: ChatRequest):
+    base = _ollama_base_url()
+    messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+    messages += [{"role": m.role, "content": m.content} for m in req.messages]
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(
+                f"{base}/api/chat",
+                json={"model": _chat_model(), "messages": messages, "stream": False},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Ollama request timed out")
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Ollama error: {exc}")
+    return {"reply": data.get("message", {}).get("content", "")}
 
 
 @app.get("/api/testrail/status")

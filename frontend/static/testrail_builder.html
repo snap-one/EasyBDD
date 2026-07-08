@@ -164,8 +164,21 @@ textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
   font-size: 11px; font-weight: 700; background: var(--red); color: #fff;
 }
 #right-tabs button .badge.warn { background: var(--amber); color: #201500; }
-#preview-pane, #issues-pane { flex: 1; overflow-y: auto; padding: 12px; display: none; min-height: 0; }
-#preview-pane.active, #issues-pane.active { display: block; }
+#preview-pane, #issues-pane, #chat-pane { flex: 1; overflow-y: auto; padding: 12px; display: none; min-height: 0; }
+#preview-pane.active, #issues-pane.active, #chat-pane.active { display: flex; }
+#chat-pane { flex-direction: column; padding: 0; }
+#chat-status { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-dim); padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#chat-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+#chat-status.ok .dot { background: var(--green); }
+#chat-status.err .dot { background: var(--red); }
+#chat-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+#chat-messages:empty::before { content: "Ask about builder actions, TestRail cases, or the Preconditions YAML."; color: var(--text-faint); font-size: 12.5px; }
+.chat-msg { max-width: 88%; padding: 8px 11px; border-radius: 10px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
+.chat-msg.assistant { align-self: flex-start; background: var(--bg-card); border: 1px solid var(--border); color: var(--text); }
+#chat-input-row { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
+#chat-input { flex: 1; resize: none; height: 38px; font-size: 13px; }
+#chat-send:disabled { opacity: 0.5; }
 #preview-title { font-family: var(--mono); font-size: 12.5px; color: var(--amber); margin-bottom: 8px; word-break: break-all; }
 #preview-body {
   font-family: var(--mono); font-size: 12px; white-space: pre; overflow-x: auto;
@@ -311,6 +324,7 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
       <div id="right-tabs">
         <button id="tab-preview" class="active">TestRail Preview</button>
         <button id="tab-issues">Issues<span id="issue-badge" style="display:none" class="badge">0</span></button>
+        <button id="tab-chat">Assistant</button>
       </div>
       <div id="preview-pane" class="active">
         <div id="preview-title"></div>
@@ -321,6 +335,14 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
         <div id="preview-body"></div>
       </div>
       <div id="issues-pane"></div>
+      <div id="chat-pane">
+        <div id="chat-status"><span class="dot"></span><span id="chat-status-text">Checking assistant…</span></div>
+        <div id="chat-messages"></div>
+        <div id="chat-input-row">
+          <textarea id="chat-input" placeholder="Ask the assistant…"></textarea>
+          <button id="chat-send" class="btn primary">Send</button>
+        </div>
+      </div>
       <div id="publish-bar">
         <div class="row">
           <div style="flex:1">
@@ -491,6 +513,8 @@ const S = {
   previewTimer: null,
   collapsedSections: new Set(),  // sidebar section ids the user collapsed
   stepsExpanded: true,  // default expand/collapse state for newly-rendered step cards
+  chatMessages: [],     // {role, content} history for the AI chat panel (session-only)
+  chatBusy: false,
 };
 
 let dragCtx = null;  // {list, fromIndex, card, container, pointerY, rafId} of the step drag in progress, or null
@@ -1919,9 +1943,58 @@ window.addEventListener("beforeunload", (e) => { if (S.dirty) { e.preventDefault
 function switchTab(name) {
   $("#tab-preview").classList.toggle("active", name === "preview");
   $("#tab-issues").classList.toggle("active", name === "issues");
+  $("#tab-chat").classList.toggle("active", name === "chat");
   $("#preview-pane").classList.toggle("active", name === "preview");
   $("#issues-pane").classList.toggle("active", name === "issues");
+  $("#chat-pane").classList.toggle("active", name === "chat");
 }
+
+/* ============================== AI chat assistant ============================== */
+async function checkChatStatus() {
+  const box = $("#chat-status"), text = $("#chat-status-text");
+  try {
+    const st = await api("/api/chat/status");
+    box.className = st.configured ? "ok" : "err";
+    text.textContent = st.configured ? `Connected — ${st.model}` : "Assistant unreachable (Ollama down?)";
+  } catch (e) {
+    box.className = "err";
+    text.textContent = "Assistant unreachable";
+  }
+}
+
+function renderChatMessage(role, content) {
+  $("#chat-messages").appendChild(el("div", { class: `chat-msg ${role}` }, content));
+  const pane = $("#chat-messages");
+  pane.scrollTop = pane.scrollHeight;
+}
+
+async function sendChatMessage() {
+  const input = $("#chat-input");
+  const text = input.value.trim();
+  if (!text || S.chatBusy) return;
+  input.value = "";
+  S.chatMessages.push({ role: "user", content: text });
+  renderChatMessage("user", text);
+  S.chatBusy = true;
+  $("#chat-send").disabled = true;
+  try {
+    const res = await api("/api/chat", { method: "POST", body: { messages: S.chatMessages } });
+    S.chatMessages.push({ role: "assistant", content: res.reply });
+    renderChatMessage("assistant", res.reply);
+  } catch (e) {
+    toast("Assistant error: " + e.message, "err");
+  } finally {
+    S.chatBusy = false;
+    $("#chat-send").disabled = false;
+  }
+}
+
+$("#tab-chat").addEventListener("click", () => switchTab("chat"));
+$("#chat-send").addEventListener("click", sendChatMessage);
+$("#chat-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
+});
+checkChatStatus();
 
 boot();
 </script>
