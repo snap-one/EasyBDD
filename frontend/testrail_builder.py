@@ -1214,6 +1214,13 @@ def _tr_call(fn, *args, **kwargs):
         raise HTTPException(status_code=502, detail=f"TestRail error: {exc}")
 
 
+def _allowed_project_ids() -> Optional[set]:
+    raw = os.getenv("TESTRAIL_ALLOWED_PROJECT_IDS", "").strip()
+    if not raw:
+        return None
+    return {int(part) for part in raw.split(",") if part.strip()}
+
+
 def _case_link(case_id: int) -> str:
     base = os.getenv("TESTRAIL_URL", "").rstrip("/")
     return f"{base}/index.php?/cases/view/{case_id}" if base else ""
@@ -1254,10 +1261,11 @@ async def testrail_status():
 @app.get("/api/testrail/projects")
 async def testrail_projects():
     projects = _tr_call(_tr().get_projects)
+    allowed = _allowed_project_ids()
     return [
         {"id": p["id"], "name": p["name"], "suite_mode": p.get("suite_mode")}
         for p in projects
-        if not p.get("is_completed")
+        if not p.get("is_completed") and (allowed is None or p["id"] in allowed)
     ]
 
 
