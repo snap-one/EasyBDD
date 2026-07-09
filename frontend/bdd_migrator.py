@@ -1596,6 +1596,93 @@ _SIMPLIFY_MATCHERS = (
 )
 
 
+# Mirrors easybdd.core.safe_eval.SafeEvaluator's call whitelist — kept as a
+# local copy rather than an import so bdd_migrator.py stays self-contained
+# regardless of caller sys.path (it has no other easybdd dependency today).
+# If that whitelist changes, this must be updated too, or a condition step
+# emitted here could fail at test-run time with "Method/Function call not
+# allowed" even though it looked fine at migration time.
+_SAFE_EVAL_BUILTINS = frozenset({
+    "len", "str", "int", "float", "bool", "list", "dict", "tuple", "abs", "min", "max",
+    "sum", "round", "range", "enumerate", "zip", "sorted", "reversed", "any", "all",
+    "isinstance", "type",
+})
+_SAFE_EVAL_METHODS = frozenset({
+    "get", "keys", "values", "items", "count", "index", "split", "join", "strip",
+    "lower", "upper", "replace", "startswith", "endswith", "isdigit", "isalpha", "isalnum",
+})
+
+
+def _is_safe_eval_condition(node: ast.AST) -> bool:
+    """Whether `node` would actually be accepted by the runner's condition
+    evaluator — checked before committing to a real If/Else step, since
+    unparsing an arbitrary test expression (e.g. one calling json.loads,
+    which safe_eval explicitly rejects) would otherwise produce a condition
+    that looks fine at migration time but fails at test-run time."""
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            if isinstance(child.func, ast.Name):
+                if child.func.id not in _SAFE_EVAL_BUILTINS:
+                    return False
+            elif isinstance(child.func, ast.Attribute):
+                if child.func.attr not in _SAFE_EVAL_METHODS:
+                    return False
+            else:
+                return False
+        elif isinstance(child, (ast.Import, ast.ImportFrom, ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
+            return False
+    return True
+
+
+def _match_conditional_action_stmt(stmt: ast.stmt) -> Optional[Dict]:
+    """Bare (non-assignment) statement of the shape:
+
+        time.sleep(a) if <condition> else time.sleep(b)
+
+    -> a real If/Else control-flow step with test.sleep in each branch,
+    instead of an assignment-shaped rewrite (this is a statement run purely
+    for its side effect, not a value being stored). The condition's own
+    source text is used as-is — the runner's condition evaluator
+    (easybdd.core.safe_eval) already exposes every current variable by its
+    plain Python name and explicitly allows isinstance/in/and/or, so no
+    ${var} templating is needed or even possible here (safe_eval parses a
+    real Python expression, not a pre-substituted string). Only fires when
+    ast.unparse is available (Python 3.9+) and the condition doesn't
+    reference anything the caller couldn't already see as a variable.
+    """
+    if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.IfExp)):
+        return None
+    test, body, orelse = stmt.value.test, stmt.value.body, stmt.value.orelse
+
+    def _as_sleep_step(call: ast.AST) -> Optional[Dict]:
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "sleep" and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == "time" and len(call.args) == 1 and not call.keywords):
+            return None
+        seconds = _expr_to_template(call.args[0])
+        if seconds is None:
+            return None
+        return {"test.sleep": {"seconds": seconds}}
+
+    then_step = _as_sleep_step(body)
+    else_step = _as_sleep_step(orelse)
+    if then_step is None or else_step is None:
+        return None
+
+    if not _is_safe_eval_condition(test):
+        return None  # would fail at test-run time — leave the whole block as eval.exec instead
+
+    unparse = getattr(ast, "unparse", None)
+    if unparse is None:
+        return None
+    try:
+        condition_src = unparse(test)
+    except Exception:
+        return None
+
+    return {"condition": condition_src, "then": [then_step], "else": [else_step]}
+
+
 def _simplify_single_value(value: ast.AST, store_as: str) -> Optional[List[Dict]]:
     for matcher in _SIMPLIFY_MATCHERS:
         result = matcher(value, store_as)
@@ -1822,6 +1909,18 @@ def _simplify_exec_code(code: str) -> Optional[List[Dict]]:
                 results.extend(simplified)
                 i += 1
                 continue
+        cond_step = _match_conditional_action_stmt(stmt)
+        if cond_step is not None:
+            results.append(cond_step)
+            i += 1
+            continue
+        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            # Safe to drop unconditionally: this only reaches the caller as
+            # part of a fully-simplified block (we bail on the whole thing
+            # below otherwise), so nothing declarative we emitted needs the
+            # module — it was only ever needed by raw code we're replacing.
+            i += 1
+            continue
         return None  # this statement doesn't match anything -- bail on the whole block
     return results
 
