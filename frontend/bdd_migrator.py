@@ -58,6 +58,7 @@ Key syntax being migrated
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -1290,6 +1291,7 @@ def parse_shared_step(name: str, body: str) -> Optional[Dict[str, Any]]:
     if not body:
         return None
     steps, _ = parse_step_block(body)
+    steps = _simplify_eval_steps(steps)
     slug  = re.sub(r"^Shared:\s*", "", name).strip()
     slug  = re.sub(r"[^A-Za-z0-9_]+", "_", slug).strip("_")
     return {"name": slug, "description": name, "steps": steps}
@@ -1334,14 +1336,17 @@ def migrate(content: str) -> Dict[str, Any]:
         doc = _parse_json(content) or {}
         variables_out = parse_given_variables(doc.get("given", "{}"))
         for sh_name, sh_body in (doc.get("shared", {}) or {}).items():
-            entry = parse_shared_step(sh_name, sh_body)
+            entry = parse_shared_step(sh_name, sh_body)  # already eval-simplified internally
             if entry:
+                _flag_unsimplified_eval(entry["steps"], f"Shared: {entry['name']}", warnings)
                 shared_out[entry["name"]] = {
                     "description": entry["description"],
                     "steps": entry["steps"],
                 }
         for feat_name, feat_body in (doc.get("feature", {}) or {}).items():
             steps, data = parse_step_block(feat_body)
+            steps = _simplify_eval_steps(steps)
+            _flag_unsimplified_eval(steps, feat_name, warnings)
             test_dict = {"name": feat_name, "variables": variables_out.copy(), "steps": steps}
             if data:
                 test_dict["data"] = data
@@ -1362,7 +1367,7 @@ def migrate(content: str) -> Dict[str, Any]:
                 test_dict["tags"] = t["tags"]
             if variables_out:
                 test_dict["variables"] = variables_out
-            test_dict["steps"] = t["steps"]
+            test_dict["steps"] = _simplify_eval_steps(t["steps"])
 
             if t.get("loop_count", 0) > 1:
                 test_dict["data"] = [
@@ -1370,6 +1375,7 @@ def migrate(content: str) -> Dict[str, Any]:
                 ]
                 warnings.append(f"Test '{name}' had {t['loop_count']} loop iterations — added data: list.")
 
+            _flag_unsimplified_eval(test_dict["steps"], name, warnings)
             _flag_todos(test_dict["steps"], name, warnings)
             tests_out.append({"name": slug, "display_name": name,
                                "yaml": yaml.dump(test_dict, sort_keys=False, allow_unicode=True)})
@@ -1377,9 +1383,11 @@ def migrate(content: str) -> Dict[str, Any]:
     else:
         # Raw step block (e.g., content of custom_preconds)
         steps, data = parse_step_block(content)
+        steps = _simplify_eval_steps(steps)
         test_dict = {"name": "Migrated Test", "steps": steps}
         if data:
             test_dict["data"] = data
+        _flag_unsimplified_eval(steps, "Migrated Test", warnings)
         _flag_todos(steps, "Migrated Test", warnings)
         tests_out.append({"name": "migrated_test", "display_name": "Migrated Test",
                            "yaml": yaml.dump(test_dict, sort_keys=False, allow_unicode=True)})
@@ -1398,6 +1406,420 @@ def migrate(content: str) -> Dict[str, Any]:
             "variables":    len(variables_out),
         },
     }
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# eval.exec / eval.run simplification — recognize common Python idioms and
+# rewrite them as declarative list.pick/text.replace/text.regex_extract/
+# text.format actions instead. Conservative by design: if any statement in
+# a code block doesn't match a known idiom, the WHOLE block is left as the
+# original eval.exec/eval.run rather than partially transformed — a partial
+# rewrite risks silently breaking variable flow the untransformed statement
+# depended on (e.g. a helper variable a later real eval.exec still reads).
+# ────────────────────────────────────────────────────────────────────────────
+
+def _expr_to_template(node: ast.AST) -> Optional[str]:
+    """Convert a simple AST expression into a ${var}-interpolated string
+    (or a literal) for use as a declarative action's string param. Returns
+    None if the expression is too complex to represent this way — e.g. a
+    function call, comprehension, or anything beyond a name/literal/+."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Constant):
+        return str(node.value)
+    if isinstance(node, ast.Name):
+        return f"${{{node.id}}}"
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _expr_to_template(node.left)
+        right = _expr_to_template(node.right)
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+
+def _index_value(node: ast.AST) -> Optional[int]:
+    """Extract a literal integer index, including negative literals
+    (-1, -2, ...), which the Python parser represents as UnaryOp(USub)."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, int):
+        return node.value
+    if (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub)
+            and isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, int)):
+        return -node.operand.value
+    return None
+
+
+def _match_list_pick(value: ast.AST, store_as: str) -> Optional[Dict]:
+    """x = y[n]  ->  list.pick"""
+    if isinstance(value, ast.Subscript) and isinstance(value.value, ast.Name):
+        idx = _index_value(value.slice)
+        if idx is not None:
+            return {"action": "list.pick", "from_var": value.value.id, "index": idx, "store_as": store_as}
+    return None
+
+
+def _match_text_replace(value: ast.AST, store_as: str) -> Optional[Dict]:
+    """x = y.replace(a, b)  ->  text.replace"""
+    if (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+            and value.func.attr == "replace" and len(value.args) == 2 and not value.keywords):
+        receiver = _expr_to_template(value.func.value)
+        find = _expr_to_template(value.args[0])
+        repl = _expr_to_template(value.args[1])
+        if receiver is not None and find is not None and repl is not None:
+            return {"action": "text.replace", "value": receiver, "find": find,
+                    "replace_with": repl, "store_as": store_as}
+    return None
+
+
+def _match_regex_extract(value: ast.AST, store_as: str) -> Optional[Dict]:
+    """x = re.search(pattern, y).group(n)  ->  text.regex_extract
+
+    No None-check on the match here — this only fires for code that already
+    assumed the match always succeeds (the pattern this codebase actually
+    uses); the safer "or a default" version is _match_regex_ternary_fusion.
+    """
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute) and value.func.attr == "group"):
+        return None
+    inner = value.func.value
+    if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute) and inner.func.attr == "search"
+            and isinstance(inner.func.value, ast.Name) and inner.func.value.id == "re"
+            and len(inner.args) == 2 and not inner.keywords):
+        return None
+    pattern = _expr_to_template(inner.args[0])
+    source = _expr_to_template(inner.args[1])
+    if pattern is None or source is None:
+        return None
+    group = 0
+    if value.args:
+        g = _index_value(value.args[0])
+        if g is None:
+            return None
+        group = g
+    step = {"action": "text.regex_extract", "value": source, "pattern": pattern, "store_as": store_as}
+    if group:
+        step["group"] = group
+    return step
+
+
+def _match_text_format(value: ast.AST, store_as: str) -> Optional[Dict]:
+    """x = '{}.{}'.format(a, b)  ->  text.format
+
+    Only handles bare {} placeholders (not {0}/{name}) with an exact
+    placeholder/arg count match — anything fancier bails out."""
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute) and value.func.attr == "format"
+            and isinstance(value.func.value, ast.Constant) and isinstance(value.func.value.value, str)
+            and not value.keywords):
+        return None
+    template_str = value.func.value.value
+    placeholders = re.findall(r"\{\}", template_str)
+    if len(placeholders) != len(value.args) or not placeholders:
+        return None
+    arg_reprs = [_expr_to_template(a) for a in value.args]
+    if any(r is None for r in arg_reprs):
+        return None
+    rebuilt = template_str
+    for rep in arg_reprs:
+        rebuilt = rebuilt.replace("{}", rep, 1)
+    return {"action": "text.format", "template": rebuilt, "store_as": store_as}
+
+
+_SIMPLIFY_MATCHERS = (_match_list_pick, _match_text_replace, _match_regex_extract, _match_text_format)
+
+
+def _simplify_single_value(value: ast.AST, store_as: str) -> Optional[Dict]:
+    for matcher in _SIMPLIFY_MATCHERS:
+        result = matcher(value, store_as)
+        if result is not None:
+            return result
+    return None
+
+
+def _name_unsafe_after(stmts_after: List[ast.stmt], name: str) -> bool:
+    """True if `name` is read anywhere in stmts_after before being cleanly
+    reassigned — i.e. it's not safe to collapse away a fused match/ternary
+    that only `name` currently holds.
+
+    This codebase reuses generic scratch names (m/date/body) across
+    back-to-back upgrade/downgrade blocks in the same eval.exec — e.g.
+    `m = re.search(...)` for downgrade immediately follows the upgrade
+    block's fused-away `m`. A plain "is `name` referenced anywhere later"
+    check would treat that fresh, unrelated reassignment as a conflicting
+    use and refuse to fuse the (perfectly safe) first block. Instead, once
+    a later statement rebinds `name` via a plain `name = ...` with no
+    self-reference, name's earlier value has no more readers and everything
+    after that point is irrelevant to this fusion's safety.
+    """
+    for s in stmts_after:
+        read = any(
+            isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load)
+            for n in ast.walk(s)
+        )
+        if read:
+            return True
+        rebinds = (
+            isinstance(s, ast.Assign) and len(s.targets) == 1
+            and isinstance(s.targets[0], ast.Name) and s.targets[0].id == name
+        )
+        if rebinds:
+            return False
+    return False
+
+
+def _match_regex_ternary_fusion(
+    stmt_a: ast.stmt, stmt_b: ast.stmt, stmts_after: List[ast.stmt]
+) -> Optional[Dict]:
+    """m = re.search(pattern, y); x = m.group(n) if m else default
+    ->  a single text.regex_extract with a default, consuming both
+    statements. Only fires when `m` isn't read again later before being
+    reassigned — see _name_unsafe_after for why reassignment (not just any
+    later reference) is the real safety boundary."""
+    if not (isinstance(stmt_a, ast.Assign) and len(stmt_a.targets) == 1 and isinstance(stmt_a.targets[0], ast.Name)):
+        return None
+    m_name = stmt_a.targets[0].id
+    search_call = stmt_a.value
+    if not (isinstance(search_call, ast.Call) and isinstance(search_call.func, ast.Attribute)
+            and search_call.func.attr == "search" and isinstance(search_call.func.value, ast.Name)
+            and search_call.func.value.id == "re" and len(search_call.args) == 2 and not search_call.keywords):
+        return None
+
+    if not (isinstance(stmt_b, ast.Assign) and len(stmt_b.targets) == 1 and isinstance(stmt_b.targets[0], ast.Name)):
+        return None
+    x_name = stmt_b.targets[0].id
+    if not isinstance(stmt_b.value, ast.IfExp):
+        return None
+    test, body, orelse = stmt_b.value.test, stmt_b.value.body, stmt_b.value.orelse
+    if not (isinstance(test, ast.Name) and test.id == m_name):
+        return None
+    if not (isinstance(body, ast.Call) and isinstance(body.func, ast.Attribute) and body.func.attr == "group"
+            and isinstance(body.func.value, ast.Name) and body.func.value.id == m_name):
+        return None
+    if not isinstance(orelse, ast.Constant):
+        return None  # only literal defaults supported
+
+    if _name_unsafe_after(stmts_after, m_name):
+        return None  # m is read again before being reassigned — collapsing it away would change behavior
+
+    pattern = _expr_to_template(search_call.args[0])
+    source = _expr_to_template(search_call.args[1])
+    if pattern is None or source is None:
+        return None
+    group = 0
+    if body.args:
+        g = _index_value(body.args[0])
+        if g is None:
+            return None
+        group = g
+
+    step = {"action": "text.regex_extract", "value": source, "pattern": pattern,
+            "store_as": x_name, "default": orelse.value}
+    if group:
+        step["group"] = group
+    return step
+
+
+def _match_regex_strip_fusion(
+    stmt_a: ast.stmt, stmt_b: ast.stmt, stmt_c: ast.stmt, stmts_after: List[ast.stmt]
+) -> Optional[List[Dict]]:
+    """The date-suffix version idiom seen repeatedly in this codebase's
+    firmware-parsing cases:
+
+        m = re.search(pattern, y)
+        date = m.group(n) if m else default
+        body = y.replace('_' + date, '') if date else y
+
+    A regex substitution is already a no-op when nothing matches, so the
+    third statement's conditional is unnecessary — this collapses all three
+    into a text.regex_extract (for `date`) plus a single regex text.replace
+    (for `body`, stripping "_<date>" unconditionally) instead of trying to
+    preserve the ternary literally. Only fires when `m`/`date` aren't
+    referenced anywhere outside these three statements.
+    """
+    if not (isinstance(stmt_a, ast.Assign) and len(stmt_a.targets) == 1 and isinstance(stmt_a.targets[0], ast.Name)):
+        return None
+    m_name = stmt_a.targets[0].id
+    search_call = stmt_a.value
+    if not (isinstance(search_call, ast.Call) and isinstance(search_call.func, ast.Attribute)
+            and search_call.func.attr == "search" and isinstance(search_call.func.value, ast.Name)
+            and search_call.func.value.id == "re" and len(search_call.args) == 2 and not search_call.keywords):
+        return None
+    pattern_node, source_node = search_call.args
+    if not isinstance(source_node, ast.Name):
+        return None  # need a plain variable name to reuse it in the strip step too
+    source_name = source_node.id
+
+    if not (isinstance(stmt_b, ast.Assign) and len(stmt_b.targets) == 1 and isinstance(stmt_b.targets[0], ast.Name)):
+        return None
+    date_name = stmt_b.targets[0].id
+    if not isinstance(stmt_b.value, ast.IfExp):
+        return None
+    test_b, body_b, orelse_b = stmt_b.value.test, stmt_b.value.body, stmt_b.value.orelse
+    if not (isinstance(test_b, ast.Name) and test_b.id == m_name):
+        return None
+    if not (isinstance(body_b, ast.Call) and isinstance(body_b.func, ast.Attribute) and body_b.func.attr == "group"
+            and isinstance(body_b.func.value, ast.Name) and body_b.func.value.id == m_name):
+        return None
+    if not isinstance(orelse_b, ast.Constant):
+        return None
+    group = 0
+    if body_b.args:
+        g = _index_value(body_b.args[0])
+        if g is None:
+            return None
+        group = g
+
+    if not (isinstance(stmt_c, ast.Assign) and len(stmt_c.targets) == 1 and isinstance(stmt_c.targets[0], ast.Name)):
+        return None
+    body_name = stmt_c.targets[0].id
+    if not isinstance(stmt_c.value, ast.IfExp):
+        return None
+    test_c, body_c, orelse_c = stmt_c.value.test, stmt_c.value.body, stmt_c.value.orelse
+    if not (isinstance(test_c, ast.Name) and test_c.id == date_name):
+        return None
+    if not (isinstance(body_c, ast.Call) and isinstance(body_c.func, ast.Attribute) and body_c.func.attr == "replace"
+            and isinstance(body_c.func.value, ast.Name) and body_c.func.value.id == source_name
+            and len(body_c.args) == 2 and not body_c.keywords):
+        return None
+    strip_target = body_c.args[0]
+    if not (isinstance(strip_target, ast.BinOp) and isinstance(strip_target.op, ast.Add)
+            and isinstance(strip_target.left, ast.Constant) and strip_target.left.value == "_"
+            and isinstance(strip_target.right, ast.Name) and strip_target.right.id == date_name):
+        return None
+    replace_with_node = body_c.args[1]
+    if not (isinstance(replace_with_node, ast.Constant) and replace_with_node.value == ""):
+        return None
+    if not (isinstance(orelse_c, ast.Name) and orelse_c.id == source_name):
+        return None
+
+    # Only `m` (the raw match object) needs the safety check — it has no
+    # declarative equivalent, so if something later still needed the actual
+    # match object we couldn't represent that. `date`/`body` are this
+    # fusion's real outputs and survive as run variables via store_as, so a
+    # later read of them is exactly what's supposed to happen, not a hazard.
+    if _name_unsafe_after(stmts_after, m_name):
+        return None
+
+    pattern = _expr_to_template(pattern_node)
+    source = _expr_to_template(source_node)
+    if pattern is None or source is None:
+        return None
+
+    extract_step = {"action": "text.regex_extract", "value": source, "pattern": pattern,
+                     "store_as": date_name, "default": orelse_b.value}
+    if group:
+        extract_step["group"] = group
+    strip_step = {"action": "text.replace", "value": source, "find": "_" + pattern,
+                  "regex": True, "replace_with": "", "store_as": body_name}
+    return [extract_step, strip_step]
+
+
+def _simplify_exec_code(code: str) -> Optional[List[Dict]]:
+    """Try to convert a full eval.exec code block (semicolon-joined
+    statements — this codebase's convention for multi-statement eval.exec,
+    since embedded newlines get YAML-folded to spaces) into a list of
+    declarative steps.
+
+    Returns None (leave the original eval.exec untouched) if ANY statement
+    fails to match a known idiom — see the module docstring above this
+    section for why partial transformation isn't attempted.
+    """
+    try:
+        tree = ast.parse(code, mode="exec")
+    except SyntaxError:
+        return None
+    stmts = tree.body
+    if not stmts:
+        return None
+
+    results: List[Dict] = []
+    i, n = 0, len(stmts)
+    while i < n:
+        if i + 2 < n:
+            fused3 = _match_regex_strip_fusion(stmts[i], stmts[i + 1], stmts[i + 2], stmts[i + 3:])
+            if fused3 is not None:
+                results.extend(fused3)
+                i += 3
+                continue
+        if i + 1 < n:
+            fused = _match_regex_ternary_fusion(stmts[i], stmts[i + 1], stmts[i + 2:])
+            if fused is not None:
+                results.append(fused)
+                i += 2
+                continue
+        stmt = stmts[i]
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            simplified = _simplify_single_value(stmt.value, stmt.targets[0].id)
+            if simplified is not None:
+                results.append(simplified)
+                i += 1
+                continue
+        return None  # this statement doesn't match anything -- bail on the whole block
+    return results
+
+
+def _try_simplify_eval_step(step: Dict) -> Optional[List[Dict]]:
+    """If `step` is a dot-notation eval.exec/eval.run step that matches a
+    known idiom, return the declarative dot-notation step(s) to replace it
+    with. Returns None if it doesn't match anything (leave as-is)."""
+    if "eval.exec" in step:
+        code = str((step.get("eval.exec") or {}).get("code", ""))
+        new_steps = _simplify_exec_code(code)
+        if new_steps is None:
+            return None
+        return [_to_dot_notation(s) for s in new_steps]
+    if "eval.run" in step:
+        params = step.get("eval.run") or {}
+        expr = str(params.get("expression") or params.get("code") or "")
+        store_as = str(params.get("store_as", ""))
+        if not expr or not store_as:
+            return None
+        try:
+            tree = ast.parse(expr, mode="eval")
+        except SyntaxError:
+            return None
+        simplified = _simplify_single_value(tree.body, store_as)
+        if simplified is None:
+            return None
+        return [_to_dot_notation(simplified)]
+    return None
+
+
+def _simplify_eval_steps(steps: List[Dict]) -> List[Dict]:
+    """Walk a step list, recursing into control-flow bodies, replacing any
+    eval.exec/eval.run step that matches a recognized idiom with the
+    equivalent declarative step(s). Everything else passes through
+    unchanged."""
+    out: List[Dict] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            out.append(step)
+            continue
+        for key in ("steps", "loop_steps", "then_steps", "else_steps", "except_steps", "finally_steps"):
+            if isinstance(step.get(key), list):
+                step[key] = _simplify_eval_steps(step[key])
+        replacement = _try_simplify_eval_step(step)
+        out.extend(replacement if replacement is not None else [step])
+    return out
+
+
+def _count_unsimplified_eval(steps: List[Dict]) -> int:
+    n = 0
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if "eval.exec" in step or "eval.run" in step:
+            n += 1
+        for key in ("steps", "loop_steps", "then_steps", "else_steps", "except_steps", "finally_steps"):
+            if isinstance(step.get(key), list):
+                n += _count_unsimplified_eval(step[key])
+    return n
+
+
+def _flag_unsimplified_eval(steps: List[Dict], test_name: str, warnings: List[str]) -> None:
+    n = _count_unsimplified_eval(steps)
+    if n:
+        warnings.append(
+            f"Test '{test_name}': {n} eval.exec/eval.run step(s) didn't match a known "
+            f"simplification pattern and were left as-is — review manually."
+        )
 
 
 def _flag_todos(steps: List[Dict], test_name: str, warnings: List[str]) -> None:
