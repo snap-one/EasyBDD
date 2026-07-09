@@ -1972,6 +1972,126 @@ async def lint_suite(req: LintRequest):
     return {"counts": counts, "issues": results}
 
 
+@app.get("/api/migrate/candidates")
+async def migrate_candidates(project_id: int = Query(...), suite_id: Optional[int] = Query(None)):
+    """Scan a suite for cases whose body looks like un-migrated legacy
+    (pipe-delimited mybdd) content, for the migration UI's case picker.
+    Reuses parse_case_to_model's own "legacy format?" detection — the same
+    signal /api/testrail/lint already surfaces per-case — rather than a
+    second, possibly-divergent heuristic."""
+    cases = _tr_call(_tr().get_cases, project_id, suite_id)
+    candidates = []
+    for c in cases:
+        title = c.get("title", "") or ""
+        role = _classify_role(title)
+        if role in ("other", "test"):
+            continue
+        parsed = parse_case_to_model(c)
+        notes = parsed.get("notes", [])
+        is_legacy = any(
+            "legacy format" in n or "Could not parse existing body" in n
+            for n in notes
+        )
+        if is_legacy:
+            candidates.append({
+                "case_id": c["id"], "title": title, "role": role,
+                "section_id": c.get("section_id"),
+            })
+    return {"candidates": candidates}
+
+
+class MigratePreviewRequest(BaseModel):
+    case_id: Optional[int] = None
+    # Paste mode — used when a case's live body has already been clobbered
+    # by a bad migration and the original legacy source only exists outside
+    # TestRail (the caller supplies it directly instead of case_id).
+    content: Optional[str] = None
+    name: Optional[str] = None
+    case_type: Optional[str] = None
+
+
+@app.post("/api/migrate/preview")
+async def migrate_preview(req: MigratePreviewRequest):
+    """Run the BDD migrator against either a live case's current body
+    (case_id) or pasted legacy content, and return the resulting Easy BDD
+    model + preview body — without publishing anything. Hand the returned
+    "model" straight to /api/testrail/publish to actually apply it."""
+    import bdd_migrator
+
+    old_body = None
+    if req.case_id:
+        case = _tr_call(_tr().get_case, req.case_id)
+        title = case.get("title", "") or ""
+        role = _classify_role(title)
+        if role in ("other", "test"):
+            raise HTTPException(status_code=400, detail=f"Case C{req.case_id} isn't a migratable case type (role={role!r})")
+        name = title
+        for prefix, r in _ROLE_BY_PREFIX.items():
+            if title.startswith(prefix):
+                name = title[len(prefix):].strip()
+                break
+        old_body = strip_html_to_text(str(case.get("custom_preconds") or ""))
+        # A case_id + pasted content together means: use this case's known
+        # title/type, but migrate the pasted text instead of the live body —
+        # for cases whose body was already overwritten by a bad migration,
+        # where the original legacy source only exists outside TestRail.
+        legacy_source = req.content if req.content else old_body
+    else:
+        if not req.content or not req.name or not req.case_type:
+            raise HTTPException(
+                status_code=400,
+                detail="content, name, and case_type are required when case_id is not given",
+            )
+        legacy_source = req.content
+        name = req.name
+        role = req.case_type
+
+    if not legacy_source.strip():
+        raise HTTPException(status_code=400, detail="Nothing to migrate — source content is empty")
+
+    try:
+        result = bdd_migrator.migrate(legacy_source)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Migration failed: {exc}")
+
+    migrator_warnings = list(result.get("warnings", []))
+    if not result.get("tests"):
+        raise HTTPException(status_code=422, detail="Migrator produced no steps — check the source content.")
+
+    parsed_yaml = yaml.safe_load(result["tests"][0]["yaml"]) or {}
+    raw_steps = parsed_yaml.get("steps") or []
+    nodes = [_dict_to_node(s) for s in raw_steps if isinstance(s, dict)]
+    data_rows = None
+    if parsed_yaml.get("data"):
+        data_rows = yaml.safe_dump(parsed_yaml["data"], default_flow_style=False, width=100000).rstrip()
+
+    model = CaseModel(
+        case_type=role,
+        name=name,
+        variables=[],
+        data_rows=data_rows,
+        steps=[n.model_dump() for n in nodes],
+    )
+
+    v = validate_case(model)
+    try:
+        title = case_title(model)
+    except ValueError:
+        title = name
+
+    return {
+        "case_id": req.case_id,
+        "title": title,
+        "model": model.model_dump(),
+        "old_body": old_body,
+        "new_body": v["body"],
+        "valid": v["valid"],
+        "errors": v["errors"],
+        "warnings": v["warnings"],
+        "migrator_warnings": migrator_warnings,
+    }
+
+
 @app.post("/api/testrail/section")
 async def create_section(req: SectionRequest):
     payload: Dict[str, Any] = {"name": req.name}

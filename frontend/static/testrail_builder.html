@@ -286,6 +286,7 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
     <div style="flex:1"></div>
     <button class="btn ghost" id="btn-runs-view" title="Browse test runs, check results, mark tests for retest">📊 Runs</button>
     <button class="btn ghost" id="btn-run-modal" title="Assemble published cases into an EASY_BDD: run">🏃 Create Run</button>
+    <button class="btn ghost" id="btn-migrate-modal" title="Convert legacy pipe-delimited mybdd cases to Easy BDD actions">🔀 Migrate</button>
     <button class="btn ghost" id="btn-new-case">＋ New Case</button>
   </div>
 
@@ -429,6 +430,42 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
   <div class="modal" style="width:760px; height:80vh">
     <div class="modal-head"><h2>Suite health check</h2><button class="icon-btn" data-close="lint-back">✕</button></div>
     <div class="modal-body" id="lint-body" style="flex:1; min-height:0; overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- ============ migrate legacy cases modal ============ -->
+<div class="modal-back" id="migrate-back">
+  <div class="modal" style="width:920px; height:85vh">
+    <div class="modal-head"><h2>Migrate legacy cases</h2><button class="icon-btn" data-close="migrate-back">✕</button></div>
+    <div class="modal-body" style="flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:10px">
+      <div class="dim" style="font-size:12.5px">
+        Converts old pipe-delimited mybdd steps to Easy BDD actions. "Auto-detected" cases below
+        failed to parse as Easy BDD at all — pick any others too if you know they need it.
+        If a case was already run through a broken migration, its live body may look like valid
+        (but wrong) Easy BDD and won't be auto-detected — use Paste mode with the original source instead.
+      </div>
+      <div style="display:flex; gap:8px; align-items:center">
+        <button class="add-link" id="migrate-select-flagged">Select auto-detected</button>
+        <button class="add-link" id="migrate-select-none">Select none</button>
+        <span class="dim" style="margin-left:auto; font-size:12px" id="migrate-count"></span>
+      </div>
+      <div id="migrate-cases" style="flex:0 0 auto; max-height:160px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:6px"></div>
+
+      <div class="copy-row" style="margin-top:2px; margin-bottom:0">
+        <span class="lbl">Paste mode (for cases whose live body is already broken)</span>
+      </div>
+      <div style="display:flex; gap:8px">
+        <input id="migrate-paste-case-id" class="compact" placeholder="Case ID, e.g. 18761852" style="width:200px; margin:0">
+        <textarea id="migrate-paste-content" placeholder="Paste raw pipe-delimited legacy text…" style="flex:1; height:64px; font-family:var(--mono); font-size:12px; margin:0"></textarea>
+      </div>
+
+      <div id="migrate-results" style="flex:1; overflow-y:auto; border-top:1px solid var(--border); padding-top:8px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close="migrate-back">Close</button>
+      <button class="btn ghost" id="btn-migrate-preview">Preview</button>
+      <button class="btn primary" id="btn-migrate-publish-all" disabled>Publish all valid</button>
+    </div>
   </div>
 </div>
 
@@ -1616,8 +1653,197 @@ async function runLint() {
   }
 }
 
+/* ============================== migrate legacy cases ============================== */
+// case_id -> latest /api/migrate/preview result, so "Publish all valid" and
+// per-case publish buttons don't need to re-fetch.
+S.migrateResults = {};
+
+function migrateCaseRow(c, flagged) {
+  return el("label", { class: "run-case-row" },
+    el("input", { type: "checkbox", "data-mcid": c.id, checked: flagged || null }),
+    el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
+    el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
+    flagged ? el("span", { class: "dim", style: "font-size:11px" }, "auto-detected") : null,
+    el("span", { class: "cid" }, `C${c.id}`),
+  );
+}
+
+function migrateSelectionCount() {
+  const n = document.querySelectorAll("#migrate-cases input[data-mcid]:checked").length;
+  $("#migrate-count").textContent = `${n} case${n === 1 ? "" : "s"} selected`;
+}
+
+async function openMigrateModal() {
+  if (!S.projectId) { toast("Select a project first.", "err"); return; }
+  const box = $("#migrate-cases");
+  box.innerHTML = "";
+  $("#migrate-results").innerHTML = "";
+  $("#migrate-paste-case-id").value = "";
+  $("#migrate-paste-content").value = "";
+  S.migrateResults = {};
+  $("#btn-migrate-publish-all").disabled = true;
+  box.appendChild(el("div", { class: "empty-note" }, "Scanning suite for legacy-format cases…"));
+  $("#migrate-back").classList.add("open");
+
+  let flaggedIds = new Set();
+  try {
+    const res = await api(`/api/migrate/candidates?project_id=${S.projectId}&suite_id=${S.suiteId || ""}`);
+    flaggedIds = new Set(res.candidates.map(c => c.case_id));
+  } catch (e) {
+    toast("Could not scan for candidates: " + e.message, "err");
+  }
+
+  box.innerHTML = "";
+  const migratable = S.cases.filter(c => c.role !== "other" && c.role !== "test");
+  if (!migratable.length) {
+    box.appendChild(el("div", { class: "empty-note" }, "No migratable cases in this suite."));
+  } else {
+    // Flagged (auto-detected) cases first, so they're immediately visible.
+    const sorted = [...migratable].sort((a, b) => (flaggedIds.has(b.id) ? 1 : 0) - (flaggedIds.has(a.id) ? 1 : 0));
+    for (const c of sorted) {
+      const row = migrateCaseRow(c, flaggedIds.has(c.id));
+      row.querySelector("input").addEventListener("change", migrateSelectionCount);
+      box.appendChild(row);
+    }
+  }
+  migrateSelectionCount();
+}
+
+function renderMigrateResult(result) {
+  const card = el("div", { class: "step-card", style: "margin-bottom:10px" });
+  card.appendChild(el("div", { class: "step-head" },
+    el("span", { class: "titlebit", style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, result.title || "(untitled)"),
+    result.case_id ? el("span", { class: "actid", style: "margin-left:auto; flex-shrink:0" }, `C${result.case_id}`) : null,
+  ));
+  const det = el("div", { style: "padding: 4px 12px 10px; display:flex; flex-direction:column; gap:8px" });
+
+  for (const w of (result.migrator_warnings || [])) det.appendChild(el("div", { class: "issue warning" }, "⚠ migrator: " + w));
+  for (const e of (result.errors || [])) det.appendChild(el("div", { class: "issue error" }, "✕ " + e));
+  for (const w of (result.warnings || [])) det.appendChild(el("div", { class: "issue warning" }, "⚠ " + w));
+  if (!result.errors?.length && !result.warnings?.length && !result.migrator_warnings?.length) {
+    det.appendChild(el("div", { class: "issue okline" }, "✓ Migrated cleanly, no issues."));
+  }
+
+  const bodies = el("div", { style: "display:flex; gap:10px" });
+  if (result.old_body !== null && result.old_body !== undefined) {
+    const oldCol = el("div", { style: "flex:1; min-width:0" },
+      el("div", { class: "dim", style: "font-size:11px; margin-bottom:3px" }, "CURRENT (live) BODY"),
+      el("pre", { style: "font-family:var(--mono); font-size:11px; white-space:pre-wrap; word-break:break-word; background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:8px; max-height:220px; overflow-y:auto; margin:0" }, result.old_body || "(empty)"));
+    bodies.appendChild(oldCol);
+  }
+  const newCol = el("div", { style: "flex:1; min-width:0" },
+    el("div", { class: "dim", style: "font-size:11px; margin-bottom:3px" }, "MIGRATED (proposed) BODY"),
+    el("pre", { style: "font-family:var(--mono); font-size:11px; white-space:pre-wrap; word-break:break-word; background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:8px; max-height:220px; overflow-y:auto; margin:0" }, result.new_body || "(empty)"));
+  bodies.appendChild(newCol);
+  det.appendChild(bodies);
+
+  const actions = el("div", { style: "display:flex; gap:8px; align-items:center" });
+  const publishBtn = el("button", { class: "btn primary", style: "padding:5px 12px; font-size:12.5px" }, "Publish this case");
+  if (!result.valid || !result.case_id) publishBtn.disabled = true;
+  publishBtn.addEventListener("click", () => publishMigratedCase(result, publishBtn).catch(() => {}));
+  actions.appendChild(publishBtn);
+  if (!result.case_id) actions.appendChild(el("span", { class: "dim", style: "font-size:11.5px" }, "Paste mode needs a Case ID to publish to."));
+  det.appendChild(actions);
+
+  card.appendChild(det);
+  return card;
+}
+
+async function publishMigratedCase(result, btn) {
+  const c = S.cases.find(x => x.id === result.case_id);
+  if (!c) {
+    const msg = `Case C${result.case_id} not found in the loaded suite.`;
+    toast(msg, "err");
+    throw new Error(msg);
+  }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publishing…'; }
+  try {
+    const res = await api("/api/testrail/publish", { method: "POST", body: {
+      model: result.model, project_id: S.projectId, suite_id: S.suiteId,
+      section_id: c.section_id, case_id: result.case_id,
+    } });
+    toast(`Published C${result.case_id} — <a href="${res.link}" target="_blank">open ↗</a>`, "ok", true);
+    if (btn) { btn.textContent = "✓ Published"; }
+    if (S.editingCaseId === result.case_id) loadCase(result.case_id);
+  } catch (e) {
+    toast(`Publish failed for C${result.case_id}: ` + e.message, "err");
+    if (btn) { btn.disabled = false; btn.textContent = "Publish this case"; }
+    throw e;
+  }
+}
+
+async function migratePreviewSelected() {
+  const results = $("#migrate-results");
+  results.innerHTML = "";
+  S.migrateResults = {};
+  $("#btn-migrate-publish-all").disabled = true;
+
+  const ids = [...document.querySelectorAll("#migrate-cases input[data-mcid]:checked")].map(cb => Number(cb.dataset.mcid));
+  const pasteCaseId = Number($("#migrate-paste-case-id").value.trim() || 0);
+  const pasteContent = $("#migrate-paste-content").value.trim();
+  if (pasteContent && !pasteCaseId) { toast("Enter a Case ID to use paste mode.", "err"); return; }
+  if (!ids.length && !pasteContent) { toast("Select at least one case, or use paste mode.", "err"); return; }
+
+  const btn = $("#btn-migrate-preview");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Previewing…';
+  results.appendChild(el("div", { class: "empty-note" }, "Running migrator…"));
+  try {
+    const requests = ids.map(case_id => api("/api/migrate/preview", { method: "POST", body: { case_id } }).catch(e => ({ error: e.message, case_id })));
+    if (pasteCaseId) {
+      requests.push(api("/api/migrate/preview", { method: "POST", body: { case_id: pasteCaseId, content: pasteContent } }).catch(e => ({ error: e.message, case_id: pasteCaseId })));
+    }
+    const settled = await Promise.all(requests);
+    results.innerHTML = "";
+    let anyValid = false;
+    for (const r of settled) {
+      if (r.error) {
+        results.appendChild(el("div", { class: "issue error" }, `✕ C${r.case_id}: ${r.error}`));
+        continue;
+      }
+      S.migrateResults[r.case_id] = r;
+      if (r.valid) anyValid = true;
+      results.appendChild(renderMigrateResult(r));
+    }
+    $("#btn-migrate-publish-all").disabled = !anyValid;
+  } catch (e) {
+    results.innerHTML = "";
+    results.appendChild(el("div", { class: "issue error" }, "Preview failed: " + e.message));
+  } finally {
+    btn.disabled = false; btn.textContent = "Preview";
+  }
+}
+
+async function migratePublishAllValid() {
+  const btn = $("#btn-migrate-publish-all");
+  const valid = Object.values(S.migrateResults).filter(r => r.valid && r.case_id);
+  if (!valid.length) return;
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publishing…';
+  let ok = 0, fail = 0;
+  for (const r of valid) {
+    try { await publishMigratedCase(r, null); ok++; }
+    catch { fail++; }
+  }
+  btn.disabled = false; btn.textContent = "Publish all valid";
+  toast(`Published ${ok} case${ok === 1 ? "" : "s"}${fail ? `, ${fail} failed` : ""}.`, fail ? "err" : "ok");
+  await reloadSuite();
+}
+
 /* ============================== wire up ============================== */
 $("#btn-lint").addEventListener("click", runLint);
+$("#btn-migrate-modal").addEventListener("click", openMigrateModal);
+$("#migrate-select-flagged").addEventListener("click", () => {
+  document.querySelectorAll("#migrate-cases .run-case-row").forEach(row => {
+    const cb = row.querySelector("input[data-mcid]");
+    cb.checked = !!row.querySelector(".dim");
+  });
+  migrateSelectionCount();
+});
+$("#migrate-select-none").addEventListener("click", () => {
+  document.querySelectorAll("#migrate-cases input[data-mcid]").forEach(cb => cb.checked = false);
+  migrateSelectionCount();
+});
+$("#btn-migrate-preview").addEventListener("click", migratePreviewSelected);
+$("#btn-migrate-publish-all").addEventListener("click", migratePublishAllValid);
 $("#btn-expand-sections").addEventListener("click", () => { S.collapsedSections.clear(); renderCaseList(); });
 $("#btn-collapse-sections").addEventListener("click", () => { for (const s of S.sections) S.collapsedSections.add(s.id); renderCaseList(); });
 $("#sel-project").addEventListener("change", onProjectChange);

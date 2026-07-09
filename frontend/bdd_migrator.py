@@ -28,6 +28,11 @@ Key syntax being migrated
   | path | in json_response                         → test.assert (JSON path)
   | path == val | in json_response                  → test.assert (JSON equality)
   response_code | 200 |                             → test.assert_response
+  function | {"name":"browser"} | [{"command":...}] | → one browser.* step per array entry
+                                                        (Selenium IDE-style export). "pause" →
+                                                        browser.wait; id=/link=/name=/css=
+                                                        locators are translated to real
+                                                        selectors (xpath= passes through as-is)
   Shared: name                                      → shared_step: name
   $variable                                         → ${variable}
   gv.log[-1]['response_txt']  (YAML param context)  → ${last_response}
@@ -342,6 +347,58 @@ def _clean_var_value(v: str) -> str:
 # Browser command mapping
 # ────────────────────────────────────────────────────────────────────────────
 
+_SELENIUM_LOCATOR_RE = re.compile(
+    r"^(xpath|id|css|name|classname|class|linktext|link|partiallinktext)=(.*)$", re.I
+)
+
+
+def _selenium_locator_kwargs(raw: str) -> Dict[str, str]:
+    """Translate a Selenium IDE locator string into browser.* action kwargs.
+
+    xpath= passes through unchanged — the runtime browser service already
+    strips that prefix. id=/name=/css=/className= aren't selector engines
+    Playwright understands, so they're rewritten into real CSS. link=/
+    linkText=/partialLinkText= become a text-based match (the framework's
+    text= click already does substring matching, covering both exact and
+    partial link text). A bare string with no recognized prefix passes
+    through unchanged as a selector (already CSS/XPath-shaped, or a plain
+    ${var} reference).
+    """
+    if not raw:
+        return {}
+    m = _SELENIUM_LOCATOR_RE.match(raw.strip())
+    if not m:
+        return {"selector": raw}
+    strategy, value = m.group(1).lower(), m.group(2)
+    if strategy == "xpath":
+        return {"selector": f"xpath={value}"}
+    if strategy == "id":
+        return {"selector": f"#{value}"}
+    if strategy == "css":
+        return {"selector": value}
+    if strategy in ("classname", "class"):
+        return {"selector": f".{value}"}
+    if strategy == "name":
+        return {"selector": f"[name='{value}']"}
+    if strategy in ("link", "linktext", "partiallinktext"):
+        return {"text": value}
+    return {"selector": raw}
+
+
+def _selenium_selector_string(raw: str) -> str:
+    """Like _selenium_locator_kwargs, but always returns a plain selector
+    string — for params (e.g. drag-and-drop source/target) that have no
+    separate text= alternative to fall back to."""
+    if not raw:
+        return raw
+    kwargs = _selenium_locator_kwargs(raw)
+    if "selector" in kwargs:
+        return kwargs["selector"]
+    if "text" in kwargs:
+        return f"xpath=//*[normalize-space(text())='{kwargs['text']}']"
+    return raw
+
+
 def _map_browser(cmd_dict: Dict) -> Dict:
     cmd = cmd_dict.get("command", "").lower()
     # Old mybdd format uses both "param" (generic first arg) and explicit keys like "url".
@@ -364,17 +421,25 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         step = {"action": "browser.close"}
     elif cmd in ("refresh",):
         step = {"action": "browser.refresh"}
+    elif cmd in ("pause",):
+        # Selenium's timed pause — target/param/value carries milliseconds.
+        ms_raw = target or param or value or "0"
+        try:
+            ms = float(ms_raw)
+        except (TypeError, ValueError):
+            ms = 0.0
+        step = {"action": "browser.wait", "timeout": ms / 1000}
     elif cmd in ("type", "fill", "input"):
         s = {"action": "browser.fill", "value": text or value}
         sel = target or param
         if sel:
-            s["selector"] = sel
+            s.update(_selenium_locator_kwargs(sel))
         step = s
     elif cmd in ("click",):
         s = {"action": "browser.click"}
         sel = target or param
         if sel:
-            s["selector"] = sel
+            s.update(_selenium_locator_kwargs(sel))
         elif text:
             s["text"] = text
         step = s
@@ -382,19 +447,19 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         step = {"action": "browser.press_key", "key": key}
         sel = target or param
         if sel:
-            step["selector"] = sel
+            step.update(_selenium_locator_kwargs(sel))
     elif cmd in ("gettext", "get_text", "innertext"):
         s = {"action": "browser.get_text", "store_as": name or "last_text"}
         sel = target or param
         if sel:
-            s["selector"] = sel
+            s.update(_selenium_locator_kwargs(sel))
         step = s
     elif cmd in ("screenshot", "capture"):
         step = {"action": "browser.screenshot", "name": name or param or "screenshot"}
     elif cmd in ("wait", "waitfor", "wait_for_element"):
         sel = target or param
         # A bare wait with no target is a timed pause, not an element wait
-        s = {"action": "browser.wait_for", "selector": sel} if sel else {"action": "browser.wait"}
+        s = {"action": "browser.wait_for", **_selenium_locator_kwargs(sel)} if sel else {"action": "browser.wait"}
         if timeout:
             s["timeout"] = timeout
         step = s
@@ -406,23 +471,25 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         s = {"action": "browser.select", "value": value or text}
         sel = target or param
         if sel:
-            s["selector"] = sel
+            s.update(_selenium_locator_kwargs(sel))
         step = s
     elif cmd in ("hover",):
-        step = {"action": "browser.hover", "selector": target or param}
+        step = {"action": "browser.hover", **_selenium_locator_kwargs(target or param)}
     elif cmd in ("check", "uncheck"):
-        step = {"action": f"browser.{cmd}", "selector": target or param}
+        step = {"action": f"browser.{cmd}", **_selenium_locator_kwargs(target or param)}
     elif cmd in ("scroll",):
-        step = {"action": "browser.scroll", "selector": target or param}
+        step = {"action": "browser.scroll", **_selenium_locator_kwargs(target or param)}
     elif cmd in ("validate_checkbox_enabled", "assert_checked"):
         s = {"action": "browser.assert_checked"}
-        if param or target:
-            s["selector"] = param or target
+        sel = param or target
+        if sel:
+            s.update(_selenium_locator_kwargs(sel))
         step = s
     elif cmd in ("validate_checkbox_disabled", "assert_not_checked", "assert_unchecked"):
         s = {"action": "browser.assert_unchecked"}
-        if param or target:
-            s["selector"] = param or target
+        sel = param or target
+        if sel:
+            s.update(_selenium_locator_kwargs(sel))
         step = s
     elif cmd in ("click_by_role",):
         role = cmd_dict.get("role", "")
@@ -438,9 +505,10 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         # With a selector, test.assert_text_contains scopes the substring
         # check to that element; without one, browser.verify_text checks
         # the whole page (both are contains-semantics like the legacy cmd).
-        if param or target:
+        sel = param or target
+        if sel:
             step = {"action": "test.assert_text_contains",
-                    "selector": param or target,
+                    **_selenium_locator_kwargs(sel),
                     "text": cmd_dict.get("text", text)}
         else:
             step = {"action": "browser.verify_text", "text": cmd_dict.get("text", text)}
@@ -449,16 +517,17 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         step = {"action": "browser.get_title", "store_as": store}
     elif cmd in ("assert_value", "assertvalue"):
         s = {"action": "test.assert_value", "value": value or text}
-        if param or target:
-            s["selector"] = param or target
+        sel = param or target
+        if sel:
+            s.update(_selenium_locator_kwargs(sel))
         step = s
     elif cmd in ("waitfornavigation", "wait_for_navigation", "wait_for_load"):
         # browser.wait_for_url with no url waits for the page load state
         step = {"action": "browser.wait_for_url"}
     elif cmd in ("dragdrop", "drag_drop", "drag_and_drop"):
         step = {"action": "browser.drag_and_drop",
-                "source_selector": target or param,
-                "target_selector": _sub_vars(str(cmd_dict.get("destination", "")))}
+                "source_selector": _selenium_selector_string(target or param),
+                "target_selector": _selenium_selector_string(_sub_vars(str(cmd_dict.get("destination", ""))))}
     elif cmd in ("setlocalStorage", "set_localstorage", "localstorage"):
         step = {"action": "eval.exec",
                 "code": f"localStorage.setItem({cmd_dict.get('key','key')!r}, {cmd_dict.get('value',value)!r})"}
@@ -546,6 +615,19 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
     if name == "sleep":
         sec = param_dict.get("sec", param_dict.get("seconds", 1))
         return {"action": "test.sleep", "seconds": float(sec)}
+
+    if name == "browser":
+        # Selenium IDE-style export: data_str is a JSON array of
+        # {"command":..., "target":..., "value":...} steps, one Selenium
+        # command per entry. Parse from raw_data_str (pre-_sub_vars, same
+        # convention as the "eval" paired-conditional case above) since the
+        # array is JSON syntax, not a value to substitute — _map_browser
+        # already runs _sub_vars on each individual field it reads.
+        commands = _parse_json(raw_data_str)
+        if not isinstance(commands, list):
+            return {"action": "test.log",
+                    "message": f"TODO function browser (expected a JSON array): {data_str[:120]}"}
+        return [_map_browser(c) for c in commands if isinstance(c, dict)]
 
     if name in ("exec", "execute"):
         # Use _translate_code (not _sub_vars) — Python code context, not a YAML string value.
