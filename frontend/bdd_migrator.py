@@ -686,7 +686,18 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         path    = _sub_vars(str(param_dict.get("path", param_dict.get("command", ""))))
         full_url = (url.rstrip("/") + "/" + path.lstrip("/")) if path else url
         full_url = _ensure_base_url(full_url)
-        is_ws = method == "SEND" or full_url.startswith("wss://") or full_url.startswith("ws://")
+        # "url" here is almost always a ${var} (e.g. "$url" resolving to
+        # wss://... at runtime), so checking its literal prefix at migration
+        # time never fires — and "method":"send" is set inconsistently in
+        # this codebase (present on some otherwise-identical OvrC calls,
+        # omitted on others). The one reliable signal this codebase actually
+        # uses consistently is the "command" key itself (vs "path") — every
+        # OvrC dx* call in the real suite uses "command", never "path".
+        is_ws = (
+            method == "SEND"
+            or full_url.startswith("wss://") or full_url.startswith("ws://")
+            or "command" in param_dict
+        )
         if is_ws:
             body_val = _expand_json_payload(data_str) if data_str and data_str not in ("{}", "") else None
             ws_step: Dict[str, Any] = {"action": "websocket.send", "url": _ensure_base_url(url), "store_as": "last_response"}
