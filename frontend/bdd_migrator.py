@@ -1522,14 +1522,85 @@ def _match_text_format(value: ast.AST, store_as: str) -> Optional[Dict]:
     return {"action": "text.format", "template": rebuilt, "store_as": store_as}
 
 
-_SIMPLIFY_MATCHERS = (_match_list_pick, _match_text_replace, _match_regex_extract, _match_text_format)
+def _expr_to_source_and_field(node: ast.AST) -> Optional[Tuple[str, str]]:
+    """Unwrap a chain of string-keyed subscripts rooted at a plain Name
+    (optionally wrapped in an outer str(...) call) into (from_var, dotted
+    field path) for test.extract — e.g. last_response['body'] ->
+    ('last_response', 'body'), d['a']['b'] -> ('d', 'a.b'). Returns None if
+    the chain isn't rooted in a plain Name, or any key isn't a string
+    literal (an integer-indexed chain is list.pick's territory, not this)."""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "str" and len(node.args) == 1:
+        node = node.args[0]
+    parts: List[str] = []
+    while isinstance(node, ast.Subscript):
+        key = node.slice
+        if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+            return None
+        parts.append(key.value)
+        node = node.value
+    if not parts or not isinstance(node, ast.Name):
+        return None
+    parts.reverse()
+    return node.id, ".".join(parts)
 
 
-def _simplify_single_value(value: ast.AST, store_as: str) -> Optional[Dict]:
+def _match_dict_path_extract(value: ast.AST, store_as: str) -> Optional[Dict]:
+    """x = d['a']['b']  ->  test.extract
+
+    Reuses the existing dot-notation field lookup test.extract already does
+    on dict values, rather than inventing a new action for something the
+    framework already supports."""
+    if not isinstance(value, ast.Subscript):
+        return None
+    result = _expr_to_source_and_field(value)
+    if result is None:
+        return None
+    from_var, field = result
+    return {"action": "test.extract", "field": field, "from": from_var, "store_as": store_as}
+
+
+def _match_json_parse(value: ast.AST, store_as: str) -> Optional[List[Dict]]:
+    """x = json.loads(y)  ->  json.parse.
+
+    If y is a plain name/literal/${var}-representable expression, this is
+    one step. If y is itself a dict-key chain that needs test.extract first
+    (the common `json.loads(last_response["body"])` shape), this returns
+    two steps — extract the field into a synthetic variable, then parse
+    that — since a ${var} template can't express "one field of a dict"."""
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute) and value.func.attr == "loads"
+            and isinstance(value.func.value, ast.Name) and value.func.value.id == "json"
+            and len(value.args) == 1 and not value.keywords):
+        return None
+    arg = value.args[0]
+    if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name) and arg.func.id == "str" and len(arg.args) == 1:
+        arg = arg.args[0]
+
+    template = _expr_to_template(arg)
+    if template is not None:
+        return [{"action": "json.parse", "value": template, "store_as": store_as}]
+
+    extracted = _expr_to_source_and_field(arg)
+    if extracted is not None:
+        from_var, field = extracted
+        tmp = f"_{store_as}_raw"
+        return [
+            {"action": "test.extract", "field": field, "from": from_var, "store_as": tmp},
+            {"action": "json.parse", "value": f"${{{tmp}}}", "store_as": store_as},
+        ]
+    return None
+
+
+_SIMPLIFY_MATCHERS = (
+    _match_list_pick, _match_text_replace, _match_regex_extract, _match_text_format,
+    _match_json_parse, _match_dict_path_extract,
+)
+
+
+def _simplify_single_value(value: ast.AST, store_as: str) -> Optional[List[Dict]]:
     for matcher in _SIMPLIFY_MATCHERS:
         result = matcher(value, store_as)
         if result is not None:
-            return result
+            return result if isinstance(result, list) else [result]
     return None
 
 
@@ -1748,7 +1819,7 @@ def _simplify_exec_code(code: str) -> Optional[List[Dict]]:
         if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
             simplified = _simplify_single_value(stmt.value, stmt.targets[0].id)
             if simplified is not None:
-                results.append(simplified)
+                results.extend(simplified)
                 i += 1
                 continue
         return None  # this statement doesn't match anything -- bail on the whole block
@@ -1778,7 +1849,7 @@ def _try_simplify_eval_step(step: Dict) -> Optional[List[Dict]]:
         simplified = _simplify_single_value(tree.body, store_as)
         if simplified is None:
             return None
-        return [_to_dot_notation(simplified)]
+        return [_to_dot_notation(s) for s in simplified]
     return None
 
 

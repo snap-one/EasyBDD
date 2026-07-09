@@ -121,6 +121,7 @@ _EXACT_ACTIONS: dict = {
     "text.replace":           "_dispatch_text_replace",
     "text.regex_extract":     "_dispatch_text_regex_extract",
     "text.format":            "_dispatch_text_format",
+    "json.parse":             "_dispatch_json_parse",
     # Renamed non-code eval.* actions — these never execute arbitrary Python,
     # they're plain get/set/extract operations that were just misfiled under
     # the scary "eval." prefix. Routed at the OLD names (eval.extract_version,
@@ -177,6 +178,7 @@ _RERAISE_EXACT: frozenset = frozenset({
     "test.extract", "extract",
     "list.pick", "text.replace", "text.regex_extract", "text.format",
     "text.extract_version", "state.set", "state.get", "state.clear",
+    "json.parse",
 })
 
 
@@ -1493,6 +1495,9 @@ class TestRunner:
     def _dispatch_text_format(self, action, step_params, variables, sam=None):
         return self._handle_text_format_action(step_params, variables)
 
+    def _dispatch_json_parse(self, action, step_params, variables, sam=None):
+        return self._handle_json_parse_action(step_params, variables)
+
     def _dispatch_ovrc(self, action, step_params, variables, sam=None):
         return self._handle_ovrc_action(action, step_params, variables)
 
@@ -2212,6 +2217,32 @@ class TestRunner:
         if hasattr(self.config, "set_variable"):
             self.config.set_variable(store_as, template, "runtime_data")
         print(f"      📝 text.format: → {store_as!r} = {template!r}")
+        return True
+
+    def _handle_json_parse_action(self, step_params: dict, variables: dict) -> bool:
+        """Handle json.parse — parse a JSON string into a variable.
+
+        Parameters
+        ----------
+        value    : JSON text to parse (already ${var}-substituted)
+        store_as : variable name to store the parsed dict/list under
+        """
+        import json as _json
+
+        params = self._get_params(step_params)
+        value = params.get("value", "")
+        store_as = str(params.get("store_as", ""))
+        if not store_as:
+            raise ValueError("json.parse requires 'store_as'")
+        try:
+            parsed = _json.loads(value)
+        except (TypeError, _json.JSONDecodeError) as exc:
+            raise ValueError(f"json.parse: could not parse JSON: {exc}")
+
+        variables[store_as] = parsed
+        if hasattr(self.config, "set_variable"):
+            self.config.set_variable(store_as, parsed, "runtime_data")
+        print(f"      🧩 json.parse: → {store_as!r} = {parsed!r}")
         return True
 
     def _ensure_ovrc_connection(

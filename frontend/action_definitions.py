@@ -2627,6 +2627,28 @@ ACTION_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
+    "json.parse": {
+        "category": "Data",
+        "label": "Parse JSON",
+        "description": "Parse a JSON string into a variable",
+        "icon": "🧩",
+        "parameters": {
+            "value": {
+                "type": "text",
+                "required": True,
+                "label": "JSON Text",
+                "placeholder": "${last_response}",
+                "help": "JSON text to parse — usually a ${variable}",
+            },
+            "store_as": {
+                "type": "text",
+                "required": True,
+                "label": "Variable Name",
+                "placeholder": "response_dict",
+                "help": "Store the parsed dict/list in this variable",
+            },
+        },
+    },
     "text.extract_version": {
         "category": "Data",
         "label": "Extract Version",

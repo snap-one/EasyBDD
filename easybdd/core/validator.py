@@ -120,6 +120,7 @@ ACTION_SCHEMA: Dict[str, Dict] = {
         "optional": ["group", "default"],
     },
     "text.format": {"required": ["template", "store_as"], "optional": []},
+    "json.parse": {"required": ["value", "store_as"], "optional": []},
 
     # telnet.*
     "telnet.send": {
