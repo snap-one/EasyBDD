@@ -480,6 +480,11 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         step = {"action": f"browser.{cmd}", **_selenium_locator_kwargs(target or param)}
     elif cmd in ("scroll",):
         step = {"action": "browser.scroll", **_selenium_locator_kwargs(target or param)}
+    elif cmd in ("assertelementpresent", "assert_element_present", "verifyelementpresent", "waitforelementpresent"):
+        # Closest declarative equivalent — Selenium's presence check doesn't
+        # distinguish "in the DOM" from "visible", and confirming visibility
+        # is the more useful signal for a page-loaded check anyway.
+        step = {"action": "test.assert_element_visible", **_selenium_locator_kwargs(target or param)}
     elif cmd in ("validate_checkbox_enabled", "assert_checked"):
         s = {"action": "browser.assert_checked"}
         sel = param or target
@@ -608,6 +613,48 @@ def _firmware_manager_steps(param_dict: Optional[Dict] = None) -> List[Dict]:
     ]
 
 
+# Recognizes the specific retry-until-connected idiom used repeatedly in
+# the legacy suite (see _match_dxgetabout_retry_loop below).
+_ROOT_FUNCTION_DXGETABOUT_RETRY_RE = re.compile(
+    r"root_function\s*\(\s*param\s*=\s*\{[^}]*['\"]command['\"]\s*:\s*['\"]dxGetAbout['\"]"
+)
+
+
+def _match_dxgetabout_retry_loop(code: str) -> Optional[Dict]:
+    """Recognizes this exact retry-until-connected idiom, used identically
+    four times across the legacy suite (e.g. Feature: Network Interruption,
+    Feature: Boot Without Power + Network):
+
+        _i=0; _ok=False; _resp=''
+        while _i<6 and not _ok:
+            _resp = root_function(param={'name':'webservice', ..., 'command':'dxGetAbout'}, data={...}, nested=True)
+            _ok = ('deviceId' in str(_resp) and 'firmware' in str(_resp) and 'error' not in str(_resp))
+            _i += 1
+            (_ok or time.sleep(15))
+        assert _ok, '...'
+
+    root_function is an internal helper from the old framework that has no
+    equivalent in Easy BDD's eval context at all — migrated as raw
+    eval.exec, this fails outright with a NameError at test-run time, not
+    just an inelegant TODO. Rather than structurally reconstructing this
+    exact while-loop from its Python (a lot of brittle AST matching for
+    something whose scratch variable names are author-chosen and could
+    differ trivially), this checks for the one load-bearing marker that
+    can't vary — a root_function(...) call whose command is 'dxGetAbout' —
+    and replaces the whole block with the pre-built Shared: step that does
+    the same retry (Shared: wait_for_dxGetAbout_ready). Deliberately narrow:
+    only fires for this exact command, not a general "any dx* retry loop"
+    pattern — there's no evidence yet that idiom is reused for other
+    commands, and guessing wrong here would silently point a case at the
+    wrong device call.
+    """
+    if "root_function" not in code:
+        return None
+    if not _ROOT_FUNCTION_DXGETABOUT_RETRY_RE.search(code):
+        return None
+    return {"shared_step": "wait_for_dxGetAbout_ready"}
+
+
 def _map_function(param_dict: Dict, data_str: str) -> Any:
     name = param_dict.get("name", "").lower()
     raw_data_str = data_str.strip()   # keep original for JSON re-parsing (before _sub_vars mangles $ vars)
@@ -631,8 +678,12 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         return [_map_browser(c) for c in commands if isinstance(c, dict)]
 
     if name in ("exec", "execute"):
+        raw_code = str(param_dict.get("string", ""))
+        retry_step = _match_dxgetabout_retry_loop(raw_code)
+        if retry_step is not None:
+            return retry_step
         # Use _translate_code (not _sub_vars) — Python code context, not a YAML string value.
-        return _smart_eval_step(str(param_dict.get("string", "")))
+        return _smart_eval_step(raw_code)
 
     if name == "eval":
         # Detect paired conditional: {"name":"eval","string":"condition"} | {"name":"exec","string":"code"}
