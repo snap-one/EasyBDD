@@ -435,7 +435,7 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
 
 <!-- ============ migrate legacy cases modal ============ -->
 <div class="modal-back" id="migrate-back">
-  <div class="modal" style="width:920px; height:85vh">
+  <div class="modal" style="width:min(1400px, 96vw); height:94vh">
     <div class="modal-head"><h2>Migrate legacy cases</h2><button class="icon-btn" data-close="migrate-back">✕</button></div>
     <div class="modal-body" style="flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:10px">
       <div class="dim" style="font-size:12.5px">
@@ -443,23 +443,40 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
         failed to parse as Easy BDD at all — pick any others too if you know they need it.
         If a case was already run through a broken migration, its live body may look like valid
         (but wrong) Easy BDD and won't be auto-detected — use Paste mode with the original source instead.
+        Reads from the suite selected in the sidebar; always <b>creates new cases</b> in the
+        destination below — it never updates or overwrites the source.
+      </div>
+      <div id="migrate-dest-warning" class="issue error" style="display:none">
+        Pick a destination suite different from the source suite before previewing or publishing.
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; flex-shrink:0">
+        <div style="flex:1">
+          <label class="small">Destination suite (required — must differ from source)</label>
+          <select id="migrate-dest-suite" class="compact"><option value="">— select destination suite —</option></select>
+        </div>
+        <div style="flex:1">
+          <label class="small">Destination section</label>
+          <select id="migrate-dest-section" class="compact"><option value="">— select section —</option></select>
+        </div>
+        <button class="icon-btn" id="migrate-dest-new-section" title="Create new section" style="margin-top:16px">＋</button>
       </div>
       <div style="display:flex; gap:8px; align-items:center">
+        <button class="add-link" id="migrate-select-all">Select all</button>
         <button class="add-link" id="migrate-select-flagged">Select auto-detected</button>
         <button class="add-link" id="migrate-select-none">Select none</button>
         <span class="dim" style="margin-left:auto; font-size:12px" id="migrate-count"></span>
       </div>
-      <div id="migrate-cases" style="flex:0 0 auto; max-height:160px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:6px"></div>
+      <div id="migrate-cases" style="flex:0 0 auto; max-height:140px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:6px"></div>
 
       <div class="copy-row" style="margin-top:2px; margin-bottom:0">
         <span class="lbl">Paste mode (for cases whose live body is already broken)</span>
       </div>
-      <div style="display:flex; gap:8px">
+      <div style="display:flex; gap:8px; flex-shrink:0">
         <input id="migrate-paste-case-id" class="compact" placeholder="Case ID, e.g. 18761852" style="width:200px; margin:0">
-        <textarea id="migrate-paste-content" placeholder="Paste raw pipe-delimited legacy text…" style="flex:1; height:64px; font-family:var(--mono); font-size:12px; margin:0"></textarea>
+        <textarea id="migrate-paste-content" placeholder="Paste raw pipe-delimited legacy text…" style="flex:1; height:48px; font-family:var(--mono); font-size:12px; margin:0"></textarea>
       </div>
 
-      <div id="migrate-results" style="flex:1; overflow-y:auto; border-top:1px solid var(--border); padding-top:8px"></div>
+      <div id="migrate-results" style="flex:1; min-height:0; overflow-y:auto; border-top:1px solid var(--border); padding-top:8px"></div>
     </div>
     <div class="modal-foot">
       <button class="btn" data-close="migrate-back">Close</button>
@@ -1673,6 +1690,68 @@ function migrateSelectionCount() {
   $("#migrate-count").textContent = `${n} case${n === 1 ? "" : "s"} selected`;
 }
 
+// Migration always CREATES cases in a destination suite/section chosen here —
+// it must never reuse the source suite or a source case_id, which is what let
+// a prior run silently overwrite the live legacy suite via update_case().
+async function migratePopulateDestSuites() {
+  const sel = $("#migrate-dest-suite");
+  sel.innerHTML = '<option value="">— select destination suite —</option>';
+  $("#migrate-dest-section").innerHTML = '<option value="">— select section —</option>';
+  if (!S.projectId) { migrateUpdateDestValidity(); return; }
+  try {
+    const suites = await api(`/api/testrail/suites?project_id=${S.projectId}`);
+    for (const s of suites) {
+      if (s.id === S.suiteId) continue; // never offer the source suite as a destination
+      sel.appendChild(el("option", { value: s.id }, `${s.name} (#${s.id})`));
+    }
+  } catch (e) { toast("Could not load destination suites: " + e.message, "err"); }
+  migrateUpdateDestValidity();
+}
+
+async function migratePopulateDestSections() {
+  const sel = $("#migrate-dest-section");
+  sel.innerHTML = '<option value="">— select section —</option>';
+  const destSuiteId = Number($("#migrate-dest-suite").value) || null;
+  if (destSuiteId) {
+    try {
+      const sections = await api(`/api/testrail/sections?project_id=${S.projectId}&suite_id=${destSuiteId}`);
+      for (const s of sections) sel.appendChild(el("option", { value: s.id }, `${"  ".repeat(s.depth || 0)}${s.name}`));
+    } catch (e) { toast("Could not load destination sections: " + e.message, "err"); }
+  }
+  migrateUpdateDestValidity();
+}
+
+async function createMigrateDestSection() {
+  const destSuiteId = Number($("#migrate-dest-suite").value) || null;
+  if (!destSuiteId) { toast("Pick a destination suite first.", "err"); return; }
+  const name = (prompt("New section name:") || "").trim();
+  if (!name) return;
+  try {
+    const res = await api("/api/testrail/section", { method: "POST", body: {
+      project_id: S.projectId, suite_id: destSuiteId, name,
+    } });
+    await migratePopulateDestSections();
+    $("#migrate-dest-section").value = String(res.id);
+    toast(`Section created: ${res.name}`, "ok");
+  } catch (e) { toast("Could not create section: " + e.message, "err"); }
+  migrateUpdateDestValidity();
+}
+
+function migrateDestValid() {
+  const destSuiteId = Number($("#migrate-dest-suite").value) || null;
+  const destSectionId = Number($("#migrate-dest-section").value) || null;
+  return !!destSuiteId && destSuiteId !== S.suiteId && !!destSectionId;
+}
+
+function migrateUpdateDestValidity() {
+  const valid = migrateDestValid();
+  $("#migrate-dest-warning").style.display = valid ? "none" : "";
+  $("#btn-migrate-preview").disabled = !valid;
+  const anyValid = Object.values(S.migrateResults).some(r => r.valid);
+  $("#btn-migrate-publish-all").disabled = !valid || !anyValid;
+  return valid;
+}
+
 async function openMigrateModal() {
   if (!S.projectId) { toast("Select a project first.", "err"); return; }
   const box = $("#migrate-cases");
@@ -1684,6 +1763,7 @@ async function openMigrateModal() {
   $("#btn-migrate-publish-all").disabled = true;
   box.appendChild(el("div", { class: "empty-note" }, "Scanning suite for legacy-format cases…"));
   $("#migrate-back").classList.add("open");
+  migratePopulateDestSuites();
 
   let flaggedIds = new Set();
   try {
@@ -1724,25 +1804,27 @@ function renderMigrateResult(result) {
     det.appendChild(el("div", { class: "issue okline" }, "✓ Migrated cleanly, no issues."));
   }
 
-  const bodies = el("div", { style: "display:flex; gap:10px" });
+  const bodyPreStyle = "font-family:var(--mono); font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-word; " +
+    "background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:12px; " +
+    "height:52vh; max-height:640px; overflow-y:auto; margin:0";
+  const bodies = el("div", { style: "display:flex; gap:14px" });
   if (result.old_body !== null && result.old_body !== undefined) {
     const oldCol = el("div", { style: "flex:1; min-width:0" },
-      el("div", { class: "dim", style: "font-size:11px; margin-bottom:3px" }, "CURRENT (live) BODY"),
-      el("pre", { style: "font-family:var(--mono); font-size:11px; white-space:pre-wrap; word-break:break-word; background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:8px; max-height:220px; overflow-y:auto; margin:0" }, result.old_body || "(empty)"));
+      el("div", { class: "dim", style: "font-size:11.5px; margin-bottom:4px; letter-spacing:.03em" }, "CURRENT (live) BODY"),
+      el("pre", { style: bodyPreStyle }, result.old_body || "(empty)"));
     bodies.appendChild(oldCol);
   }
   const newCol = el("div", { style: "flex:1; min-width:0" },
-    el("div", { class: "dim", style: "font-size:11px; margin-bottom:3px" }, "MIGRATED (proposed) BODY"),
-    el("pre", { style: "font-family:var(--mono); font-size:11px; white-space:pre-wrap; word-break:break-word; background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:8px; max-height:220px; overflow-y:auto; margin:0" }, result.new_body || "(empty)"));
+    el("div", { class: "dim", style: "font-size:11.5px; margin-bottom:4px; letter-spacing:.03em" }, "MIGRATED (proposed) BODY"),
+    el("pre", { style: bodyPreStyle }, result.new_body || "(empty)"));
   bodies.appendChild(newCol);
   det.appendChild(bodies);
 
   const actions = el("div", { style: "display:flex; gap:8px; align-items:center" });
   const publishBtn = el("button", { class: "btn primary", style: "padding:5px 12px; font-size:12.5px" }, "Publish this case");
-  if (!result.valid || !result.case_id) publishBtn.disabled = true;
+  if (!result.valid) publishBtn.disabled = true;
   publishBtn.addEventListener("click", () => publishMigratedCase(result, publishBtn).catch(() => {}));
   actions.appendChild(publishBtn);
-  if (!result.case_id) actions.appendChild(el("span", { class: "dim", style: "font-size:11.5px" }, "Paste mode needs a Case ID to publish to."));
   det.appendChild(actions);
 
   card.appendChild(det);
@@ -1750,21 +1832,24 @@ function renderMigrateResult(result) {
 }
 
 async function publishMigratedCase(result, btn) {
-  const c = S.cases.find(x => x.id === result.case_id);
-  if (!c) {
-    const msg = `Case C${result.case_id} not found in the loaded suite.`;
+  if (!migrateDestValid()) {
+    const msg = "Pick a destination suite and section (different from the source suite) before publishing.";
     toast(msg, "err");
     throw new Error(msg);
   }
+  const destSuiteId = Number($("#migrate-dest-suite").value);
+  const destSectionId = Number($("#migrate-dest-section").value);
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publishing…'; }
   try {
+    // Never pass case_id here — that tells the backend to update_case() in
+    // place. Migration must always create a fresh case in the destination.
     const res = await api("/api/testrail/publish", { method: "POST", body: {
-      model: result.model, project_id: S.projectId, suite_id: S.suiteId,
-      section_id: c.section_id, case_id: result.case_id,
+      model: result.model, project_id: S.projectId, suite_id: destSuiteId,
+      section_id: destSectionId,
     } });
-    toast(`Published C${result.case_id} — <a href="${res.link}" target="_blank">open ↗</a>`, "ok", true);
+    const from = result.case_id ? ` (from C${result.case_id})` : "";
+    toast(`Published${from} — <a href="${res.link}" target="_blank">open ↗</a>`, "ok", true);
     if (btn) { btn.textContent = "✓ Published"; }
-    if (S.editingCaseId === result.case_id) loadCase(result.case_id);
   } catch (e) {
     toast(`Publish failed for C${result.case_id}: ` + e.message, "err");
     if (btn) { btn.disabled = false; btn.textContent = "Publish this case"; }
@@ -1773,6 +1858,10 @@ async function publishMigratedCase(result, btn) {
 }
 
 async function migratePreviewSelected() {
+  if (!migrateDestValid()) {
+    toast("Pick a destination suite and section (different from the source suite) before previewing.", "err");
+    return;
+  }
   const results = $("#migrate-results");
   results.innerHTML = "";
   S.migrateResults = {};
@@ -1804,7 +1893,7 @@ async function migratePreviewSelected() {
       if (r.valid) anyValid = true;
       results.appendChild(renderMigrateResult(r));
     }
-    $("#btn-migrate-publish-all").disabled = !anyValid;
+    $("#btn-migrate-publish-all").disabled = !anyValid || !migrateDestValid();
   } catch (e) {
     results.innerHTML = "";
     results.appendChild(el("div", { class: "issue error" }, "Preview failed: " + e.message));
@@ -1814,8 +1903,12 @@ async function migratePreviewSelected() {
 }
 
 async function migratePublishAllValid() {
+  if (!migrateDestValid()) {
+    toast("Pick a destination suite and section (different from the source suite) before publishing.", "err");
+    return;
+  }
   const btn = $("#btn-migrate-publish-all");
-  const valid = Object.values(S.migrateResults).filter(r => r.valid && r.case_id);
+  const valid = Object.values(S.migrateResults).filter(r => r.valid);
   if (!valid.length) return;
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publishing…';
   let ok = 0, fail = 0;
@@ -1831,6 +1924,10 @@ async function migratePublishAllValid() {
 /* ============================== wire up ============================== */
 $("#btn-lint").addEventListener("click", runLint);
 $("#btn-migrate-modal").addEventListener("click", openMigrateModal);
+$("#migrate-select-all").addEventListener("click", () => {
+  document.querySelectorAll("#migrate-cases input[data-mcid]").forEach(cb => cb.checked = true);
+  migrateSelectionCount();
+});
 $("#migrate-select-flagged").addEventListener("click", () => {
   document.querySelectorAll("#migrate-cases .run-case-row").forEach(row => {
     const cb = row.querySelector("input[data-mcid]");
@@ -1844,6 +1941,9 @@ $("#migrate-select-none").addEventListener("click", () => {
 });
 $("#btn-migrate-preview").addEventListener("click", migratePreviewSelected);
 $("#btn-migrate-publish-all").addEventListener("click", migratePublishAllValid);
+$("#migrate-dest-suite").addEventListener("change", migratePopulateDestSections);
+$("#migrate-dest-section").addEventListener("change", migrateUpdateDestValidity);
+$("#migrate-dest-new-section").addEventListener("click", createMigrateDestSection);
 $("#btn-expand-sections").addEventListener("click", () => { S.collapsedSections.clear(); renderCaseList(); });
 $("#btn-collapse-sections").addEventListener("click", () => { for (const s of S.sections) S.collapsedSections.add(s.id); renderCaseList(); });
 $("#sel-project").addEventListener("change", onProjectChange);
