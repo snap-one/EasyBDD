@@ -11,6 +11,15 @@ def _needs_quoting(v: str) -> bool:
     # Leading ! is a YAML tag indicator
     if v.startswith('!'):
         return True
+    # Leading > or | are YAML block-scalar indicators (folded/literal).
+    # Unlike most other indicator characters, these don't fail loudly if
+    # left unquoted — "prompt: >" silently parses back as an empty string
+    # (the folded-block content, since nothing indented follows) instead of
+    # the literal character ">", rather than raising a parse error. The
+    # runner's own round-trip parse check doesn't catch this since the YAML
+    # stays syntactically valid throughout — only the value is wrong.
+    if v.startswith(('>', '|')):
+        return True
     # ': ' inside a value creates a spurious mapping entry
     if ': ' in v:
         return True
