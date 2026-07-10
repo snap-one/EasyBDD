@@ -185,6 +185,15 @@ class AWSService:
 
         self._log(f"Connected to S3 bucket: {bucket_name} (region: {reg})")
 
+    def _build_object_url(self, bucket_name: str, key: str, protocol: str = "https") -> str:
+        """Build the public URL for an object.
+
+        Overridden by FlociService so URLs returned to variables (store_as /
+        store_url_as) point at the local Floci endpoint instead of a fake
+        s3.amazonaws.com host that would never resolve.
+        """
+        return f"{protocol}://{bucket_name}.s3.amazonaws.com/{key}"
+
     def _get_compiled_regex(self, pattern: str):
         """
         Get compiled regex from cache or compile and cache it.
@@ -444,7 +453,7 @@ class AWSService:
 
                 # Build S3 URL — encode path so spaces become %20
                 encoded_key = _url_quote(key, safe="/")
-                s3_url = f"{protocol}://{bucket_name}.s3.amazonaws.com/{encoded_key}"
+                s3_url = self._build_object_url(bucket_name, encoded_key, protocol)
                 object_urls.append(s3_url)
 
                 # Build CloudFront URL if specified
@@ -652,7 +661,7 @@ class AWSService:
                 self._log(f"Could not extract version from: {latest_file}", "warning")
 
             # Build URL
-            url = f"https://{bucket_name}.s3.amazonaws.com/{latest_file}"
+            url = self._build_object_url(bucket_name, latest_file)
 
             # Download if requested
             if download_dir:
@@ -725,7 +734,7 @@ class AWSService:
                 )
                 self._log(f"File made public: {s3_key}")
 
-            url = f"https://{bucket_name}.s3.amazonaws.com/{s3_key}"
+            url = self._build_object_url(bucket_name, s3_key)
             self._log(f"Upload complete: {url}")
 
             return url

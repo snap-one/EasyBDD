@@ -275,6 +275,31 @@ ACTION_SCHEMA: Dict[str, Dict] = {
         "optional": ["folder_prefix"],
     },
 
+    # floci.* — same S3 operations as aws.*, aimed at a local Floci endpoint
+    # (default http://localhost:4566) instead of real AWS. Independent of,
+    # and in addition to, the aws.*/s3.* actions above.
+    "floci.list_files": {
+        "required": ["bucket_name"],
+        "optional": [
+            "folder_prefix", "filename_pattern", "version_pattern",
+            "file_extension", "specific_version", "cloudfront_url",
+            "cloudfront_filename_only", "download_dir", "protocol",
+            "access_key_id", "secret_access_key", "region", "store_as",
+            "discover_prefix", "repo_root",
+        ],
+    },
+    "floci list firmware files": {"alias_of": "floci.list_files"},
+    "floci.get_latest": {"required": [], "optional": ["store_as"]},
+    "floci get latest firmware": {"alias_of": "floci.get_latest"},
+    "floci.upload": {
+        "required": ["bucket_name", "file_path"],
+        "optional": ["key", "store_as"],
+    },
+    "floci.delete_folder": {
+        "required": ["bucket_name"],
+        "optional": ["folder_prefix"],
+    },
+
     # api.* — HTTP requests
     "api.get": {
         "required": ["url"],
@@ -392,7 +417,7 @@ _STRUCTURAL_KEYS: FrozenSet[str] = frozenset([
 
 # Known action namespace prefixes
 _KNOWN_PREFIXES: FrozenSet[str] = frozenset([
-    "test", "eval", "browser", "api", "aws", "s3",
+    "test", "eval", "browser", "api", "aws", "s3", "floci",
     "jsonrpc", "ovrc", "websocket", "ws", "telnet",
     "serial", "pagerduty", "pd", "command",
 ])

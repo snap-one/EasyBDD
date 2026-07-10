@@ -249,6 +249,34 @@ _COMMANDS = {
         "notes": [],
     },
 
+    "floci-upload": {
+        "summary": "Upload local file(s) to a Floci-emulated S3 bucket",
+        "usage":   "easybdd floci-upload <bucket_name> <file_path>... [options]",
+        "required": [
+            ("bucket_name", "str", "Floci bucket name (created automatically if missing)"),
+            ("file_path",   "path", "One or more local files to upload"),
+        ],
+        "optional": [
+            ("--key-prefix",   "str",  "",                        "Prefix prepended to each object key"),
+            ("--flatten",      "flag", None,                      "Use just the basename as the object key (drop directory structure)"),
+            ("--endpoint-url", "str",  "$FLOCI_ENDPOINT_URL or http://localhost:4566", "Floci endpoint URL"),
+            ("--region",       "str",  "us-east-1",               "Region passed to boto3 (Floci does not validate it)"),
+        ],
+        "examples": [
+            ("Mirror a single changed firmware file into Floci",
+             "easybdd floci-upload wattbox wattbox/upgrade_moip_4.7.0.bin"),
+            ("Mirror several files, flattening directory structure",
+             "easybdd floci-upload wattbox wattbox/a.bin wattbox/b.bin --flatten"),
+            ("Point at a non-default Floci host",
+             "easybdd floci-upload wattbox wattbox/a.bin --endpoint-url http://floci-host:4566"),
+        ],
+        "notes": [
+            "No AWS credentials required — Floci accepts any identity",
+            "Independent of the real S3 bucket; does not read from or write to AWS",
+            "Bucket is created automatically on first upload if it doesn't exist yet",
+        ],
+    },
+
     "mcp-serve": {
         "summary": "Start the Easy BDD MCP server (for Claude / AI integrations)",
         "usage":   "easybdd mcp-serve [options]",
@@ -278,6 +306,7 @@ _ALL_COMMANDS_SUMMARY = [
     ("run",                 "Run local YAML test files"),
     ("generate",            "Generate Gherkin .feature files from YAML tests"),
     ("mcp-serve",           "Start the MCP server for AI integrations"),
+    ("floci-upload",        "Upload local file(s) to a Floci-emulated S3 bucket"),
     ("docker-run",          "Build and run a test inside a Docker container"),
     ("record",              "Launch Playwright codegen and convert recording to YAML"),
     ("selector-audit",      "Scan YAML files for fragile CSS/XPath selectors"),
@@ -791,6 +820,41 @@ Examples:
         help="Port for SSE/streamable-http transport (default: 8080)",
     )
 
+    # Floci upload command — mirror local file(s) into a Floci-emulated S3 bucket
+    floci_parser = subparsers.add_parser(
+        "floci-upload",
+        help="Upload local file(s) to a Floci-emulated S3 bucket",
+    )
+    floci_parser.add_argument(
+        "bucket_name", help="Floci bucket name (created automatically if missing)"
+    )
+    floci_parser.add_argument(
+        "file_paths", nargs="+", metavar="FILE", help="Local file path(s) to upload"
+    )
+    floci_parser.add_argument(
+        "--key-prefix",
+        default="",
+        metavar="PREFIX",
+        help="Prefix prepended to each object key",
+    )
+    floci_parser.add_argument(
+        "--flatten",
+        action="store_true",
+        help="Use just the file's basename as the object key (drop directory structure)",
+    )
+    floci_parser.add_argument(
+        "--endpoint-url",
+        default=None,
+        dest="endpoint_url",
+        metavar="URL",
+        help="Floci endpoint URL (default: $FLOCI_ENDPOINT_URL or http://localhost:4566)",
+    )
+    floci_parser.add_argument(
+        "--region",
+        default="us-east-1",
+        help="Region passed to boto3 (default: us-east-1; Floci does not validate it)",
+    )
+
     # TestRail list command
     trcr_parser = subparsers.add_parser(
         "testrail-create-run",
@@ -1041,6 +1105,8 @@ Examples:
             return testrail_sync(args)
         elif args.command == "mcp-serve":
             return mcp_serve(args)
+        elif args.command == "floci-upload":
+            return floci_upload(args)
         elif args.command == "selector-audit":
             return selector_audit(args)
         elif args.command == "record":
@@ -1051,6 +1117,49 @@ Examples:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
+    return 0
+
+
+def floci_upload(args) -> int:
+    """Upload local file(s) to a Floci-emulated S3 bucket.
+
+    Independent of the real S3 upload path — intended for CI stages that want
+    firmware mirrored into a local/free Floci bucket in addition to (not
+    instead of) whatever already lands in the real bucket.
+    """
+    from .services.floci_service import FlociService
+
+    service = FlociService(logger=print, endpoint_url=args.endpoint_url)
+
+    failures = 0
+    for file_path in args.file_paths:
+        path = Path(file_path)
+        if not path.exists():
+            print(f"Error: file not found: {file_path}", file=sys.stderr)
+            failures += 1
+            continue
+
+        key = path.name if args.flatten else str(path).replace(os.sep, "/").lstrip("./")
+        if args.key_prefix:
+            key = f"{args.key_prefix.rstrip('/')}/{key}"
+
+        try:
+            url = service.upload_file(
+                bucket_name=args.bucket_name,
+                local_file_path=str(path),
+                s3_key=key,
+                region=args.region,
+            )
+            print(f"[Floci] Uploaded {file_path} -> {url}")
+        except Exception as e:
+            print(f"Error uploading {file_path} to Floci: {e}", file=sys.stderr)
+            failures += 1
+
+    if failures:
+        print(f"\n{failures} of {len(args.file_paths)} file(s) failed to upload.", file=sys.stderr)
+        return 1
+
+    print(f"\nUploaded {len(args.file_paths)} file(s) to Floci bucket '{args.bucket_name}'.")
     return 0
 
 

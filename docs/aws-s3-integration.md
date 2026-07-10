@@ -739,3 +739,4 @@ Or, if you know the exact string prefix:
 - See [examples/](../tests/cases/) for complete test examples
 - Read [API Authentication](api-authentication.md) for API testing
 - Check [Assertions](assertions.md) for validation patterns
+- Want the same operations against a local, free, no-credentials bucket in addition to real S3? See [Floci Integration](floci-integration.md)

@@ -73,6 +73,8 @@ _DEPRECATED_ACTION_MAP: dict = {
     "check soft assertions": "test.check_assertions",
     "aws list firmware files": "aws.list_files",
     "aws get latest firmware": "aws.get_latest",
+    "floci list firmware files": "floci.list_files",
+    "floci get latest firmware": "floci.get_latest",
 }
 
 
@@ -143,6 +145,8 @@ _PREFIX_ACTIONS: list = [
     ("aws.",        "_dispatch_aws"),
     ("aws",         "_dispatch_aws"),
     ("s3.",         "_dispatch_aws"),
+    ("floci.",      "_dispatch_floci"),
+    ("floci",       "_dispatch_floci"),
     ("api.",        "_dispatch_api"),
     ("pagerduty.",  "_dispatch_pagerduty"),
     ("pagerduty",   "_dispatch_pagerduty"),
@@ -1369,6 +1373,7 @@ class TestRunner:
                 "api": "api",
                 "aws": "aws",
                 "s3": "aws",
+                "floci": "floci",
                 "jsonrpc": "jsonrpc",
                 "websocket": "websocket",
                 "ws": "websocket",
@@ -1503,6 +1508,9 @@ class TestRunner:
 
     def _dispatch_aws(self, action, step_params, variables, sam=None):
         return self._handle_aws_action(action, step_params, variables)
+
+    def _dispatch_floci(self, action, step_params, variables, sam=None):
+        return self._handle_floci_action(action, step_params, variables)
 
     def _dispatch_api(self, action, step_params, variables, sam=None):
         return self._handle_api_action(action, step_params, variables)
@@ -4315,15 +4323,50 @@ class TestRunner:
     def _handle_aws_action(
         self, action: str, step_params: dict, variables: dict
     ) -> bool:
-        """Handle AWS S3 actions."""
+        """Handle AWS S3 actions (real AWS)."""
         from ..services.aws_service import AWSService
 
-        # Get or create AWS service from variables
         aws_service = variables.get("_aws_service")
         if not aws_service:
             aws_service = AWSService(logger=print)
             variables["_aws_service"] = aws_service
 
+        return self._handle_s3_like_action(
+            aws_service, action, step_params, variables,
+            service_label="AWS", var_prefix="aws",
+        )
+
+    def _handle_floci_action(
+        self, action: str, step_params: dict, variables: dict
+    ) -> bool:
+        """Handle Floci actions — same S3 operations as AWSService, but aimed
+        at a local Floci endpoint (default http://localhost:4566) instead of
+        real AWS. Independent of, and in addition to, the aws.*/s3.* actions."""
+        from ..services.floci_service import FlociService
+
+        floci_service = variables.get("_floci_service")
+        if not floci_service:
+            floci_service = FlociService(logger=print)
+            variables["_floci_service"] = floci_service
+
+        return self._handle_s3_like_action(
+            floci_service, action, step_params, variables,
+            service_label="Floci", var_prefix="floci",
+        )
+
+    def _handle_s3_like_action(
+        self,
+        aws_service,
+        action: str,
+        step_params: dict,
+        variables: dict,
+        service_label: str = "AWS",
+        var_prefix: str = "aws",
+    ) -> bool:
+        """Shared S3-operation handler used by both AWSService (real AWS) and
+        FlociService (local Floci emulator) — the two differ only in which
+        boto3 endpoint/identity they resolve to, not in the S3 operations
+        themselves."""
         # Extract parameters using helper — resolve ${vars} against current variables
         params = self._get_params(step_params)
         action_lower = action.lower()
@@ -4331,26 +4374,26 @@ class TestRunner:
         # Log credential source (mask secrets)
         key_id = (
             params.get("access_key_id")
-            or variables.get("aws_access_key_id")
-            or AWSService._global_config.get("access_key_id")
+            or variables.get(f"{var_prefix}_access_key_id")
+            or type(aws_service)._global_config.get("access_key_id")
         )
         if key_id:
             masked = key_id[:4] + "****" + key_id[-4:] if len(key_id) > 8 else "****"
-            print(f"      AWS credentials: key_id={masked} (explicit)")
+            print(f"      {service_label} credentials: key_id={masked} (explicit)")
         else:
-            print(f"      AWS credentials: using AWS CLI / environment defaults")
+            print(f"      {service_label} credentials: using AWS CLI / environment defaults")
 
         try:
             if any(k in action_lower for k in ("list firmware", "list files", "list_files", "list_firmware")):
                 # List and download firmware files
                 bucket_name = params.get("bucket_name", "")
                 if not bucket_name:
-                    raise ValueError("AWS list firmware requires 'bucket_name'")
+                    raise ValueError(f"{service_label} list firmware requires 'bucket_name'")
 
-                # Inject aws_access_key_id / aws_secret_access_key from run variables
-                # if the step didn't specify them explicitly
-                eff_key    = params.get("access_key_id")    or variables.get("aws_access_key_id")
-                eff_secret = params.get("secret_access_key") or variables.get("aws_secret_access_key")
+                # Inject <prefix>_access_key_id / <prefix>_secret_access_key from run
+                # variables if the step didn't specify them explicitly
+                eff_key    = params.get("access_key_id")    or variables.get(f"{var_prefix}_access_key_id")
+                eff_secret = params.get("secret_access_key") or variables.get(f"{var_prefix}_secret_access_key")
 
                 # Default download_dir: <cwd>/Firmware/<folder_prefix>
                 # Mirrors the S3 folder structure under a local Firmware/ root.
@@ -4419,8 +4462,8 @@ class TestRunner:
                         variables[local_paths_as] = local_paths
                         print(f"      Stored {len(local_paths)} local path(s) as: {local_paths_as!r}")
                     # Always expose as a predictable name too
-                    variables["_aws_local_paths"] = local_paths
-                    variables["_aws_local_path"] = local_paths[0]
+                    variables[f"_{var_prefix}_local_paths"] = local_paths
+                    variables[f"_{var_prefix}_local_path"] = local_paths[0]
                     print(f"      Local path(s): {local_paths}")
 
                 # Always expose result as last_response for eval.exec steps
@@ -4430,12 +4473,12 @@ class TestRunner:
                     print(f"      ⚠  0 files matched — check filter params above")
                 return True
 
-            elif "get latest firmware" in action_lower:
+            elif "get latest firmware" in action_lower or "get_latest" in action_lower:
                 # Get latest firmware file
                 bucket_name = params.get("bucket_name", "")
                 if not bucket_name:
                     raise ValueError(
-                        "AWS get latest firmware requires " "'bucket_name'"
+                        f"{service_label} get latest firmware requires 'bucket_name'"
                     )
 
                 result = aws_service.get_latest_firmware(
@@ -4487,7 +4530,7 @@ class TestRunner:
 
                 if not bucket_name or not local_file:
                     raise ValueError(
-                        "AWS upload requires 'bucket_name' and " "'local_file_path'"
+                        f"{service_label} upload requires 'bucket_name' and 'local_file_path'"
                     )
 
                 url = aws_service.upload_file(
@@ -4508,14 +4551,14 @@ class TestRunner:
 
                 return True
 
-            elif "delete folder" in action_lower:
+            elif "delete folder" in action_lower or "delete_folder" in action_lower:
                 # Delete folder from S3
                 bucket_name = params.get("bucket_name", "")
                 folder_prefix = params.get("folder_prefix", "")
 
                 if not bucket_name or not folder_prefix:
                     raise ValueError(
-                        "AWS delete folder requires 'bucket_name' "
+                        f"{service_label} delete folder requires 'bucket_name' "
                         "and 'folder_prefix'"
                     )
 
@@ -4530,11 +4573,11 @@ class TestRunner:
                 return True
 
             else:
-                print(f"      ❌ Unknown AWS action: {action}")
-                raise ValueError(f"Unknown AWS action: {action}")
+                print(f"      ❌ Unknown {service_label} action: {action}")
+                raise ValueError(f"Unknown {service_label} action: {action}")
 
         except Exception as e:
-            print(f"      ❌ AWS action failed: {e}")
+            print(f"      ❌ {service_label} action failed: {e}")
             raise
 
     def _get_params(self, step_params: dict) -> dict:

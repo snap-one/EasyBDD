@@ -24,6 +24,7 @@ Easy BDD is a YAML-based test framework that runs test cases authored directly i
 | [assertions.md](./assertions.md) | `test.assert`, schema validation, soft assertions |
 | [api-authentication.md](./api-authentication.md) | Auto-auth via `login_json`/`token_path`, bearer/basic/API key/OAuth2 |
 | [aws-s3-integration.md](./aws-s3-integration.md) | S3 file listing, firmware download, CloudFront URLs |
+| [floci-integration.md](./floci-integration.md) | Same S3 operations against a local Floci emulator — no AWS creds, in addition to real S3 |
 | [telnet.md](./telnet.md) | `telnet.send` for network devices |
 | [ssh-lgip.md](./ssh-lgip.md) | Stateful SSH sessions, LGIP IR control |
 | [jsonrpc-websocket.md](./jsonrpc-websocket.md) | JSON-RPC over WebSocket |

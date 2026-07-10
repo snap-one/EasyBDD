@@ -183,6 +183,19 @@ pipeline {
 
 After this pipeline runs, the newly created TestRail runs will be picked up and executed by the execution pipeline (below) on its next poll cycle.
 
+### Mirroring firmware into Floci
+
+The real `Jenkinsfile.firmware-wattbox` in this repo (which differs slightly
+from the illustrative snippet above) also includes a **"Mirror Firmware to
+Floci"** stage. It runs right after firmware detection and pushes every
+changed `.bin` file into a local [Floci](https://floci.io) instance via
+`python -m easybdd floci-upload`, in addition to — not instead of — whatever
+already happens with the real S3 bucket. It's independent of TestRail run
+creation, so it runs even if a changed file doesn't match a known firmware
+type. See [Floci Integration](floci-integration.md) for the `floci.*` YAML
+actions, the `floci-upload` CLI, and how to point this stage at your own
+bucket/endpoint.
+
 ---
 
 ## Jenkinsfile.create-smoke-run

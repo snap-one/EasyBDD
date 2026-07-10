@@ -952,6 +952,132 @@ ACTION_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
+    # ==================== FLOCI ACTIONS ====================
+    # Same S3 operations as the AWS actions above, but aimed at a local Floci
+    # endpoint (default http://localhost:4566) instead of real AWS.
+    "floci.list_files": {
+        "category": "Floci",
+        "label": "List Floci Files",
+        "description": "List files in a local Floci-emulated S3 bucket",
+        "icon": "📂",
+        "parameters": {
+            "bucket_name": {
+                "type": "text",
+                "required": True,
+                "label": "Bucket Name",
+                "placeholder": "my-bucket",
+                "help": "Bucket name (created automatically in Floci if missing)",
+            },
+            "folder_prefix": {
+                "type": "text",
+                "required": False,
+                "label": "Folder Prefix",
+                "placeholder": "firmware/",
+                "help": "Filter by folder path",
+            },
+            "file_extension": {
+                "type": "text",
+                "required": False,
+                "label": "File Extension",
+                "placeholder": ".bin",
+                "help": "Filter by file extension",
+            },
+            "store_as": {
+                "type": "text",
+                "required": False,
+                "label": "Variable Name",
+                "placeholder": "file_list",
+                "help": "Store results in variable",
+            },
+        },
+    },
+    "floci.get_latest": {
+        "category": "Floci",
+        "label": "Get Latest Floci File",
+        "description": "Get most recent file from a local Floci-emulated S3 bucket",
+        "icon": "🆕",
+        "parameters": {
+            "bucket_name": {
+                "type": "text",
+                "required": True,
+                "label": "Bucket Name",
+                "placeholder": "my-bucket",
+                "help": "Bucket name (created automatically in Floci if missing)",
+            },
+            "folder_prefix": {
+                "type": "text",
+                "required": False,
+                "label": "Folder Prefix",
+                "placeholder": "firmware/",
+                "help": "Filter by folder path",
+            },
+            "file_extension": {
+                "type": "text",
+                "required": False,
+                "label": "File Extension",
+                "placeholder": ".bin",
+                "help": "Filter by file extension",
+            },
+            "store_as": {
+                "type": "text",
+                "required": True,
+                "label": "Variable Name",
+                "placeholder": "latest_firmware",
+                "help": "Store file info in variable",
+            },
+        },
+    },
+    "floci.upload": {
+        "category": "Floci",
+        "label": "Upload to Floci",
+        "description": "Upload a file to a local Floci-emulated S3 bucket",
+        "icon": "⬆️",
+        "parameters": {
+            "bucket_name": {
+                "type": "text",
+                "required": True,
+                "label": "Bucket Name",
+                "placeholder": "my-bucket",
+                "help": "Bucket name (created automatically in Floci if missing)",
+            },
+            "key": {
+                "type": "text",
+                "required": True,
+                "label": "Object Key",
+                "placeholder": "uploads/file.bin",
+                "help": "Object key (destination path)",
+            },
+            "file_path": {
+                "type": "file",
+                "required": True,
+                "label": "Local File Path",
+                "placeholder": "/path/to/file.bin",
+                "help": "Local file to upload",
+            },
+        },
+    },
+    "floci.delete_folder": {
+        "category": "Floci",
+        "label": "Delete Floci Folder",
+        "description": "Delete all objects under a folder prefix in Floci",
+        "icon": "🗑️",
+        "parameters": {
+            "bucket_name": {
+                "type": "text",
+                "required": True,
+                "label": "Bucket Name",
+                "placeholder": "my-bucket",
+                "help": "Bucket name",
+            },
+            "folder_prefix": {
+                "type": "text",
+                "required": True,
+                "label": "Folder Prefix",
+                "placeholder": "old-builds/",
+                "help": "Folder prefix to delete",
+            },
+        },
+    },
     # ==================== OVRC API ACTIONS ====================
     "ovrc.connect": {
         "category": "OvrC API",
