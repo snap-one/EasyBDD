@@ -511,13 +511,17 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         # With a selector, test.assert_text_contains scopes the substring
         # check to that element; without one, browser.verify_text checks
         # the whole page (both are contains-semantics like the legacy cmd).
+        # Selenium IDE's assertText/assertText-style commands carry the expected
+        # substring in "value", not "text" — text is reserved for a link-locator
+        # match (see _selenium_locator_kwargs's link=/linkText= handling above).
+        expected = cmd_dict.get("text") or value or text
         sel = param or target
         if sel:
             step = {"action": "test.assert_text_contains",
                     **_selenium_locator_kwargs(sel),
-                    "text": cmd_dict.get("text", text)}
+                    "text": expected}
         else:
-            step = {"action": "browser.verify_text", "text": cmd_dict.get("text", text)}
+            step = {"action": "browser.verify_text", "text": expected}
     elif cmd in ("gettitle", "get_title", "asserttitle", "assert_title"):
         store = cmd_dict.get("store_as", "page_title")
         step = {"action": "browser.get_title", "store_as": store}
@@ -542,6 +546,36 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         step = {"action": "test.log", "message": f"TODO browser.{cmd}: {json.dumps(cmd_dict)}"}
 
     return step
+
+
+def _fixup_orphan_fills(steps: List[Dict]) -> List[Dict]:
+    """Legacy Selenium exports often click a field to focus it, then type into
+    it as a *separate* step with no locator of its own — the old runtime's
+    active-element tracking made the click's target implicit for the type
+    right after it. browser.fill has no such concept, so fold a click+fill
+    pair like that into one fill using the click's locator, instead of
+    emitting an unresolvable, locator-less fill step.
+
+    Operates on flat {"action": ..., ...} dicts, before _to_dot_notation."""
+    out: List[Dict] = []
+    i = 0
+    while i < len(steps):
+        cur = steps[i]
+        nxt = steps[i + 1] if i + 1 < len(steps) else None
+        if (
+            isinstance(cur, dict) and cur.get("action") == "browser.click"
+            and isinstance(nxt, dict) and nxt.get("action") == "browser.fill"
+            and cur.get("selector")
+            and not any(k in nxt for k in ("selector", "field", "role", "label"))
+        ):
+            merged = dict(nxt)
+            merged["selector"] = cur["selector"]
+            out.append(merged)
+            i += 2
+            continue
+        out.append(cur)
+        i += 1
+    return out
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -1173,7 +1207,7 @@ def parse_step_block(text: str) -> tuple:
     steps — list of Easy BDD step dicts
     data  — list of variable dicts from an Examples table, or empty list
     """
-    steps: List[Dict] = []
+    raw_steps: List[Dict] = []
     data: List[Dict] = []
     in_examples = False
     ex_headers: List[str] = []
@@ -1218,12 +1252,13 @@ def parse_step_block(text: str) -> tuple:
         step = _parse_step_line(stripped)
         if step:
             if isinstance(step, list):
-                steps.extend(_to_dot_notation(s) for s in step)
+                raw_steps.extend(step)
             else:
-                steps.append(_to_dot_notation(step))
+                raw_steps.append(step)
 
     # Handle Examples: at end of block
     _flush_examples()
+    steps = [_to_dot_notation(s) for s in _fixup_orphan_fills(raw_steps)]
     return steps, data
 
 
@@ -1238,9 +1273,15 @@ def parse_feature_file(content: str) -> List[Dict[str, Any]]:
     """
     tests = []
     current_test: Optional[Dict] = None
+    raw_steps: List[Dict] = []
     in_when = False
     in_examples = False
     loop_count = 0
+
+    def _finalize_current_test():
+        if current_test:
+            current_test["steps"] = [_to_dot_notation(s) for s in _fixup_orphan_fills(raw_steps)]
+            tests.append(current_test)
 
     for raw_line in content.splitlines():
         line = raw_line.strip()
@@ -1250,12 +1291,12 @@ def parse_feature_file(content: str) -> List[Dict[str, Any]]:
 
         if line.startswith("Scenario") and ":" in line:
             # Save previous test
-            if current_test:
-                tests.append(current_test)
+            _finalize_current_test()
             # New test
             title = re.sub(r"^Scenario\s*Outline\s*:\s*", "", line).strip()
             title = re.sub(r"^Scenario\s*:\s*", "", title).strip()
             current_test = {"name": title, "description": "", "tags": [], "steps": [], "loop_count": 0}
+            raw_steps = []
             in_when = False
             in_examples = False
             continue
@@ -1303,12 +1344,11 @@ def parse_feature_file(content: str) -> List[Dict[str, Any]]:
             step = _parse_step_line(stripped)
             if step:
                 if isinstance(step, list):
-                    current_test["steps"].extend(_to_dot_notation(s) for s in step)
+                    raw_steps.extend(step)
                 else:
-                    current_test["steps"].append(_to_dot_notation(step))
+                    raw_steps.append(step)
 
-    if current_test:
-        tests.append(current_test)
+    _finalize_current_test()
 
     return tests
 
