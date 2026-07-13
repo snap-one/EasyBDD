@@ -54,6 +54,8 @@ Easy BDD is a YAML-based test framework that runs test cases authored directly i
 | Doc | What it covers |
 |-----|----------------|
 | [ci-cd-integration.md](./ci-cd-integration.md) | Jenkins pipelines, GitHub Actions, TestRail run creation |
+| [mcp-setup.md](./mcp-setup.md) | Exposing Easy BDD itself as an MCP server to Claude, Cursor, VS Code |
+| [github-jenkins-mcp-setup.md](./github-jenkins-mcp-setup.md) | Connecting Claude Code, Claude Desktop, and VS Code to GitHub's and Jenkins' own MCP servers |
 | [setup.md](./setup.md) | Installation, environment setup, framework config |
 | [CENTRALIZED_VARIABLES.md](./CENTRALIZED_VARIABLES.md) | Variable scopes and resolution order |
 | [DEVICE_AGNOSTIC_SETUP.md](./DEVICE_AGNOSTIC_SETUP.md) | Multi-device configs, parameterized device testing |
