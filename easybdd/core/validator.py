@@ -163,7 +163,7 @@ ACTION_SCHEMA: Dict[str, Dict] = {
     "browser.navigate":     {"alias_of": "browser.open"},
     "browser.close":        {"required": [], "optional": []},
     "close browser":        {"alias_of": "browser.close"},
-    "browser.click":        {"required": [], "optional": ["selector", "text", "button", "role", "name", "label"]},
+    "browser.click":        {"required": [], "optional": ["selector", "text", "button", "role", "name", "label", "exact", "timeout"]},
     "click element":        {"alias_of": "browser.click"},
     "browser.fill":         {"required": [], "optional": [
         "selector", "field", "value", "role", "name", "label", "clear",
