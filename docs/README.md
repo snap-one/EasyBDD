@@ -60,7 +60,7 @@ Easy BDD is a YAML-based test framework that runs test cases authored directly i
 | [CENTRALIZED_VARIABLES.md](./CENTRALIZED_VARIABLES.md) | Variable scopes and resolution order |
 | [DEVICE_AGNOSTIC_SETUP.md](./DEVICE_AGNOSTIC_SETUP.md) | Multi-device configs, parameterized device testing |
 | [automatic-time-tracking.md](./automatic-time-tracking.md) | Datalake metrics posting |
-| [datalake-logger.md](./datalake-logger.md) | Teams notifications, error hints |
+| [datalake-logger.md](./datalake-logger.md) | Error hints, datalake metrics posting |
 
 ---
 

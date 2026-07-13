@@ -3,7 +3,6 @@ Datalake Logger for Easy BDD Framework
 
 Provides comprehensive logging with:
 - Error hints and tracking
-- Teams notifications
 - Datalake metrics posting
 - Console logging with Loguru
 
@@ -18,7 +17,7 @@ import re
 import json
 import time
 import datetime
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Any, List, Tuple
 from pathlib import Path
 
 try:
@@ -35,7 +34,7 @@ try:
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
-    print("Warning: requests not installed for Teams/Datalake posting")
+    print("Warning: requests not installed for Datalake posting")
 
 try:
     from openai import OpenAI
@@ -47,7 +46,7 @@ except ImportError:
 
 class DatalakeLogger:
     """
-    Comprehensive logger with error hints, Teams notifications, and datalake posting.
+    Comprehensive logger with error hints and datalake posting.
     """
 
     def __init__(
@@ -61,7 +60,7 @@ class DatalakeLogger:
 
         Args:
             artifact_path: Path to store artifacts and logs
-            post_results: Whether to post to Teams and Datalake
+            post_results: Whether to post to Datalake
             error_hint_subs: Error hint substitutions (type, value, hint)
         """
         self.artifact_path = Path(artifact_path)
@@ -69,7 +68,6 @@ class DatalakeLogger:
 
         self.post_results = post_results
         self.error_hint_subs = error_hint_subs or []
-        self.skip_errors_type_set = set(["builtins.AssertionError"])
 
         self.logger = None
         if LOGURU_AVAILABLE:
@@ -165,7 +163,6 @@ class DatalakeLogger:
     def limited_traceback_sink(self, message):
         """
         Custom sink that logs errors with limited traceback to project files.
-        Also posts to Teams if configured.
         """
         record = message.record
         exception_info = record.get("exception")
@@ -224,17 +221,6 @@ class DatalakeLogger:
 
         if self.logger:
             self.logger.opt(depth=0).log("WARNING", f"\nHint: {hint}")
-
-        # Post to Teams if not a duplicate error type
-        if exception_type not in self.skip_errors_type_set:
-            self.teams_post(
-                message=f"{exception_raw}\n{hint}",
-                request="Test execution",
-                run_name="Easy BDD Test Run",
-                object_id="TEST001",
-            )
-
-        self.skip_errors_type_set.add(exception_type)
 
     def error_hint(self, param1: str, param2: str) -> Optional[str]:
         """
@@ -327,75 +313,6 @@ class DatalakeLogger:
             if self.logger:
                 self.logger.debug(f"GPT hint failed: {e}")
             return None
-
-    def teams_post(
-        self,
-        message: str,
-        request: str = "",
-        run_name: str = "",
-        object_id: str = "T000000",
-    ) -> Dict[str, Any]:
-        """
-        Post a message to Microsoft Teams.
-
-        Args:
-            message: Message to post
-            request: Request description
-            run_name: Test run name
-            object_id: Test object ID
-
-        Returns:
-            Response dict
-        """
-        if not REQUESTS_AVAILABLE:
-            return {"error": "requests library not available"}
-
-        # Teams webhook URL (can be configured)
-        url = os.environ.get(
-            "TEAMS_WEBHOOK_URL",
-            "https://prod-178.westus.logic.azure.com:443/workflows/bd547a7ba2e34cfdb790b293cf6ab48b/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=PHGVoHgBdwRxvENue3yS6dj3h2KU4AjX08jsm88JUoo",
-        )
-
-        headers = {"Content-Type": "application/json"}
-
-        test_desc = f"[{run_name} {object_id}]\n"
-        my_message = f"{request}\n\n{message}"
-        full_message = f"{test_desc}\n{my_message}"
-
-        teams_adaptive_card = {
-            "type": "message",
-            "attachments": [
-                {
-                    "contentType": "application/vnd.microsoft.card.adaptive",
-                    "content": {
-                        "type": "AdaptiveCard",
-                        "body": [
-                            {"type": "TextBlock", "text": full_message, "wrap": True}
-                        ],
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                        "version": "1.2",
-                    },
-                }
-            ],
-        }
-
-        if self.post_results:
-            try:
-                response = requests.post(
-                    url, headers=headers, json=teams_adaptive_card, timeout=10
-                )
-                if response.status_code != 202:
-                    if self.logger:
-                        self.logger.warning(
-                            f"Teams error {response.status_code}: {response.text}"
-                        )
-                return {"status": response.status_code, "text": response.text}
-            except Exception as e:
-                if self.logger:
-                    self.logger.warning(f"Teams post failed: {e}")
-                return {"error": str(e)}
-        else:
-            return {"teams_message": f"{test_desc}\n{my_message}"}
 
     def datalake_post(
         self,
@@ -570,7 +487,7 @@ def get_logger(
 
     Args:
         artifact_path: Path to store artifacts
-        post_results: Whether to post to Teams/Datalake
+        post_results: Whether to post to Datalake
 
     Returns:
         DatalakeLogger instance

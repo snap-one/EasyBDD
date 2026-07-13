@@ -1043,7 +1043,7 @@ Easy_BDD/
 │   ├── core/
 │   │   ├── runner.py              # Execution engine, ActionRegistry, control flow
 │   │   ├── testrail_runner.py     # TestRail lifecycle — find, execute, post results
-│   │   ├── testrail_reporter.py   # Datalake + Teams webhook reporting
+│   │   ├── testrail_reporter.py   # Datalake reporting
 │   │   ├── parser.py              # YAML parser, YAML repair utilities
 │   │   └── validator.py           # Step schema and syntax validation
 │   └── services/

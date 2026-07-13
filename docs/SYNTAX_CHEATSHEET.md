@@ -864,7 +864,6 @@ aws:
 datalake:
   enabled: false
   s3_bucket: "test-results"
-  teams_webhook: "${TEAMS_WEBHOOK_URL}"
 ```
 
 ---
@@ -1086,7 +1085,6 @@ TEST_PASSWORD=SecurePassword123!
 DEVICE_PASSWORD=admin123
 
 # Webhook URLs
-TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/...
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 

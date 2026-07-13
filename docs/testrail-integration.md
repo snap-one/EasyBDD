@@ -138,7 +138,6 @@ Special control variables recognized by the runner:
 | Variable | Effect |
 |----------|--------|
 | `no_datalake: True` | Skips posting results to the data lake for this run |
-| `no_teams: True` | Suppresses the Teams notification after this run completes |
 | `async_execution: true` | Runs all data-driven iterations in parallel |
 | `max_workers: N` | Maximum parallel workers when `async_execution` is enabled |
 
@@ -952,36 +951,3 @@ Notes:
 - Name is capped at 80 characters.
 - When running standalone (no TestRail), the report name falls back to the YAML file stem.
 - If the attachment upload fails (for example, due to API permissions), a warning is printed but the run result is not affected.
-
----
-
-## Teams Notifications
-
-After each TestRail run completes, Easy BDD posts an Adaptive Card to Microsoft Teams summarizing the results.
-
-### What the card shows
-
-- Status emoji (pass / fail)
-- Passed, Failed, and Skipped counts
-- Total duration
-- Two action buttons: **View TestRail Run** and **View Jenkins Log** (populated from the `BUILD_URL` environment variable)
-
-### Setup
-
-Add the webhook URL to your `.env` file:
-
-```bash
-TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/...
-```
-
-The notification fires only when `(passed + failed) > 0`. Runs where all tests were skipped or blocked do not trigger a notification.
-
-### Suppressing notifications for a specific run
-
-Add a `Var:` case to the run with:
-
-```
-no_teams: True
-```
-
-This is useful for development runs, dry runs, or any run where you do not want channel noise.

@@ -70,7 +70,6 @@ ping_target: 192.168.100.1
 | Variable | Effect |
 |----------|--------|
 | `no_datalake: True` | Skip posting results to the data lake |
-| `no_teams: True` | Suppress the Teams notification |
 | `retry: 0` | Disable automatic retries for this run |
 
 ---

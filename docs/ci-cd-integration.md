@@ -20,7 +20,7 @@ The general pattern:
 
 1. **A trigger event** (git push, firmware upload, scheduled cron) calls `testrail-create-run` to create one or more TestRail runs.
 2. **Jenkins** polls TestRail (or is triggered via webhook) and calls `testrail-run` to execute whichever runs have pending tests.
-3. Results, HTML reports, and Teams notifications are produced automatically.
+3. Results and HTML reports are produced automatically.
 
 This decouples *run creation* from *run execution* — runs can be created by GitHub Actions even if Jenkins is not running, and Jenkins will pick them up on its next poll cycle.
 
@@ -218,12 +218,10 @@ Jenkins (testrail-run pipeline)
   └─ Executes each Feature:/Test: case
   └─ Posts results back to TestRail
   └─ Uploads HTML report as attachment to each result
-  └─ Posts Teams notification with pass/fail summary
 ```
 
 ### Key points
 
 - Run creation and run execution are decoupled. If Jenkins is down during the push, the runs wait in TestRail until Jenkins comes back.
-- The `BUILD_NUMBER` and `BUILD_URL` env vars are set by Jenkins when executing runs, so report filenames and Teams notification links point to the correct Jenkins build.
+- The `BUILD_NUMBER` and `BUILD_URL` env vars are set by Jenkins when executing runs, so report filenames point to the correct Jenkins build.
 - Use `--dry-run` on `testrail-create-run` to preview the runs without creating them during pipeline development.
-- To suppress Teams notifications for CI development runs, add a `Var:` case with `no_teams: True` to the run.
