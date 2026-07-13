@@ -812,10 +812,14 @@ class BrowserService:
         **kwargs,
     ) -> None:
         """Enhanced Playwright click with XPath support"""
-        # Pull timeout out before copying to click_options — otherwise it'd be
-        # passed twice (once explicitly, once via **click_options) and crash
-        # every call below with "got multiple values for keyword argument".
+        # Pull timeout/exact out before copying to click_options — otherwise
+        # they'd be passed twice (once explicitly, once via **click_options)
+        # and crash every call below with "got multiple values for keyword
+        # argument" (timeout) or "got an unexpected keyword argument" (exact,
+        # which Locator.click() doesn't accept at all — it's a get_by_role/
+        # get_by_label constructor arg, not a click() arg).
         timeout = kwargs.pop("timeout", None)
+        exact = kwargs.pop("exact", False)
         click_options = kwargs.copy()
 
         if button:
@@ -825,7 +829,6 @@ class BrowserService:
             # Handle get_by_label (e.g., page.get_by_label("SourceAnalogTosLinkCoaxHDMI"))
             if label:
                 print(f"      Finding element by label: {label}")
-                exact = kwargs.get("exact", False)
                 self.playwright_page.get_by_label(label, exact=exact).click(
                     timeout=timeout or 5000, **click_options
                 )
@@ -834,7 +837,6 @@ class BrowserService:
 
             # Handle get_by_role (e.g., page.get_by_role("link", name="...") or just role)
             if role:
-                exact = kwargs.get("exact", False)
                 if name:
                     # Role with name (more specific)
                     print(f"      Finding element by role '{role}' with name: {name}")
