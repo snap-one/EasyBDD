@@ -121,6 +121,31 @@ Open `http://localhost:8091`. Requires the same `TESTRAIL_URL` / `TESTRAIL_USERN
 Use it to browse runs, mark tests for retest, and edit cases without hand-writing YAML
 in the TestRail web UI.
 
+### Production instance
+
+The builder also runs persistently on the main Jenkins server
+(`192.168.100.100`) as a systemd service, so nobody needs to run it locally —
+just open **http://192.168.100.100:8091**.
+
+- Service unit: `/etc/systemd/system/easybdd-testrail-builder.service`
+- Runs from `/var/lib/jenkins/workspace/EASY_BDD/frontend` (the same checkout
+  Jenkins pipelines use for `EASY_BDD_DIR`), as the `jenkins` user
+- Loads TestRail credentials from `/var/lib/jenkins/workspace/EASY_BDD/.env`
+- Enabled at boot (`systemctl enable`) and auto-restarts on failure
+
+To pick up new code after a `git pull` in that checkout:
+
+```bash
+sudo systemctl restart easybdd-testrail-builder
+```
+
+Check status / logs:
+
+```bash
+sudo systemctl status easybdd-testrail-builder
+journalctl -u easybdd-testrail-builder -f
+```
+
 ---
 
 ## 4. MCP server — let an AI assistant drive the framework

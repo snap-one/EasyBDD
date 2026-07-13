@@ -896,10 +896,12 @@ python frontend/start_testrail_builder.py --port 9000
 
 Uses the same TestRail credentials as the runner (`.env`: `TESTRAIL_URL`, `TESTRAIL_USERNAME`, `TESTRAIL_API_KEY`).
 
+**Production instance:** the builder runs persistently on the main Jenkins server as the `easybdd-testrail-builder` systemd service (enabled at boot) — no need to run it locally. Open **http://192.168.100.100:8091**. See [ONBOARDING.md](ONBOARDING.md#production-instance) for service management commands.
+
 What it does:
 
 - **Case types** — build any of the five case types; the correct title prefix is applied automatically.
-- **Step palette** — every action the runner supports (Browser, API, SSH, Telnet, Serial, WebSocket, OvrC, AWS, Eval, Test utilities…), searchable, with per-parameter forms, required-field markers, and help text.
+- **Step palette** — every action the runner supports (Browser, API, SSH, Telnet, Serial, WebSocket, OvrC, AWS, Floci, Eval, Test utilities…), searchable, with per-parameter forms, required-field markers, and help text.
 - **Control flow** — for_each / if-else / repeat / parallel blocks with nested steps.
 - **Shared steps** — call `Shared:` cases from the selected suite by picking them from a dropdown.
 - **Live preview + validation** — the Preconditions body is generated server-side and round-trip parsed with the runner's own parser before publishing, so what lands in TestRail is guaranteed to execute. Typos get "did you mean" suggestions.
