@@ -270,7 +270,6 @@ Each `Jenkinsfile.*` at the repo root is a separate Jenkins pipeline:
 | `Jenkinsfile.testrail-all` | Run everything against TestRail |
 | `Jenkinsfile.testrail-convert` | Convert/import into TestRail |
 | `Jenkinsfile.testrail-sync` | Sync results back to TestRail |
-| `Jenkinsfile.create-smoke-run` | Create a smoke-test TestRail run |
 | `Jenkinsfile.firmware-wattbox` | Firmware upgrade test pipeline |
 
 Setting up a *new* pipeline (job config, credentials, agent labels) is a Jenkins-side

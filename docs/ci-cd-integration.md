@@ -10,8 +10,7 @@ How to wire Easy BDD into GitHub Actions and Jenkins so that test runs are creat
 2. [GitHub Action: Auto-create Smoke Run on Push](#github-action)
 3. [Setting Up GitHub Secrets](#github-secrets)
 4. [Jenkinsfile.firmware-wattbox — Firmware-triggered Runs](#jenkinsfilefirmware-wattbox)
-5. [Jenkinsfile.create-smoke-run — Jenkins Polling Fallback](#jenkinsfilecreate-smoke-run)
-6. [Full Pipeline Walkthrough](#full-pipeline-walkthrough)
+5. [Full Pipeline Walkthrough](#full-pipeline-walkthrough)
 
 ---
 
@@ -195,61 +194,6 @@ creation, so it runs even if a changed file doesn't match a known firmware
 type. See [Floci Integration](floci-integration.md) for the `floci.*` YAML
 actions, the `floci-upload` CLI, and how to point this stage at your own
 bucket/endpoint.
-
----
-
-## Jenkinsfile.create-smoke-run
-
-Use this as a fallback when GitHub Actions is not available, or to run on a pure Jenkins polling trigger.
-
-The key addition is an **SCM trigger guard**: the pipeline checks whether the commit that triggered the build is the same one that created the runs. This prevents creating duplicate runs if the pipeline is re-triggered for the same commit.
-
-```groovy
-pipeline {
-    agent any
-
-    triggers {
-        pollSCM('H/5 * * * *')
-    }
-
-    environment {
-        TESTRAIL_URL      = credentials('testrail-url')
-        TESTRAIL_USERNAME = credentials('testrail-username')
-        TESTRAIL_API_KEY  = credentials('testrail-api-key')
-    }
-
-    stages {
-        stage('SCM trigger guard') {
-            steps {
-                script {
-                    // Only proceed if this build was triggered by an SCM change
-                    // (not a manual or timer-triggered re-run of an old commit)
-                    def cause = currentBuild.getBuildCauses('hudson.triggers.SCMTrigger$SCMTriggerCause')
-                    if (!cause) {
-                        echo "Not an SCM-triggered build — skipping run creation"
-                        currentBuild.result = 'NOT_BUILT'
-                        return
-                    }
-                    echo "SCM change detected — proceeding with run creation"
-                }
-            }
-        }
-
-        stage('Create smoke runs') {
-            steps {
-                sh """
-                    python -m easybdd testrail-create-run 59 106662 \\
-                      --given-section "VPS" \\
-                      --sections "Functions" "Firmware Resiliency" "VPS Web UI" "VPS API" \\
-                      --description "Branch: ${env.GIT_BRANCH}
-                    Commit: ${env.GIT_COMMIT}
-                    Build: ${env.BUILD_URL}"
-                """
-            }
-        }
-    }
-}
-```
 
 ---
 
