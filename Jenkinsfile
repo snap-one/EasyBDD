@@ -17,6 +17,12 @@ pipeline {
         VENV        = '/home/jenkins/Easy_BDD/env'
         PYTHON      = '/home/jenkins/Easy_BDD/env/bin/python'
         PIP         = '/home/jenkins/Easy_BDD/env/bin/pip'
+        // TestRail smoke suite — same project/suite used by
+        // Jenkinsfile.create-smoke-run and the GitHub Action in
+        // docs/ci-cd-integration.md. Cases here are authored via the
+        // web UI test builder / directly in TestRail, not as local YAML.
+        PROJECT_ID  = '59'
+        SUITE_ID    = '106662'
     }
 
     stages {
@@ -48,11 +54,7 @@ pipeline {
             steps {
                 dir("${PROJECT_DIR}") {
                     sh '''
-                        if [ -d tests/cases ]; then
-                            ${PYTHON} -m easybdd validate tests/cases/
-                        else
-                            echo "No tests/cases directory found — skipping validation"
-                        fi
+                        ${PYTHON} -m easybdd validate --testrail-suite ${SUITE_ID} --project ${PROJECT_ID}
                     '''
                 }
             }
