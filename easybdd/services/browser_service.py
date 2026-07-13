@@ -481,7 +481,28 @@ class BrowserService:
 
         # Create new Playwright instance only if needed
         if self.playwright_playwright is None:
-            self.playwright_playwright = sync_playwright().start()
+            # TEMPORARY DIAGNOSTIC — remove once the asyncio/Playwright conflict
+            # investigated 2026-07-13 is root-caused.
+            import threading as _threading
+            print(f"      🔬 [DEBUG] thread={_threading.current_thread().name}")
+            try:
+                _running = asyncio.get_running_loop()
+                print(f"      🔬 [DEBUG] asyncio.get_running_loop() -> RUNNING loop {_running!r}")
+            except RuntimeError as _e:
+                print(f"      🔬 [DEBUG] asyncio.get_running_loop() -> RuntimeError: {_e}")
+            try:
+                _loop = asyncio.get_event_loop()
+                print(
+                    f"      🔬 [DEBUG] asyncio.get_event_loop() -> {_loop!r} "
+                    f"is_running={_loop.is_running()} is_closed={_loop.is_closed()}"
+                )
+            except Exception as _e:
+                print(f"      🔬 [DEBUG] asyncio.get_event_loop() -> {type(_e).__name__}: {_e}")
+            try:
+                self.playwright_playwright = sync_playwright().start()
+            except Exception as _e:
+                print(f"      🔬 [DEBUG] sync_playwright().start() raised: {type(_e).__name__}: {_e}")
+                raise
 
         # Browser launch options
         launch_options = {
