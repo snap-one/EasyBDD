@@ -896,7 +896,7 @@ python frontend/start_testrail_builder.py --port 9000
 
 Uses the same TestRail credentials as the runner (`.env`: `TESTRAIL_URL`, `TESTRAIL_USERNAME`, `TESTRAIL_API_KEY`).
 
-**Production instance:** the builder runs persistently on the main Jenkins server as the `easybdd-testrail-builder` systemd service (enabled at boot) — no need to run it locally. Open **http://192.168.100.100:8091**. See [ONBOARDING.md](ONBOARDING.md#production-instance) for service management commands.
+**Production instance:** the builder runs persistently on the main Jenkins server as the `easybdd-testrail-builder` systemd service (enabled at boot) — no need to run it locally. Open **<jenkins_url>:8091**. See [ONBOARDING.md](ONBOARDING.md#production-instance) for service management commands.
 
 What it does:
 

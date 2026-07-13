@@ -37,7 +37,7 @@ python frontend/start_testrail_builder.py --port 8091
 Open http://localhost:8091 in your browser.
 
 > **Already running for you:** the builder is deployed as a persistent service
-> on the main Jenkins server — just open **http://192.168.100.100:8091**
+> on the main Jenkins server — just open **<jenkins_url>:8091**
 > instead of starting it yourself. See [ONBOARDING.md](ONBOARDING.md#production-instance).
 
 ## 🎯 First Test (2 minutes)

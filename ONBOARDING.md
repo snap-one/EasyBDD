@@ -124,8 +124,8 @@ in the TestRail web UI.
 ### Production instance
 
 The builder also runs persistently on the main Jenkins server
-(`192.168.100.100`) as a systemd service, so nobody needs to run it locally —
-just open **http://192.168.100.100:8091**.
+(`<jenkins_url>`) as a systemd service, so nobody needs to run it locally —
+just open **<jenkins_url>:8091**.
 
 - Service unit: `/etc/systemd/system/easybdd-testrail-builder.service`
 - Runs from `/var/lib/jenkins/workspace/EASY_BDD/frontend` (the same checkout
