@@ -147,6 +147,7 @@ List and optionally download firmware files from S3.
 | `download_dir` | No | string | Download directory (default: "Firmware") |
 | `protocol` | No | string | URL protocol (default: "https") |
 | `store_as` | No | string | Variable name to store URL list |
+| `local_paths_as` | No | string | Variable name to store the list of downloaded files' local paths — needed when a later step (e.g. a web UI file upload) requires a local filesystem path rather than the S3/CloudFront URL |
 | `discover_prefix` | No | boolean | Auto-discover folder prefix when `folder_prefix` is not set (default: false) |
 | `repo_root` | No | string | Root directory for local repo walk during prefix discovery (default: current working dir) |
 | `access_key_id` | No | string | AWS Access Key ID |
