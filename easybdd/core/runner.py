@@ -3767,6 +3767,7 @@ class TestRunner:
                 store_as = _m.group(1) or _m.group(2)
 
         import platform as _platform
+        from .assertions import _contains, _not_contains
         # Build the execution context: shared state + current test variables
         ctx = {
             "state": self._eval_state,
@@ -3777,6 +3778,8 @@ class TestRunner:
             "datetime": _datetime,
             "collections": _collections,
             "platform": _platform,
+            "contains": _contains,
+            "not_contains": _not_contains,
         }
         ctx.update(self._eval_state)
         ctx.update(variables)
