@@ -812,6 +812,10 @@ class BrowserService:
         **kwargs,
     ) -> None:
         """Enhanced Playwright click with XPath support"""
+        # Pull timeout out before copying to click_options — otherwise it'd be
+        # passed twice (once explicitly, once via **click_options) and crash
+        # every call below with "got multiple values for keyword argument".
+        timeout = kwargs.pop("timeout", None)
         click_options = kwargs.copy()
 
         if button:
@@ -823,7 +827,7 @@ class BrowserService:
                 print(f"      Finding element by label: {label}")
                 exact = kwargs.get("exact", False)
                 self.playwright_page.get_by_label(label, exact=exact).click(
-                    timeout=5000, **click_options
+                    timeout=timeout or 5000, **click_options
                 )
                 print(f"      ✓ Clicked element with label: {label}")
                 return
@@ -835,14 +839,14 @@ class BrowserService:
                     # Role with name (more specific)
                     print(f"      Finding element by role '{role}' with name: {name}")
                     self.playwright_page.get_by_role(role, name=name, exact=exact).click(
-                        timeout=5000, **click_options
+                        timeout=timeout or 5000, **click_options
                     )
                     print(f"      ✓ Clicked {role}: {name}")
                 else:
                     # Role alone (clicks first element with that role)
                     print(f"      Finding element by role: {role}")
                     self.playwright_page.get_by_role(role).first.click(
-                        timeout=5000, **click_options
+                        timeout=timeout or 5000, **click_options
                     )
                     print(f"      ✓ Clicked first element with role: {role}")
                 return
@@ -851,7 +855,7 @@ class BrowserService:
             _label = label or (selector[len("label:"):].strip() if selector and selector.startswith("label:") else None)
             if _label:
                 print(f"      Finding element by label: {_label}")
-                self.playwright_page.get_by_label(_label).click(timeout=5000)
+                self.playwright_page.get_by_label(_label).click(timeout=timeout or 5000)
                 print(f"      ✓ Clicked element labeled '{_label}'")
                 return
 
@@ -875,7 +879,7 @@ class BrowserService:
                             break
 
                     if target_frame:
-                        target_frame.click(element_sel, timeout=5000, **click_options)
+                        target_frame.click(element_sel, timeout=timeout or 5000, **click_options)
                         print(f"      ✓ Clicked element in iframe")
                         return
                     else:
@@ -890,19 +894,19 @@ class BrowserService:
                         # First try exact role match
                         self.playwright_page.get_by_role(
                             "button", name=aria_label
-                        ).click(timeout=5000, **click_options)
+                        ).click(timeout=timeout or 5000, **click_options)
                         return
                     except:
                         try:
                             # Try as text input
                             self.playwright_page.get_by_label(aria_label).click(
-                                timeout=5000, **click_options
+                                timeout=timeout or 5000, **click_options
                             )
                             return
                         except:
                             # Fall back to text match
                             self.playwright_page.get_by_text(aria_label).click(
-                                timeout=5000, **click_options
+                                timeout=timeout or 5000, **click_options
                             )
                             return
 
@@ -913,7 +917,7 @@ class BrowserService:
                     xpath_selector = self._normalize_xpath_selector(selector)
                     print(f"      Using XPath: {xpath_selector}")
                     self.playwright_page.click(
-                        f"xpath={xpath_selector}", timeout=10000, **click_options
+                        f"xpath={xpath_selector}", timeout=timeout or 10000, **click_options
                     )
                     return
                 else:
@@ -921,9 +925,9 @@ class BrowserService:
                     frame_loc, resolved_sel = self._resolve_iframe_selector(selector)
                     try:
                         if frame_loc:
-                            frame_loc.locator(resolved_sel).click(timeout=5000, **click_options)
+                            frame_loc.locator(resolved_sel).click(timeout=timeout or 5000, **click_options)
                         else:
-                            self.playwright_page.click(resolved_sel, timeout=5000, **click_options)
+                            self.playwright_page.click(resolved_sel, timeout=timeout or 5000, **click_options)
                     except Exception:
                         if not self._try_heal_selector(selector, "click", **click_options):
                             raise
@@ -939,7 +943,7 @@ class BrowserService:
                 print(f"      Finding button by role with name: {button}")
                 try:
                     self.playwright_page.get_by_role("button", name=button).click(
-                        timeout=5000
+                        timeout=timeout or 5000
                     )
                     print(f"      ✓ Clicked button: {button}")
                     return
