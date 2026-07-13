@@ -765,7 +765,8 @@ class TestRunner:
         # Capture start time for datalake metrics
         start_time = datetime.datetime.now()
 
-        services = {}
+        self._services = {}
+        services = self._services
         failed_step_info = None
         failure_screenshot = None
         step_logs = []
@@ -1390,6 +1391,22 @@ class TestRunner:
 
         return "browser"  # Default for unrecognized or space-separated actions
 
+    def _get_cached_service(self, service_type: str):
+        """Get or create a service instance, reusing it across steps within the
+        current test — including inside for_each/while/try-except loop bodies.
+
+        _execute_single_test seeds self._services per test; without routing
+        every service lookup through this same cache, control-flow bodies
+        (_run_loop_body, _execute_try_except) would call _create_service
+        directly and get a brand-new instance per step, silently discarding
+        state like an already-open Playwright browser session.
+        """
+        if not hasattr(self, "_services"):
+            self._services = {}
+        if service_type not in self._services:
+            self._services[service_type] = self._create_service(service_type)
+        return self._services[service_type]
+
     def _create_service(self, service_type: str):
         """Create a service instance"""
         if service_type == "browser":
@@ -1635,7 +1652,7 @@ class TestRunner:
                     )
                     for i, then_step in enumerate(step.then_steps, 1):
                         svc_type = self._get_service_type(then_step.action)
-                        svc = self._create_service(svc_type)
+                        svc = self._get_cached_service(svc_type)
                         success = self._execute_step(
                             svc, then_step, variables, soft_assert_manager, step_number
                         )
@@ -1653,7 +1670,7 @@ class TestRunner:
                     )
                     for i, else_step in enumerate(step.else_steps, 1):
                         svc_type = self._get_service_type(else_step.action)
-                        svc = self._create_service(svc_type)
+                        svc = self._get_cached_service(svc_type)
                         success = self._execute_step(
                             svc, else_step, variables, soft_assert_manager, step_number
                         )
@@ -1696,7 +1713,7 @@ class TestRunner:
                 raise _ContinueSignal()
 
             svc_type = self._get_service_type(loop_step.action)
-            svc = self._create_service(svc_type)
+            svc = self._get_cached_service(svc_type)
             success = self._execute_step(svc, loop_step, variables, soft_assert_manager, step_number)
             if not success:
                 return False
@@ -1783,7 +1800,7 @@ class TestRunner:
         try:
             for try_step in (step.try_steps or []):
                 svc_type = self._get_service_type(try_step.action)
-                svc = self._create_service(svc_type)
+                svc = self._get_cached_service(svc_type)
                 ok = self._execute_step(svc, try_step, variables, soft_assert_manager, step_number)
                 if not ok:
                     success = False
@@ -1794,7 +1811,7 @@ class TestRunner:
                 variables["_exception"] = str(exc)
                 for ex_step in step.except_steps:
                     svc_type = self._get_service_type(ex_step.action)
-                    svc = self._create_service(svc_type)
+                    svc = self._get_cached_service(svc_type)
                     self._execute_step(svc, ex_step, variables, soft_assert_manager, step_number)
             else:
                 success = False
@@ -1803,7 +1820,7 @@ class TestRunner:
                 print(f"      → FINALLY")
                 for fin_step in step.finally_steps:
                     svc_type = self._get_service_type(fin_step.action)
-                    svc = self._create_service(svc_type)
+                    svc = self._get_cached_service(svc_type)
                     try:
                         self._execute_step(svc, fin_step, variables, soft_assert_manager, step_number)
                     except Exception as fin_exc:
