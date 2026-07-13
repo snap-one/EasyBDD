@@ -44,7 +44,7 @@ method: dxGetAbout
 url: '${url}'
 store_as: last_response
 - test.assert:
-expression: "'error' not in str(last_response)"
+expression: "not_contains(last_response, 'error')"
 ```
 
 ---

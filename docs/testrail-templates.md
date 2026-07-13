@@ -73,9 +73,9 @@ command: "?Firmware"
 prompt: '>'
 # 2. Assert no error and expected key present
 - test.assert:
-expression: "'Errno' not in str(last_response)"
+expression: "not_contains(last_response, 'Errno')"
 - test.assert:
-expression: "'?Firmware=' in str(last_response)"
+expression: "contains(last_response, '?Firmware=')"
 ```
 
 For a multi-command sequence against a switch/router (e.g. enabling an interface), pass
@@ -92,7 +92,7 @@ prompt: '#'
 commands: [configure, 'interface GigabitEthernet ${net_port}', 'no shutdown', end]
 # 2. Assert success
 - test.assert:
-expression: "'error' not in str(last_response)"
+expression: "not_contains(last_response, 'error')"
 ```
 
 ---
@@ -147,10 +147,10 @@ version: 0
 store_as: last_response
 # 2. Assert no error in the response
 - test.assert:
-expression: "'error' not in str(last_response)"
+expression: "not_contains(last_response, 'error')"
 # 3. Assert the response references this device
 - test.assert:
-expression: "'${mac}' in str(last_response)"
+expression: "contains(last_response, '${mac}')"
 ```
 
 For a call that takes a payload (e.g. triggering a firmware update), add the extra field
@@ -168,7 +168,7 @@ version: 0
 url: ${upgrade_file}
 store_as: last_response
 - test.assert:
-expression: "'error' not in str(last_response)"
+expression: "not_contains(last_response, 'error')"
 ```
 
 ---
@@ -247,7 +247,7 @@ steps:
 # 1. Start the long-running operation
 - shared_step: Firmware_Dummy_Upgrade
 - test.assert:
-expression: "'error' not in str(last_response)"
+expression: "not_contains(last_response, 'error')"
 # 2. Wait for the configured offset, then inject the fault
 - test.sleep:
 seconds: "${fault_offset_seconds}"

@@ -302,7 +302,7 @@ A common TestRail YAML mistake is accidentally indenting `test.assert` under the
       - configure
       - shutdown
       - test.assert:         # ← this is sent as a literal command to the device!
-    expression: "'error' not in str(last_response)"
+    expression: "not_contains(last_response, 'error')"
 
 # CORRECT — test.assert is a separate step at the same level
 - telnet.send:
@@ -312,7 +312,7 @@ A common TestRail YAML mistake is accidentally indenting `test.assert` under the
       - configure
       - shutdown
 - test.assert:
-    expression: "'error' not in str(last_response)"
+    expression: "not_contains(last_response, 'error')"
 ```
 
 ### Authenticated devices require credentials in every `telnet.send` step
@@ -332,5 +332,5 @@ Always pass credentials (or use variables from the run's variable set):
       - interface GigabitEthernet ${net_port}
       - shutdown
 - test.assert:
-    expression: "'error' not in str(last_response)"
+    expression: "not_contains(last_response, 'error')"
 ```

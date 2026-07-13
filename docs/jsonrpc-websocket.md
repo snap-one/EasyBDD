@@ -130,9 +130,9 @@ When `method` is set, the service wraps `data` in a JSON-RPC 2.0 envelope:
       url: ${upgrade_file}
     store_as: last_response
 - test.assert:
-    expression: '''error'' not in str(last_response)'
+    expression: "not_contains(last_response, 'error')"
 - test.assert:
-    expression: '''${mac}'' in str(last_response)'
+    expression: "contains(last_response, '${mac}')"
 ```
 
 ---

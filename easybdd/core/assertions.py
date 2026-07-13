@@ -20,6 +20,23 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 
+def _contains(container: Any, item: Any) -> bool:
+    """Check if item is contained in container, casting both to str for substring checks.
+
+    Lets expressions write contains(last_response, 'error') instead of
+    'error' in str(last_response), regardless of whether last_response is
+    already a string or some other type (dict, list, etc).
+    """
+    if isinstance(container, str) or isinstance(item, str):
+        return str(item) in str(container)
+    return item in container
+
+
+def _not_contains(container: Any, item: Any) -> bool:
+    """Inverse of contains() — see contains() docstring."""
+    return not _contains(container, item)
+
+
 def _path_get(obj: Any, path: str, default: Any = None) -> Any:
     """Traverse a nested dict/list using a dot-separated path string.
 
@@ -107,6 +124,8 @@ class AssertionEngine:
         "isinstance": isinstance,
         "type": type,
         "path": _path_get,
+        "contains": _contains,
+        "not_contains": _not_contains,
     }
 
     def __init__(self, context: Optional[Dict[str, Any]] = None):
@@ -314,10 +333,6 @@ class AssertionEngine:
             result.message = message
 
         return result
-
-    def contains(self, container: Any, item: Any) -> bool:
-        """Check if container contains item (helper for expressions)."""
-        return item in container
 
 
 class JSONSchemaValidator:

@@ -9,6 +9,23 @@ import operator
 from typing import Any, Dict
 
 
+def _contains(container: Any, item: Any) -> bool:
+    """Check if item is contained in container, casting both to str for substring checks.
+
+    Lets expressions write contains(last_response, 'error') instead of
+    'error' in str(last_response), regardless of whether last_response is
+    already a string or some other type (dict, list, etc).
+    """
+    if isinstance(container, str) or isinstance(item, str):
+        return str(item) in str(container)
+    return item in container
+
+
+def _not_contains(container: Any, item: Any) -> bool:
+    """Inverse of contains() — see contains() docstring."""
+    return not _contains(container, item)
+
+
 class SafeEvaluator:
     """Safe expression evaluator with restricted operations."""
 
@@ -60,6 +77,8 @@ class SafeEvaluator:
         "all": all,
         "isinstance": isinstance,
         "type": type,
+        "contains": _contains,
+        "not_contains": _not_contains,
     }
 
     def __init__(self, context: Dict[str, Any] = None):
