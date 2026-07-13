@@ -41,7 +41,7 @@ pipeline {
         string(
             name: 'TARGET_SUITE_NAME',
             defaultValue: '',
-            description: 'Name for the new TestRail suite (default: EASY_BDD: <source suite name>)'
+            description: 'Name for the new TestRail suite (default: EASYBDD: <source suite name>)'
         )
         string(
             name: 'TAG',

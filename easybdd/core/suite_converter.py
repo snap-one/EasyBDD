@@ -268,7 +268,7 @@ class BddSuiteConverter:
         write_yaml:            Write YAML test files locally.
         create_testrail_suite: Create a new TestRail suite with Easy BDD cases.
         target_suite_id:       Write into an existing suite (omit to create new).
-        target_suite_name:     Name for the new suite (default: EASY_BDD: <source>).
+        target_suite_name:     Name for the new suite (default: EASYBDD: <source>).
         """
         if not source_suite_id and not source_run_id:
             raise ValueError("Provide source_suite_id or source_run_id.")
@@ -324,7 +324,7 @@ class BddSuiteConverter:
         if not suite_tag:
             suite_tag = _slug(source_suite_name) if source_suite_name else f"suite_{source_suite_id or source_run_id}"
         if not target_suite_name:
-            target_suite_name = f"EASY_BDD: {source_suite_name}" if source_suite_name else "EASY_BDD: Converted Suite"
+            target_suite_name = f"EASYBDD: {source_suite_name}" if source_suite_name else "EASYBDD: Converted Suite"
 
         # ── classify cases ──────────────────────────────────────────────
         classified = []

@@ -20,8 +20,8 @@ pipeline {
         )
         string(
             name: 'RUN_PREFIX',
-            defaultValue: 'EASY_BDD:',
-            description: 'TestRail run name prefix to match (e.g. EASY_BDD:, Debug:, Mark:)'
+            defaultValue: 'EASYBDD:',
+            description: 'TestRail run name prefix to match (e.g. EASYBDD:, Debug:, Mark:)'
         )
         string(
             name: 'BRANCH',

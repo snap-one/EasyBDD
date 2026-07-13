@@ -2,7 +2,7 @@
 TestRail-driven test runner for Easy BDD Framework.
 
 Lifecycle (6 phases):
-  1. find_run      — scan project for EASY_BDD: run with pending tests
+  1. find_run      — scan project for EASYBDD: run with pending tests
   2. prepare_run   — fetch tests, parse run_vars from description
   3. cron_gate     — skip all if outside cron window
   4. execute_tests — resolve each case to YAML, run it, post result in real-time
@@ -418,7 +418,7 @@ class TestRailRunner:
         result = runner.run(project_id=59)
     """
 
-    DEFAULT_PREFIX = "EASY_BDD:"
+    DEFAULT_PREFIX = "EASYBDD:"
 
     def __init__(
         self,
@@ -475,7 +475,7 @@ class TestRailRunner:
         return self._lifecycle(project_id, run_id, verbose, no_datalake=no_datalake)
 
     def find_run(self, project_id: int) -> Optional[Dict[str, Any]]:
-        """Find an active EASY_BDD: run without executing tests.
+        """Find an active EASYBDD: run without executing tests.
 
         Returns dict with run_id, run_name, run_url if found, else None.
         """
@@ -669,7 +669,7 @@ class TestRailRunner:
     # ------------------------------------------------------------------ #
 
     def _find_run(self, project_id: int) -> Optional[Dict]:
-        """Return the first EASY_BDD: run with pending tests created in the last 30 days.
+        """Return the first EASYBDD: run with pending tests created in the last 30 days.
 
         Skips runs that have tests in Running status — those are already being
         processed by another build and should not be claimed.

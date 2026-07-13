@@ -33,16 +33,16 @@ _W = 78  # output width
 
 _COMMANDS = {
     "testrail-run": {
-        "summary": "Execute tests driven by an active TestRail EASY_BDD: run",
+        "summary": "Execute tests driven by an active TestRail EASYBDD: run",
         "usage":   "easybdd testrail-run <project_id> [options]",
         "required": [
-            ("project_id", "int", "TestRail project ID to scan for an active EASY_BDD: run"),
+            ("project_id", "int", "TestRail project ID to scan for an active EASYBDD: run"),
         ],
         "optional": [
             ("--run-id",       "int",  None,                  "Target a specific run ID (skips auto-discovery)"),
             ("--tests-dir",    "path", "tests/cases",          "Directory to search for local YAML tests"),
             ("--artifact-dir", "path", "reports/testrail",     "Directory for generated artifacts and reports"),
-            ("--prefix",       "str",  "EASY_BDD:",            "Run name prefix to match (or TESTRAIL_RUN_PREFIX env var)"),
+            ("--prefix",       "str",  "EASYBDD:",            "Run name prefix to match (or TESTRAIL_RUN_PREFIX env var)"),
             ("--quiet",        "flag", None,                   "Suppress per-test progress output"),
             ("--no-datalake",  "flag", None,                   "Skip posting results to the datalake"),
             ("--find-only",    "flag", None,                   "Check if an active run exists, write .properties file, no execution"),
@@ -65,12 +65,12 @@ _COMMANDS = {
     },
 
     "testrail-list": {
-        "summary": "List TestRail projects or active EASY_BDD: runs",
+        "summary": "List TestRail projects or active EASYBDD: runs",
         "usage":   "easybdd testrail-list [project_id] [options]",
         "required": [],
         "optional": [
             ("project_id", "int", None,        "Show runs for this project (omit to list all projects)"),
-            ("--prefix",   "str", "EASY_BDD:", "Filter runs by name prefix"),
+            ("--prefix",   "str", "EASYBDD:", "Filter runs by name prefix"),
         ],
         "examples": [
             ("List all TestRail projects",
@@ -89,9 +89,9 @@ _COMMANDS = {
             ("suite_id",   "int", "TestRail suite ID to create the run from"),
         ],
         "optional": [
-            ("--name",              "str",  None,           "Run name (default: EASY_BDD: <suite name>)"),
+            ("--name",              "str",  None,           "Run name (default: EASYBDD: <suite name>)"),
             ("--sections",          "str+", None,           "Section names to include (substring match, repeatable)"),
-            ("--prefix",            "str",  "EASY_BDD:",    "Run name prefix"),
+            ("--prefix",            "str",  "EASYBDD:",    "Run name prefix"),
             ("--description",       "str",  "",             "Run description (supports JSON run-config syntax)"),
             ("--milestone-id",      "int",  None,           "Associate run with this milestone"),
             ("--given-section",     "str",  None,           "Section with Given: cases — creates one run per Given: case (per-SKU mode)"),
@@ -129,7 +129,7 @@ _COMMANDS = {
             ("--no-testrail",       "flag", None,                  "Write YAML files only — do NOT create a new TestRail suite"),
             ("--no-yaml",           "flag", None,                  "Create TestRail suite only — do NOT write YAML files"),
             ("--target-suite",      "int",  None,                  "Write into an existing TestRail suite instead of creating new"),
-            ("--target-suite-name", "str",  "EASY_BDD: <name>",    "Name for the new TestRail suite"),
+            ("--target-suite-name", "str",  "EASYBDD: <name>",    "Name for the new TestRail suite"),
             ("--dry-run",           "flag", None,                  "Preview without creating files or TestRail cases"),
             ("--quiet",             "flag", None,                  "Suppress per-case progress output"),
         ],
@@ -297,7 +297,7 @@ _COMMANDS = {
 }
 
 _ALL_COMMANDS_SUMMARY = [
-    ("testrail-run",        "Execute tests driven by an active TestRail EASY_BDD: run"),
+    ("testrail-run",        "Execute tests driven by an active TestRail EASYBDD: run"),
     ("testrail-list",       "List TestRail projects or active runs"),
     ("testrail-create-run", "Create TestRail run(s) from a suite"),
     ("testrail-convert",    "Convert mybdd-format suite → Easy BDD YAML + TestRail suite"),
@@ -621,12 +621,12 @@ Examples:
     # TestRail run command
     tr_parser = subparsers.add_parser(
         "testrail-run",
-        help="Execute tests driven by a TestRail run (EASY_BDD: prefix)",
+        help="Execute tests driven by a TestRail run (EASYBDD: prefix)",
     )
     tr_parser.add_argument(
         "project_id",
         type=int,
-        help="TestRail project ID to scan for an active EASY_BDD: run",
+        help="TestRail project ID to scan for an active EASYBDD: run",
     )
     tr_parser.add_argument(
         "--run-id",
@@ -647,7 +647,7 @@ Examples:
     tr_parser.add_argument(
         "--prefix",
         default=None,
-        help="TestRail run name prefix to match (default: EASY_BDD:, or TESTRAIL_RUN_PREFIX env var)",
+        help="TestRail run name prefix to match (default: EASYBDD:, or TESTRAIL_RUN_PREFIX env var)",
     )
     tr_parser.add_argument(
         "--quiet",
@@ -731,7 +731,7 @@ Examples:
         "--target-suite-name",
         default=None,
         metavar="NAME",
-        help="Name for the new TestRail suite (default: 'EASY_BDD: <source name>')",
+        help="Name for the new TestRail suite (default: 'EASYBDD: <source name>')",
     )
     trc_parser.add_argument(
         "--dry-run",
@@ -865,7 +865,7 @@ Examples:
     trcr_parser.add_argument(
         "--name",
         default=None,
-        help='Run name (default: "EASY_BDD: <suite name>")',
+        help='Run name (default: "EASYBDD: <suite name>")',
     )
     trcr_parser.add_argument(
         "--sections",
@@ -881,7 +881,7 @@ Examples:
     trcr_parser.add_argument(
         "--prefix",
         default=None,
-        help='Run name prefix (default: "EASY_BDD: " or TESTRAIL_RUN_PREFIX env var)',
+        help='Run name prefix (default: "EASYBDD: " or TESTRAIL_RUN_PREFIX env var)',
     )
     trcr_parser.add_argument(
         "--description",
@@ -928,7 +928,7 @@ Examples:
 
     trl_parser = subparsers.add_parser(
         "testrail-list",
-        help="List TestRail projects and active EASY_BDD: runs",
+        help="List TestRail projects and active EASYBDD: runs",
     )
     trl_parser.add_argument(
         "project_id",
@@ -940,7 +940,7 @@ Examples:
     trl_parser.add_argument(
         "--prefix",
         default=None,
-        help="Run name prefix to filter by (default: EASY_BDD:, or TESTRAIL_RUN_PREFIX env var)",
+        help="Run name prefix to filter by (default: EASYBDD:, or TESTRAIL_RUN_PREFIX env var)",
     )
 
     convert_parser.add_argument(
@@ -2287,7 +2287,7 @@ def testrail_sync(args) -> int:
 
 
 def testrail_list(args) -> int:
-    """List TestRail projects or active EASY_BDD: runs for a project."""
+    """List TestRail projects or active EASYBDD: runs for a project."""
     from .services.testrail_service import TestRailService, TestRailError
 
     try:
@@ -2296,7 +2296,7 @@ def testrail_list(args) -> int:
         print(f"TestRail configuration error: {e}", file=sys.stderr)
         return 1
 
-    prefix = args.prefix or os.getenv("TESTRAIL_RUN_PREFIX", "EASY_BDD:")
+    prefix = args.prefix or os.getenv("TESTRAIL_RUN_PREFIX", "EASYBDD:")
 
     if args.project_id is None:
         # List all projects
@@ -2362,7 +2362,7 @@ def testrail_create_run(args) -> int:
         print(f"TestRail configuration error: {e}", file=sys.stderr)
         return 1
 
-    prefix = args.prefix or os.getenv("TESTRAIL_RUN_PREFIX", "EASY_BDD:").rstrip()
+    prefix = args.prefix or os.getenv("TESTRAIL_RUN_PREFIX", "EASYBDD:").rstrip()
 
     try:
         suite = tr.get_suite(args.suite_id)
@@ -2525,7 +2525,7 @@ def testrail_create_run(args) -> int:
 
 
 def testrail_run(args) -> int:
-    """Discover and execute tests driven by a TestRail EASY_BDD: run."""
+    """Discover and execute tests driven by a TestRail EASYBDD: run."""
     from .core.config import ConfigManager
     from .core.variable_manager import GlobalConfigManager
     from .core.testrail_runner import TestRailRunner
