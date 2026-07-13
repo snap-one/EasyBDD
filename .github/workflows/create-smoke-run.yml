@@ -29,7 +29,7 @@ jobs:
         run: |
           short_sha="${GITHUB_SHA::7}"
           python -m easybdd testrail-create-run 59 106662 \
-            --name "EASY_BDD: Regression Smoke Test - ${short_sha}" \
+            --name "EASYBDD: Regression Smoke Test - ${short_sha}" \
             --description "$(cat <<EOF
           Auto-created by GitHub Actions
 
