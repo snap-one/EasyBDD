@@ -4823,8 +4823,14 @@ class TestRunner:
                 role = params.get("role", "")
                 name = params.get("name", "")
                 label = params.get("label", "")
+                # Forward anything else (exact, timeout, etc.) instead of
+                # silently dropping it — click_element/_playwright_click
+                # already accept **kwargs for exactly this.
+                _known = {"selector", "text", "button", "role", "name", "label"}
+                extra = {k: v for k, v in params.items() if k not in _known}
                 service.click_element(
-                    selector=selector, text=text, button=button, role=role, name=name, label=label
+                    selector=selector, text=text, button=button, role=role, name=name, label=label,
+                    **extra
                 )
                 return True
 
