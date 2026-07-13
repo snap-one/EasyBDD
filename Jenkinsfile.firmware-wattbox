@@ -5,9 +5,17 @@
 pipeline {
     agent { label 'built-in' }
 
+    // Jenkins and Floci both run on this same box, and this server has no
+    // public endpoint for GitHub to webhook into — so poll instead. A cheap
+    // git ls-remote every 5 min; a full checkout/build only runs when the
+    // remote SHA actually moved.
+    triggers {
+        pollSCM('H/5 * * * *')
+    }
+
     environment {
         PROJECT_ID    = '77'
-        SUITE_ID      = '52630'
+        SUITE_ID      = '106658'
         EASY_BDD_DIR  = '/var/lib/jenkins/workspace/EASY_BDD'
         PYTHON        = '/var/lib/jenkins/workspace/EASY_BDD/env/bin/python'
         // Bucket name to mirror changed firmware into on the local Floci
@@ -26,9 +34,16 @@ pipeline {
                 script {
                     def changedFiles = []
 
-                    if (env.GIT_PREVIOUS_COMMIT && env.GIT_PREVIOUS_COMMIT != env.GIT_COMMIT) {
+                    // Diff from the last *successful* build's commit, not just
+                    // the previous build's — GIT_PREVIOUS_COMMIT advances even
+                    // when a build fails/aborts before mirroring finishes, which
+                    // would silently drop that commit's firmware files from every
+                    // future diff. GIT_PREVIOUS_SUCCESSFUL_COMMIT never does.
+                    def baseCommit = env.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: env.GIT_PREVIOUS_COMMIT
+
+                    if (baseCommit && baseCommit != env.GIT_COMMIT) {
                         def diff = sh(
-                            script: "git diff --name-only ${env.GIT_PREVIOUS_COMMIT} ${env.GIT_COMMIT}",
+                            script: "git diff --name-only ${baseCommit} ${env.GIT_COMMIT}",
                             returnStdout: true
                         ).trim()
                         changedFiles = diff ? diff.split('\n').toList() : []
