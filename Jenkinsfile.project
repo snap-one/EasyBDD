@@ -1,11 +1,30 @@
+// ── Same project list as the retired Jenkinsfile.testrail-all, used only to
+// ── look up a display name when PROJECT_ID is derived from the job name. ───
+def TESTRAIL_PROJECTS = [
+    59: 'JDM Automation',
+    74: 'Audio',
+    76: 'Routers',
+    77: 'Power',
+    78: 'Surveillance',
+    79: 'Switches',
+    80: 'Access Points',
+    81: 'Media Distribution',
+]
+
 def WORKSPACE = '/var/lib/jenkins/workspace/EASY_BDD'
 
 pipeline {
     agent any
 
     parameters {
-        string(name: 'PROJECT_ID',   defaultValue: '', description: 'TestRail project ID')
-        string(name: 'PROJECT_NAME', defaultValue: '', description: 'TestRail project name')
+        string(name: 'PROJECT_ID',   defaultValue: '', description: 'TestRail project ID (leave blank to derive from a job name ending in the id, e.g. EASYBDD_PROJECT_77)')
+        string(name: 'PROJECT_NAME', defaultValue: '', description: 'TestRail project name (leave blank to look it up from PROJECT_ID)')
+    }
+
+    // Each per-project job instance runs this same script from SCM; Jenkins'
+    // per-job hashing on 'H' staggers the 8 jobs within the 5-minute window.
+    triggers {
+        cron('H/5 * * * *')
     }
 
     options {
@@ -16,17 +35,33 @@ pipeline {
     }
 
     stages {
+        stage('Resolve Project') {
+            steps {
+                script {
+                    def id = params.PROJECT_ID?.trim()
+                    if (!id) {
+                        def jobName = env.JOB_BASE_NAME ?: env.JOB_NAME
+                        def m = (jobName =~ /(\d+)$/)
+                        if (m.find()) {
+                            id = m.group(1)
+                        }
+                    }
+                    env.RESOLVED_PROJECT_ID = id ?: ''
+                    env.RESOLVED_PROJECT_NAME = params.PROJECT_NAME?.trim() ?: (TESTRAIL_PROJECTS[id as Integer] ?: id ?: '')
+                }
+            }
+        }
         stage('Run TestRail Project') {
             when {
-                expression { params.PROJECT_ID?.trim() }
+                expression { env.RESOLVED_PROJECT_ID?.trim() }
             }
             steps {
                 sh """#!/bin/bash
                     cd ${WORKSPACE}
-                    rm -f reports/run_${params.PROJECT_ID}.properties
+                    rm -f reports/run_${env.RESOLVED_PROJECT_ID}.properties
                     set -a && . .env && set +a
                     . env/bin/activate
-                    python -m easybdd testrail-run ${params.PROJECT_ID} || true
+                    python -m easybdd testrail-run ${env.RESOLVED_PROJECT_ID}
                 """
             }
         }
@@ -35,18 +70,18 @@ pipeline {
     post {
         always {
             script {
-                if (!params.PROJECT_ID?.trim()) {
+                if (!env.RESOLVED_PROJECT_ID?.trim()) {
                     currentBuild.displayName = "#${BUILD_NUMBER} — No PROJECT_ID supplied"
                     currentBuild.description = ''
                     return
                 }
-                def propsFile = "${WORKSPACE}/reports/run_${params.PROJECT_ID}.properties"
+                def propsFile = "${WORKSPACE}/reports/run_${env.RESOLVED_PROJECT_ID}.properties"
                 if (fileExists(propsFile)) {
                     def props = readProperties file: propsFile
                     def runName = props['RUN_NAME'] ?: ''
                     def runUrl  = props['RUN_URL']  ?: ''
                     if (runName) {
-                        currentBuild.displayName = "#${BUILD_NUMBER} — ${params.PROJECT_NAME}: ${runName}"
+                        currentBuild.displayName = "#${BUILD_NUMBER} — ${env.RESOLVED_PROJECT_NAME}: ${runName}"
                         currentBuild.description = "<a href=\"${runUrl}\">${runName}</a>"
                         return
                     }
