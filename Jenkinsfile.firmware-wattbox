@@ -122,7 +122,14 @@ pipeline {
                     // anything no longer present in the working tree (e.g. a
                     // removed/renamed firmware file) rather than failing the
                     // build trying to upload a file that doesn't exist.
-                    def files = env.CHANGED_BIN_FILES.split('\n').findAll { it?.trim() && fileExists(it.trim()) }
+                    //
+                    // .toList() before .findAll matters here: split() returns a
+                    // raw array, and calling the fileExists step inside a
+                    // closure iterating a raw array trips Jenkins' CPS
+                    // checkpointing with a NotSerializableException on
+                    // ArrayIterator. Lists iterate with a serializable
+                    // iterator, so convert first.
+                    def files = env.CHANGED_BIN_FILES.split('\n').toList().findAll { it?.trim() && fileExists(it.trim()) }
                     if (files.isEmpty()) {
                         echo "No changed firmware files still present on disk — nothing to mirror."
                         return
