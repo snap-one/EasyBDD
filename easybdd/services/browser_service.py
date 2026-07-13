@@ -558,7 +558,14 @@ class BrowserService:
         browser_type = getattr(
             self.playwright_playwright, self._get_playwright_browser_name(browser)
         )
-        self.playwright_browser = browser_type.launch(**launch_options)
+        try:
+            self.playwright_browser = browser_type.launch(**launch_options)
+            print(f"      🔬 [DEBUG] browser_type.launch() OK, browser={self.playwright_browser!r}")
+        except Exception as _e:
+            import traceback as _tb
+            print(f"      🔬 [DEBUG] browser_type.launch() raised: {type(_e).__name__}: {_e}")
+            _tb.print_exc()
+            raise
 
         # Create context with enhanced options
         # Get window size from config, or use a reasonable default (1280x720) instead of 1920x1080
@@ -611,13 +618,20 @@ class BrowserService:
                 self.screenshots_dir / "network.har"
             )
 
-        self.playwright_context = self.playwright_browser.new_context(**context_options)
+        try:
+            self.playwright_context = self.playwright_browser.new_context(**context_options)
 
-        # Enable request/response interception for MCP mode
-        if self.mcp_bridge.mcp_mode:
-            self.playwright_context.route("**/*", self._handle_route)
+            # Enable request/response interception for MCP mode
+            if self.mcp_bridge.mcp_mode:
+                self.playwright_context.route("**/*", self._handle_route)
 
-        self.playwright_page = self.playwright_context.new_page()
+            self.playwright_page = self.playwright_context.new_page()
+            print(f"      🔬 [DEBUG] new_context()/new_page() OK, page={self.playwright_page!r}")
+        except Exception as _e:
+            import traceback as _tb
+            print(f"      🔬 [DEBUG] new_context()/new_page() raised: {type(_e).__name__}: {_e}")
+            _tb.print_exc()
+            raise
 
         # Set MCP bridge page reference
         self.mcp_bridge.page = self.playwright_page
@@ -639,6 +653,11 @@ class BrowserService:
             print(f"Navigation warning: {e}")
             # Fallback navigation
             self.playwright_page.goto(url, wait_until="domcontentloaded")
+
+        print(
+            f"      🔬 [DEBUG] _open_playwright_browser() completed fully, "
+            f"self.playwright_page={self.playwright_page!r} id(self)={id(self)}"
+        )
 
     def _handle_route(self, route, request):
         """Handle network routes for MCP mode"""
@@ -803,6 +822,10 @@ class BrowserService:
         **kwargs,
     ) -> None:
         """Enhanced click with multiple selector strategies"""
+        print(
+            f"      🔬 [DEBUG] click_element() id(self)={id(self)} "
+            f"playwright_page={self.playwright_page!r} selenium_driver={self.selenium_driver!r}"
+        )
         if self.playwright_page:
             self._playwright_click(selector, text, button, role, name, label=label, **kwargs)
         elif self.selenium_driver:
