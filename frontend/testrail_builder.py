@@ -1,0 +1,2277 @@
+"""Easy BDD TestRail Test Builder — backend.
+
+A focused web app for authoring TestRail test cases visually:
+
+  * Create Var:, Shared:, Setup:, Teardown: and Feature: cases from guided
+    forms — no YAML syntax or action-name spelling to get wrong.
+  * The step palette is generated from frontend/action_definitions.py merged
+    with easybdd.core.validator.ACTION_SCHEMA, so every action the runner
+    supports is available.
+  * The Preconditions body is generated server-side in the flush-left
+    dot-notation format the runner expects, then round-trip validated with
+    the exact same parser the runner uses (fix_step_list_indent +
+    parse_yaml_lenient).
+  * Cases publish straight into a TestRail suite/section, and runs can be
+    assembled from published cases (EASY_BDD: prefix) ready for
+    `python -m easybdd testrail-run`.
+
+Start with:  python frontend/start_testrail_builder.py   (default port 8091)
+"""
+
+from __future__ import annotations
+
+import difflib
+import json
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
+except ImportError:
+    pass
+
+import httpx
+import yaml
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+
+from action_definitions import ACTION_DEFINITIONS  # noqa: E402
+
+from easybdd.core.parser import (  # noqa: E402
+    fix_step_list_indent,
+    parse_yaml_lenient,
+    strip_html_to_text,
+)
+from easybdd.core.testrail_utils import _needs_quoting  # noqa: E402
+from easybdd.core.validator import ACTION_SCHEMA  # noqa: E402
+from easybdd.services.testrail_service import (  # noqa: E402
+    TestRailError,
+    TestRailService,
+)
+
+app = FastAPI(
+    title="Easy BDD TestRail Test Builder",
+    description="Author Var/Shared/Setup/Teardown/Feature cases visually and publish to TestRail",
+    version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+CASE_PREFIXES = {
+    "feature": "Feature:",
+    "var": "Var:",
+    "shared": "Shared:",
+    "setup": "Setup:",
+    "teardown": "Teardown:",
+    "test": "Test:",
+}
+
+_ROLE_BY_PREFIX = {v: k for k, v in CASE_PREFIXES.items()}
+
+# Categories for actions that exist in the runner's ACTION_SCHEMA but have no
+# rich definition in action_definitions.py
+_PREFIX_CATEGORY = {
+    "telnet": "Telnet",
+    "serial": "Serial",
+    "websocket": "WebSocket",
+    "eval": "Eval",
+    "command": "Command",
+    "test": "Test",
+    "aws": "AWS",
+    "browser": "Browser",
+    "api": "API",
+    "ssh": "SSH",
+    "jsonrpc": "JSON-RPC",
+    "ovrc": "OvrC API",
+    "pagerduty": "PagerDuty",
+}
+
+_PREFIX_ICON = {
+    "telnet": "📟",
+    "serial": "🔌",
+    "websocket": "🔄",
+    "eval": "🐍",
+    "command": "💻",
+}
+
+
+# --------------------------------------------------------------------------- #
+# Action catalog                                                               #
+# --------------------------------------------------------------------------- #
+
+# Definitions that override / extend action_definitions.py where it disagrees
+# with what the runner actually dispatches (see runner._handle_assert_action
+# and runner._handle_extract_action).
+def _sel_param(help_text: str = "CSS selector for the element") -> Dict[str, Any]:
+    return {"type": "text", "required": False, "label": "Selector",
+            "placeholder": "#element or .class", "help": help_text}
+
+
+def _timeout_param() -> Dict[str, Any]:
+    return {"type": "number", "required": False, "label": "Timeout (ms)", "placeholder": "10000"}
+
+
+def _browser_assert(label: str, desc: str, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    params: Dict[str, Any] = {"selector": {**_sel_param(), "required": True}}
+    params.update(extra or {})
+    params["timeout"] = _timeout_param()
+    return {"category": "Browser", "label": label, "description": desc, "icon": "✅", "parameters": params}
+
+
+_CATALOG_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "browser.fill": {
+        "category": "Browser",
+        "label": "Fill Input Field",
+        "description": "Fill a form field with text — target it by CSS selector, role+name, or label",
+        "icon": "✏️",
+        "_one_of": [["selector", "field", "role", "label"]],
+        "parameters": {
+            "selector": _sel_param("CSS selector for the input field"),
+            "value": {"type": "text", "required": True, "label": "Value",
+                      "placeholder": "testuser", "help": "Text to fill in the field"},
+            "role": {"type": "text", "required": False, "label": "Role",
+                     "placeholder": "textbox", "help": "ARIA role (use with Name)"},
+            "name": {"type": "text", "required": False, "label": "Name",
+                     "help": "Accessible name (use with Role)"},
+            "label": {"type": "text", "required": False, "label": "Label",
+                      "help": "Target by form label text"},
+            "field": {"type": "text", "required": False, "label": "Field (alias)",
+                      "help": "Alias of Selector — kept for older cases"},
+            "clear": {"type": "boolean", "required": False, "label": "Clear first",
+                      "help": "Clear the field before typing"},
+        },
+    },
+    "browser.assert_checked": _browser_assert(
+        "Assert Checkbox Checked", "Assert a checkbox/toggle is checked"),
+    "browser.assert_unchecked": _browser_assert(
+        "Assert Checkbox Unchecked", "Assert a checkbox/toggle is NOT checked"),
+    "test.assert_text_contains": _browser_assert(
+        "Assert Text Contains", "Assert an element's text contains a substring",
+        {"text": {"type": "text", "required": True, "label": "Text"}}),
+    "test.assert_text_equals": _browser_assert(
+        "Assert Text Equals", "Assert an element's text equals a value",
+        {"text": {"type": "text", "required": True, "label": "Text"}}),
+    "test.assert_element_visible": _browser_assert(
+        "Assert Element Visible", "Assert an element is visible on the page"),
+    "test.assert_element_not_visible": _browser_assert(
+        "Assert Element Not Visible", "Assert an element is not visible"),
+    "test.assert_element_enabled": _browser_assert(
+        "Assert Element Enabled", "Assert an element is enabled"),
+    "test.assert_element_disabled": _browser_assert(
+        "Assert Element Disabled", "Assert an element is disabled"),
+    "test.assert_element_count": _browser_assert(
+        "Assert Element Count", "Assert how many elements match a selector",
+        {"count": {"type": "number", "required": True, "label": "Count", "placeholder": "1"}}),
+    "browser.get_title": {
+        "category": "Browser",
+        "label": "Get Page Title",
+        "description": "Read the browser tab title (also stored as last_response)",
+        "icon": "🏷️",
+        "parameters": {
+            "store_as": {"type": "text", "required": False, "label": "Store as",
+                         "placeholder": "page_title"},
+        },
+    },
+    "telnet.send": {
+        "category": "Telnet",
+        "label": "Telnet Send",
+        "description": "Run one command (or a list of commands) over telnet",
+        "icon": "📟",
+        "_one_of": [["command", "commands"]],
+        "parameters": {
+            "command": {"type": "text", "required": False, "label": "Command",
+                        "placeholder": "show version"},
+            "commands": {"type": "list", "required": False, "label": "Commands (list)",
+                         "help": "Run several commands in one session — YAML list"},
+            "host": {"type": "text", "required": False, "label": "Host"},
+            "port": {"type": "number", "required": False, "label": "Port", "placeholder": "23"},
+            "username": {"type": "text", "required": False, "label": "Username"},
+            "password": {"type": "text", "required": False, "label": "Password"},
+            "prompt": {"type": "text", "required": False, "label": "Shell prompt",
+                       "placeholder": "#", "help": "Prompt string to wait for after each command"},
+            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "placeholder": "15"},
+            "store_as": {"type": "text", "required": False, "label": "Store as"},
+        },
+    },
+    "test.assert": {
+        "category": "Test",
+        "label": "Assert Condition",
+        "description": "Assert a Python expression is true (e.g. last_status_code == 200)",
+        "icon": "✅",
+        "parameters": {
+            "expression": {
+                "type": "text",
+                "required": True,
+                "label": "Expression",
+                "placeholder": "last_status_code == 200",
+                "help": "Python expression evaluated against test variables",
+            },
+            "message": {
+                "type": "text",
+                "required": False,
+                "label": "Failure message",
+                "help": "Custom message shown when the assertion fails",
+            },
+        },
+    },
+    "websocket.connect": {
+        "category": "WebSocket",
+        "label": "WebSocket Connect",
+        "description": "Open a WebSocket connection (pooled by URL — later send/receive steps reuse it)",
+        "icon": "🔄",
+        "parameters": {
+            "url": {"type": "text", "required": True, "label": "URL",
+                    "placeholder": "wss://host:port/path", "help": "WebSocket endpoint (ws:// or wss://)"},
+            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "placeholder": "10"},
+            "headers": {"type": "json", "required": False, "label": "Headers",
+                        "help": "e.g. {header: '${mac},127.0.0.1,80,plain'}"},
+            "subprotocols": {"type": "list", "required": False, "label": "Subprotocols"},
+            "verify_ssl": {"type": "boolean", "required": False, "label": "Verify SSL"},
+            "session_token": {"type": "text", "required": False, "label": "Session token"},
+            "auth_url": {"type": "text", "required": False, "label": "Auth URL",
+                         "help": "Optional HTTP auth endpoint called before connecting"},
+            "auth_username": {"type": "text", "required": False, "label": "Auth username"},
+            "auth_password": {"type": "text", "required": False, "label": "Auth password"},
+        },
+    },
+    "websocket.send": {
+        "category": "WebSocket",
+        "label": "WebSocket Send",
+        "description": "Send a message and read the reply. With Method set, sends a JSON-RPC envelope; extra parameters become the JSON-RPC params.",
+        "icon": "📨",
+        "parameters": {
+            "url": {"type": "text", "required": True, "label": "URL",
+                    "placeholder": "wss://host:port/path",
+                    "help": "Identifies the pooled connection (reconnects automatically)"},
+            "method": {"type": "text", "required": False, "label": "JSON-RPC method",
+                       "placeholder": "dxGetAbout",
+                       "help": "When set, the message is wrapped in a JSON-RPC 2.0 envelope"},
+            "data": {"type": "json", "required": False, "label": "Data / params",
+                     "help": "Raw message, or the params dict in JSON-RPC mode"},
+            "wait_for": {"type": "text", "required": False, "label": "Wait for",
+                         "help": "Keep reading until the response contains this text"},
+            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "placeholder": "10"},
+            "store_as": {"type": "text", "required": False, "label": "Store as",
+                         "help": "Variable name to store the response"},
+        },
+    },
+    "websocket.receive": {
+        "category": "WebSocket",
+        "label": "WebSocket Receive",
+        "description": "Read the next message from an open WebSocket connection",
+        "icon": "📥",
+        "parameters": {
+            "url": {"type": "text", "required": True, "label": "URL",
+                    "help": "Identifies the pooled connection"},
+            "wait_for": {"type": "text", "required": False, "label": "Wait for",
+                         "help": "Keep reading until the response contains this text"},
+            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "placeholder": "10"},
+            "store_as": {"type": "text", "required": False, "label": "Store as"},
+        },
+    },
+    "websocket.disconnect": {
+        "category": "WebSocket",
+        "label": "WebSocket Disconnect",
+        "description": "Close a pooled WebSocket connection",
+        "icon": "🔌",
+        "parameters": {
+            "url": {"type": "text", "required": False, "label": "URL",
+                    "help": "Connection to close (omit to no-op)"},
+        },
+    },
+    "test.extract": {
+        "category": "Test",
+        "label": "Extract Value",
+        "description": "Extract a field from a stored response (dict dot-notation or CLI 'Key : Value' text)",
+        "icon": "🔍",
+        "parameters": {
+            "field": {
+                "type": "text",
+                "required": True,
+                "label": "Field",
+                "placeholder": "access_token or data.user.id",
+                "help": "Field name — dot-notation for dict responses, key substring for CLI text",
+            },
+            "from": {
+                "type": "text",
+                "required": False,
+                "label": "From variable",
+                "placeholder": "last_response",
+                "help": "Variable to read from (default: last_response)",
+            },
+            "store_as": {
+                "type": "text",
+                "required": False,
+                "label": "Store as",
+                "help": "Variable name to store the extracted value",
+            },
+            "equals": {
+                "type": "text",
+                "required": False,
+                "label": "Assert equals",
+                "help": "Optionally assert the extracted value equals this",
+            },
+            "contains": {
+                "type": "text",
+                "required": False,
+                "label": "Assert contains",
+                "help": "Optionally assert the extracted value contains this string",
+            },
+            "message": {
+                "type": "text",
+                "required": False,
+                "label": "Failure message",
+            },
+        },
+    },
+}
+
+
+def _build_catalog() -> Dict[str, Dict[str, Any]]:
+    """Merge the rich UI catalog with the runner's ACTION_SCHEMA.
+
+    Actions only known to ACTION_SCHEMA get generic text-field parameter
+    definitions so nothing the runner supports is missing from the palette.
+    Aliases (short names / alias_of entries) are skipped — the builder always
+    emits canonical service.verb names.
+    """
+    catalog: Dict[str, Dict[str, Any]] = {}
+    for action_id, definition in ACTION_DEFINITIONS.items():
+        catalog[action_id] = {
+            "category": definition.get("category", "Other"),
+            "label": definition.get("label", action_id),
+            "description": definition.get("description", ""),
+            "icon": definition.get("icon", "⚙️"),
+            "parameters": definition.get("parameters", {}),
+        }
+
+    for key, schema in ACTION_SCHEMA.items():
+        if "." not in key or "alias_of" in schema or key in catalog:
+            continue
+        # ws.* / pd.* / s3.* style short prefixes are aliases of canonical ones
+        prefix = key.split(".", 1)[0]
+        if prefix in ("ws", "pd", "s3"):
+            continue
+        params: Dict[str, Any] = {}
+        for name in schema.get("required", []):
+            params[name] = {"type": "text", "required": True, "label": name}
+        for name in schema.get("optional", []):
+            params[name] = {"type": "text", "required": False, "label": name}
+        catalog[key] = {
+            "category": _PREFIX_CATEGORY.get(prefix, prefix.title()),
+            "label": key,
+            "description": "",
+            "icon": _PREFIX_ICON.get(prefix, "⚙️"),
+            "parameters": params,
+        }
+
+    catalog.update(_CATALOG_OVERRIDES)
+    return catalog
+
+
+CATALOG = _build_catalog()
+
+
+def _schema_for(action: str) -> Optional[Dict[str, Any]]:
+    """Resolve an action name in ACTION_SCHEMA, following alias_of."""
+    schema = ACTION_SCHEMA.get(action)
+    if schema and "alias_of" in schema:
+        return ACTION_SCHEMA.get(schema["alias_of"])
+    return schema
+
+
+# --------------------------------------------------------------------------- #
+# Case model                                                                    #
+# --------------------------------------------------------------------------- #
+
+class StepNode(BaseModel):
+    kind: str  # action | shared | for_each | while | condition | try | raw
+    action: Optional[str] = None
+    params: Dict[str, Any] = Field(default_factory=dict)
+    name: Optional[str] = None            # shared step name
+    items: Optional[Any] = None           # for_each list (list or "${var}")
+    loop_var: Optional[str] = None
+    expression: Optional[str] = None      # while / condition
+    loop_limit: Optional[int] = None
+    steps: List["StepNode"] = Field(default_factory=list)        # for_each / while / try
+    then_steps: List["StepNode"] = Field(default_factory=list)   # condition
+    else_steps: List["StepNode"] = Field(default_factory=list)   # condition
+    except_steps: List["StepNode"] = Field(default_factory=list)  # try
+    finally_steps: List["StepNode"] = Field(default_factory=list)  # try
+    yaml_text: Optional[str] = None       # raw
+
+
+StepNode.model_rebuild()
+
+
+class VarRow(BaseModel):
+    key: str
+    value: Any = ""
+
+
+class CaseModel(BaseModel):
+    case_type: str  # feature | var | shared | setup | teardown
+    name: str = ""
+    variables: List[VarRow] = Field(default_factory=list)
+    data_rows: Optional[str] = None  # YAML text for parameterized cases
+    steps: List[StepNode] = Field(default_factory=list)
+
+
+class PublishRequest(BaseModel):
+    model: CaseModel
+    project_id: int
+    suite_id: Optional[int] = None
+    section_id: Optional[int] = None
+    case_id: Optional[int] = None  # update existing case when set
+
+
+class SectionRequest(BaseModel):
+    project_id: int
+    suite_id: Optional[int] = None
+    name: str
+    parent_id: Optional[int] = None
+
+
+class RunRequest(BaseModel):
+    project_id: int
+    suite_id: Optional[int] = None
+    name: str
+    case_ids: List[int]
+    description: Optional[str] = None
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatCaseContext(BaseModel):
+    """The case currently open in the builder editor, sent with every chat
+    turn so the assistant doesn't need the user to paste a case ID it can
+    already see on screen."""
+    case_id: Optional[int] = None
+    title: Optional[str] = None
+    body: Optional[str] = None
+    errors: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+    case_context: Optional[ChatCaseContext] = None
+
+
+# --------------------------------------------------------------------------- #
+# Serialization — model → TestRail Preconditions text                          #
+# --------------------------------------------------------------------------- #
+
+def _scalar(v: Any) -> str:
+    """Format a scalar param value, quoting only when YAML requires it."""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    s = str(v)
+    if _needs_quoting(s):
+        return "'" + s.replace("'", "''") + "'"
+    return s
+
+
+def _flow(v: Any) -> str:
+    """Single-line flow-style YAML for dict/list values (safe to re-indent)."""
+    return yaml.safe_dump(v, default_flow_style=True, width=100000).strip()
+
+
+def _coerce_param(value: Any, ptype: str) -> Any:
+    """Coerce a UI-supplied param value to the type the action expects."""
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if ptype == "number":
+        try:
+            return int(text)
+        except ValueError:
+            try:
+                return float(text)
+            except ValueError:
+                return value
+    if ptype == "boolean":
+        if text.lower() in ("true", "yes", "1"):
+            return True
+        if text.lower() in ("false", "no", "0"):
+            return False
+        return value
+    if ptype in ("json", "keyvalue", "list", "object"):
+        if text.startswith(("{", "[")):
+            try:
+                parsed = yaml.safe_load(text)
+                if isinstance(parsed, (dict, list)):
+                    return parsed
+            except yaml.YAMLError:
+                pass
+    return value
+
+
+def _clean_params(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop empty params and coerce values to their declared types."""
+    definition = CATALOG.get(action, {})
+    schema = definition.get("parameters", {})
+    cleaned: Dict[str, Any] = {}
+    for k, v in params.items():
+        if v is None:
+            continue
+        if isinstance(v, str) and not v.strip():
+            continue
+        ptype = schema.get(k, {}).get("type", "text")
+        cleaned[k] = _coerce_param(v, ptype)
+    return cleaned
+
+
+def _emit_params(params: Dict[str, Any], lines: List[str], indent: str) -> None:
+    for k, v in params.items():
+        if isinstance(v, (dict, list)):
+            lines.append(f"{indent}{k}: {_flow(v)}")
+        else:
+            lines.append(f"{indent}{k}: {_scalar(v)}")
+
+
+def _emit_nested_steps(steps: List[StepNode], lines: List[str]) -> None:
+    """Emit steps nested inside a control-flow block.
+
+    Nested blocks are written as properly indented YAML (items at two spaces,
+    params at six) — fix_step_list_indent passes indented lines through
+    untouched, so the structure survives the runner's re-indent pass.
+    """
+    for node in steps:
+        if node.kind == "action" and node.action:
+            params = _clean_params(node.action, node.params)
+            if params:
+                lines.append(f"  - {node.action}:")
+                _emit_params(params, lines, "      ")
+            else:
+                lines.append(f"  - {node.action}: {{}}")
+        elif node.kind == "shared" and node.name:
+            lines.append(f"  - shared_step: {_scalar(node.name)}")
+        elif node.kind == "raw" and node.yaml_text:
+            raw: List[str] = []
+            _emit_raw(node.yaml_text, raw)
+            lines.extend("  " + ln for ln in raw)
+        else:
+            raise ValueError(
+                "Nested control-flow blocks are not supported — flatten the "
+                "inner block or move it to a Shared: case."
+            )
+
+
+def _emit_raw(text: str, lines: List[str]) -> None:
+    """Emit a raw YAML step (single list item) exactly as written."""
+    raw_lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not raw_lines:
+        return
+    first = raw_lines[0]
+    if not first.lstrip().startswith("-"):
+        raw_lines[0] = f"- {first.strip()}"
+    lines.extend(raw_lines)
+
+
+def _emit_step(node: StepNode, lines: List[str], number: int) -> None:
+    """Emit one top-level step in flush-left dot-notation."""
+    if node.kind == "action" and node.action:
+        label = node.action
+        params = _clean_params(node.action, node.params)
+        for hint in ("name", "label", "text", "url", "message"):
+            if hint in params and isinstance(params[hint], str):
+                label = f"{node.action} ({params[hint]})"
+                break
+        lines.append(f"# {number}. {label}")
+        if params:
+            lines.append(f"- {node.action}:")
+            _emit_params(params, lines, "")
+        else:
+            lines.append(f"- {node.action}: {{}}")
+
+    elif node.kind == "shared":
+        if not node.name:
+            raise ValueError(f"Step {number}: shared step has no name")
+        lines.append(f"# {number}. shared_step ({node.name})")
+        lines.append(f"- shared_step: {_scalar(node.name)}")
+
+    elif node.kind == "for_each":
+        items = node.items
+        if isinstance(items, str):
+            items = items.strip()
+            if items.startswith(("[", "{")):
+                items = yaml.safe_load(items)
+        lines.append(f"# {number}. for_each loop")
+        lines.append(f"- for_each: {_flow(items) if isinstance(items, (list, dict)) else _scalar(items)}")
+        if node.loop_var:
+            lines.append(f"  loop_var: {node.loop_var}")
+        lines.append("  steps:")
+        _emit_nested_steps(node.steps, lines)
+
+    elif node.kind == "while":
+        if not node.expression:
+            raise ValueError(f"Step {number}: while loop has no condition")
+        lines.append(f"# {number}. while loop")
+        lines.append(f"- while: {_scalar(node.expression)}")
+        if node.loop_limit:
+            lines.append(f"  loop_limit: {node.loop_limit}")
+        lines.append("  steps:")
+        _emit_nested_steps(node.steps, lines)
+
+    elif node.kind == "condition":
+        if not node.expression:
+            raise ValueError(f"Step {number}: condition has no expression")
+        lines.append(f"# {number}. condition")
+        lines.append(f"- condition: {_scalar(node.expression)}")
+        lines.append("  then:")
+        _emit_nested_steps(node.then_steps, lines)
+        if node.else_steps:
+            # Blank line stops the indent fixer's param scan on the previous
+            # nested step — without it 'else:' would be swallowed as a param.
+            lines.append("")
+            lines.append("  else:")
+            _emit_nested_steps(node.else_steps, lines)
+
+    elif node.kind == "try":
+        lines.append(f"# {number}. try / except / finally")
+        lines.append("- try:")
+        _emit_nested_steps(node.steps, lines)
+        if node.except_steps:
+            lines.append("")
+            lines.append("  except:")
+            _emit_nested_steps(node.except_steps, lines)
+        if node.finally_steps:
+            lines.append("")
+            lines.append("  finally:")
+            _emit_nested_steps(node.finally_steps, lines)
+
+    elif node.kind == "raw":
+        lines.append(f"# {number}. raw step")
+        _emit_raw(node.yaml_text or "", lines)
+
+    else:
+        raise ValueError(f"Step {number}: unknown step kind {node.kind!r}")
+
+
+def _coerce_var_value(value: Any) -> Any:
+    """Let engineers type [1, 2] or {a: b} into a variable value field."""
+    if isinstance(value, str) and value.strip().startswith(("[", "{")):
+        try:
+            parsed = yaml.safe_load(value)
+            if isinstance(parsed, (dict, list)):
+                return parsed
+        except yaml.YAMLError:
+            pass
+    return value
+
+
+def serialize_case_body(model: CaseModel) -> str:
+    """Build the TestRail Preconditions text for a case model."""
+    sanitize_model(model)
+    if model.case_type == "var" and not model.steps:
+        lines = []
+        for row in model.variables:
+            if not row.key.strip():
+                continue
+            value = _coerce_var_value(row.value)
+            if isinstance(value, (dict, list)):
+                lines.append(f"{row.key.strip()}: {_flow(value)}")
+            else:
+                lines.append(f"{row.key.strip()}: {_scalar(value)}")
+        return "\n".join(lines)
+
+    lines: List[str] = []
+    var_rows = [r for r in model.variables if r.key.strip()]
+    if var_rows:
+        # Keys must be indented under variables: — flush-left keys become
+        # top-level siblings after parsing and the runner would ignore them.
+        lines.append("variables:")
+        for row in var_rows:
+            value = _coerce_var_value(row.value)
+            if isinstance(value, (dict, list)):
+                lines.append(f"  {row.key.strip()}: {_flow(value)}")
+            else:
+                lines.append(f"  {row.key.strip()}: {_scalar(value)}")
+        lines.append("")
+
+    if model.data_rows and model.data_rows.strip():
+        parsed_rows = yaml.safe_load(model.data_rows)
+        if not isinstance(parsed_rows, list):
+            raise ValueError("Data rows must be a YAML list of mappings")
+        lines.append("data:")
+        lines.append(yaml.safe_dump(parsed_rows, default_flow_style=False, width=100000).rstrip())
+        lines.append("")
+
+    lines.append("steps:")
+    for idx, node in enumerate(model.steps, start=1):
+        _emit_step(node, lines, idx)
+    return "\n".join(lines)
+
+
+def case_title(model: CaseModel) -> str:
+    prefix = CASE_PREFIXES.get(model.case_type)
+    if not prefix:
+        raise ValueError(f"Unknown case type {model.case_type!r}")
+    return f"{prefix} {model.name.strip()}"
+
+
+# --------------------------------------------------------------------------- #
+# Sanitization — strip rich-text artifacts before they reach TestRail          #
+# --------------------------------------------------------------------------- #
+
+# Characters TestRail's rich-text editor (or copy/paste from docs) injects
+# that break YAML/expressions invisibly.
+_INVISIBLE_MAP = str.maketrans({
+    "\u00a0": " ",   # non-breaking space
+    "\u200b": None,  # zero-width space
+    "\u200c": None,  # zero-width non-joiner
+    "\u200d": None,  # zero-width joiner
+    "\ufeff": None,  # BOM
+    "\u2018": "'", "\u2019": "'",  # curly single quotes
+    "\u201c": '"', "\u201d": '"',  # curly double quotes
+})
+
+
+def _sanitize_str(s: str) -> str:
+    return s.translate(_INVISIBLE_MAP)
+
+
+def _sanitize_value(v: Any) -> Any:
+    if isinstance(v, str):
+        return _sanitize_str(v)
+    if isinstance(v, dict):
+        return {(_sanitize_str(k) if isinstance(k, str) else k): _sanitize_value(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_sanitize_value(x) for x in v]
+    return v
+
+
+def _sanitize_node(node: StepNode) -> None:
+    if node.action:
+        node.action = _sanitize_str(node.action).strip()
+    node.params = {k: _sanitize_value(v) for k, v in node.params.items()}
+    if isinstance(node.name, str):
+        node.name = _sanitize_str(node.name).strip()
+    if isinstance(node.expression, str):
+        node.expression = _sanitize_str(node.expression)
+    node.items = _sanitize_value(node.items)
+    if isinstance(node.yaml_text, str):
+        node.yaml_text = _sanitize_str(node.yaml_text)
+    for lst in (node.steps, node.then_steps, node.else_steps, node.except_steps, node.finally_steps):
+        for child in lst:
+            _sanitize_node(child)
+
+
+def sanitize_model(model: CaseModel) -> None:
+    """Normalize invisible/rich-text characters everywhere in the model."""
+    model.name = _sanitize_str(model.name)
+    for row in model.variables:
+        row.key = _sanitize_str(row.key).strip()
+        row.value = _sanitize_value(row.value)
+    if isinstance(model.data_rows, str):
+        model.data_rows = _sanitize_str(model.data_rows)
+    for node in model.steps:
+        _sanitize_node(node)
+
+
+# --------------------------------------------------------------------------- #
+# Validation                                                                   #
+# --------------------------------------------------------------------------- #
+
+# Actions where arbitrary extra params are legitimate (websocket.send folds
+# unrecognized params into the JSON-RPC params dict).
+_FREEFORM_PARAM_ACTIONS = {"websocket.send"}
+
+
+def _validate_action_node(node: StepNode, where: str, errors: List[str], warnings: List[str]) -> None:
+    action = node.action or ""
+    definition = CATALOG.get(action)
+    schema = _schema_for(action)
+    if not definition and not schema:
+        suggestions = difflib.get_close_matches(action, list(CATALOG.keys()), n=3, cutoff=0.6)
+        hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
+        errors.append(f"{where}: unknown action '{action}'.{hint}")
+        return
+    params = _clean_params(action, node.params)
+    if definition:
+        for pname, pdef in definition.get("parameters", {}).items():
+            if pdef.get("required") and pname not in params:
+                errors.append(f"{where}: '{action}' is missing required parameter '{pname}'")
+        for group in definition.get("_one_of", []):
+            if not any(p in params for p in group):
+                errors.append(
+                    f"{where}: '{action}' needs one of: {', '.join(group)}"
+                )
+    if schema and action not in _FREEFORM_PARAM_ACTIONS:
+        known = set(schema.get("required", [])) | set(schema.get("optional", []))
+        if definition:
+            known |= set(definition.get("parameters", {}).keys())
+        for pname in params:
+            if known and pname not in known:
+                warnings.append(f"{where}: '{action}' has unrecognized parameter '{pname}'")
+
+
+_CONTROL_FLOW_KEYS = {"for_each", "while", "condition", "if", "try", "shared_step", "test.data"}
+
+
+def _validate_raw_node(node: StepNode, where: str, errors: List[str], warnings: List[str]) -> None:
+    """Raw YAML steps get the same scrutiny: must parse, actions must exist."""
+    text = (node.yaml_text or "").strip()
+    if not text:
+        errors.append(f"{where}: raw YAML step is empty")
+        return
+    lines: List[str] = []
+    _emit_raw(node.yaml_text or "", lines)
+    try:
+        parsed = parse_yaml_lenient(fix_step_list_indent("\n".join(lines)))
+    except Exception as exc:
+        errors.append(f"{where}: raw YAML does not parse: {exc}")
+        return
+    items = parsed if isinstance(parsed, list) else [parsed]
+    for item in items:
+        if not isinstance(item, dict):
+            errors.append(f"{where}: raw YAML must be a step mapping (- service.verb: …)")
+            continue
+        if any(k in item for k in _CONTROL_FLOW_KEYS):
+            continue
+        action = item.get("action") if isinstance(item.get("action"), str) else (
+            next(iter(item)) if len(item) >= 1 and isinstance(next(iter(item)), str) and "." in next(iter(item)) else None
+        )
+        if action and not CATALOG.get(action) and not _schema_for(action):
+            suggestions = difflib.get_close_matches(action, list(CATALOG.keys()), n=3, cutoff=0.6)
+            hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
+            errors.append(f"{where}: raw YAML uses unknown action '{action}'.{hint}")
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_")
+
+
+def _walk_nodes(nodes: List[StepNode], prefix: str, errors: List[str], warnings: List[str],
+                shared_slugs: Optional[set] = None) -> None:
+    for i, node in enumerate(nodes, start=1):
+        where = f"{prefix}step {i}"
+        if node.kind == "action":
+            _validate_action_node(node, where, errors, warnings)
+        elif node.kind == "raw":
+            _validate_raw_node(node, where, errors, warnings)
+        elif node.kind == "shared":
+            if not (node.name or "").strip():
+                errors.append(f"{where}: shared step reference has no name")
+            elif shared_slugs is not None and _slug(node.name) not in shared_slugs:
+                close = difflib.get_close_matches(_slug(node.name), sorted(shared_slugs), n=2, cutoff=0.5)
+                hint = f" Closest in suite: {', '.join(close)}." if close else ""
+                warnings.append(f"{where}: no 'Shared: {node.name}' case found in the selected suite.{hint}")
+        elif node.kind == "for_each":
+            if node.items in (None, "", []):
+                errors.append(f"{where}: for_each loop has no items")
+            if not node.steps:
+                errors.append(f"{where}: for_each loop has no steps")
+            _walk_nodes(node.steps, f"{where} → ", errors, warnings, shared_slugs)
+        elif node.kind == "while":
+            if not (node.expression or "").strip():
+                errors.append(f"{where}: while loop has no condition")
+            if not node.steps:
+                errors.append(f"{where}: while loop has no steps")
+            _walk_nodes(node.steps, f"{where} → ", errors, warnings, shared_slugs)
+        elif node.kind == "condition":
+            if not (node.expression or "").strip():
+                errors.append(f"{where}: condition has no expression")
+            if not node.then_steps:
+                errors.append(f"{where}: condition has no 'then' steps")
+            _walk_nodes(node.then_steps, f"{where} then → ", errors, warnings, shared_slugs)
+            _walk_nodes(node.else_steps, f"{where} else → ", errors, warnings, shared_slugs)
+        elif node.kind == "try":
+            if not node.steps:
+                errors.append(f"{where}: try block has no steps")
+            _walk_nodes(node.steps, f"{where} try → ", errors, warnings, shared_slugs)
+            _walk_nodes(node.except_steps, f"{where} except → ", errors, warnings, shared_slugs)
+            _walk_nodes(node.finally_steps, f"{where} finally → ", errors, warnings, shared_slugs)
+
+
+# Variables the runner provides implicitly at execution time.
+_BUILTIN_VARS = {
+    "last_response", "last_response_dict", "last_status_code",
+    "last_response_headers", "last_response_text",
+}
+
+_VAR_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _collect_strings(v: Any, out: List[str]) -> None:
+    if isinstance(v, str):
+        out.append(v)
+    elif isinstance(v, dict):
+        for x in v.values():
+            _collect_strings(x, out)
+    elif isinstance(v, list):
+        for x in v:
+            _collect_strings(x, out)
+
+
+def _scan_variable_usage(model: CaseModel) -> tuple:
+    """Return (referenced names, names the case itself defines)."""
+    strings: List[str] = []
+    defined = set(_BUILTIN_VARS)
+    for row in model.variables:
+        if row.key.strip():
+            defined.add(row.key.strip())
+        _collect_strings(row.value, strings)
+    if model.data_rows:
+        try:
+            rows = yaml.safe_load(model.data_rows)
+            if isinstance(rows, list):
+                for r in rows:
+                    if isinstance(r, dict):
+                        defined.update(str(k) for k in r.keys())
+        except yaml.YAMLError:
+            pass
+
+    def walk(nodes: List[StepNode]) -> None:
+        for n in nodes:
+            _collect_strings(n.params, strings)
+            if isinstance(n.params.get("store_as"), str) and n.params["store_as"].strip():
+                defined.add(n.params["store_as"].strip())
+            if n.kind == "action" and n.action == "eval.set" and isinstance(n.params.get("key"), str):
+                defined.add(n.params["key"].strip())
+            if n.loop_var:
+                defined.add(n.loop_var.strip())
+            for f in (n.expression, n.yaml_text):
+                if isinstance(f, str):
+                    strings.append(f)
+            _collect_strings(n.items, strings)
+            for lst in (n.steps, n.then_steps, n.else_steps, n.except_steps, n.finally_steps):
+                walk(lst)
+
+    walk(model.steps)
+    refs = set()
+    for s in strings:
+        refs.update(_VAR_REF_RE.findall(s))
+    return refs, defined
+
+
+def validate_case(model: CaseModel,
+                  known_vars: Optional[List[str]] = None,
+                  known_shared: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Validate a case model.
+
+    known_vars / known_shared carry suite context (keys from Var: cases,
+    names of Shared: cases). When provided, cross-reference checks run:
+    unknown ${variable} references and missing shared steps become warnings.
+    """
+    sanitize_model(model)
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    if not model.name.strip():
+        errors.append("Case name is required")
+
+    if model.case_type == "var" and not model.steps:
+        if not any(r.key.strip() for r in model.variables):
+            errors.append("Var: case needs at least one key/value pair")
+        seen = set()
+        for row in model.variables:
+            key = row.key.strip()
+            if key and key in seen:
+                errors.append(f"Duplicate variable key '{key}'")
+            seen.add(key)
+    else:
+        if not model.steps:
+            errors.append("Add at least one step")
+        shared_slugs = {_slug(s) for s in known_shared} if known_shared is not None else None
+        _walk_nodes(model.steps, "", errors, warnings, shared_slugs)
+
+        # Cross-reference ${variables} against everything in scope.
+        if known_vars is not None:
+            refs, defined = _scan_variable_usage(model)
+            defined.update(known_vars)
+            unknown = sorted(
+                r for r in refs
+                if r not in defined and not r.isupper()  # ALL_CAPS = env var convention
+            )
+            if unknown:
+                warnings.append(
+                    "Unknown variable reference(s): "
+                    + ", ".join("${" + u + "}" for u in unknown)
+                    + " — not defined in this case, a Var: case in the suite, or by a store_as."
+                )
+
+    body = ""
+    if not errors:
+        try:
+            body = serialize_case_body(model)
+        except ValueError as exc:
+            errors.append(str(exc))
+
+    # Round-trip: parse the generated body with the exact functions the
+    # runner uses, to guarantee TestRail content will execute.
+    if body and not errors and (model.case_type != "var" or model.steps):
+        try:
+            fixed = fix_step_list_indent(body)
+            parsed = parse_yaml_lenient(fixed)
+            steps = parsed.get("steps") if isinstance(parsed, dict) else parsed
+            if not isinstance(steps, list) or not steps:
+                errors.append("Generated body did not parse into a steps list — please report this")
+        except Exception as exc:  # parser raises plain Exceptions on bad YAML
+            errors.append(f"Generated body failed runner parsing: {exc}")
+    elif body and not errors and model.case_type == "var":
+        try:
+            parsed = yaml.safe_load(body)
+            if not isinstance(parsed, dict):
+                errors.append("Var: body did not parse as key/value pairs")
+        except yaml.YAMLError as exc:
+            errors.append(f"Var: body is not valid YAML: {exc}")
+
+    return {"valid": not errors, "errors": errors, "warnings": warnings, "body": body}
+
+
+# --------------------------------------------------------------------------- #
+# Parsing — existing TestRail case → model (for editing)                       #
+# --------------------------------------------------------------------------- #
+
+_CONTROL_KEYS = ("for_each", "while", "condition", "try")
+
+
+def _dict_to_node(step: Dict[str, Any]) -> StepNode:
+    if "shared_step" in step:
+        return StepNode(kind="shared", name=str(step["shared_step"]))
+
+    if "for_each" in step:
+        return StepNode(
+            kind="for_each",
+            items=step.get("for_each"),
+            loop_var=step.get("loop_var"),
+            steps=[_dict_to_node(s) for s in step.get("steps", []) if isinstance(s, dict)],
+        )
+    if "while" in step:
+        return StepNode(
+            kind="while",
+            expression=str(step.get("while", "")),
+            loop_limit=step.get("loop_limit"),
+            steps=[_dict_to_node(s) for s in step.get("steps", []) if isinstance(s, dict)],
+        )
+    if "condition" in step or "if" in step:
+        return StepNode(
+            kind="condition",
+            expression=str(step.get("condition", step.get("if", ""))),
+            then_steps=[_dict_to_node(s) for s in step.get("then", []) if isinstance(s, dict)],
+            else_steps=[_dict_to_node(s) for s in step.get("else", []) if isinstance(s, dict)],
+        )
+    if "try" in step:
+        return StepNode(
+            kind="try",
+            steps=[_dict_to_node(s) for s in (step.get("try") or []) if isinstance(s, dict)],
+            except_steps=[_dict_to_node(s) for s in (step.get("except") or []) if isinstance(s, dict)],
+            finally_steps=[_dict_to_node(s) for s in (step.get("finally") or []) if isinstance(s, dict)],
+        )
+
+    # action-key format: {"action": "api.get", "url": ...}
+    if "action" in step and isinstance(step["action"], str):
+        params = {k: v for k, v in step.items() if k != "action"}
+        return StepNode(kind="action", action=step["action"], params=params)
+
+    # dot-notation format: {"api.get": {"url": ...}}
+    if len(step) == 1:
+        key, value = next(iter(step.items()))
+        if isinstance(key, str) and "." in key:
+            params = value if isinstance(value, dict) else ({} if value in (None, {}) else {"value": value})
+            return StepNode(kind="action", action=key, params=params)
+
+    # Anything we can't map cleanly → raw YAML node (still round-trips)
+    return StepNode(
+        kind="raw",
+        yaml_text="- " + yaml.safe_dump(step, default_flow_style=True, width=100000).strip(),
+    )
+
+
+def parse_case_to_model(case: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert a TestRail case dict to a builder model (best effort)."""
+    title = case.get("title", "") or ""
+    role = "feature"
+    name = title
+    for prefix, r in _ROLE_BY_PREFIX.items():
+        if title.startswith(prefix):
+            role = r
+            name = title[len(prefix):].strip()
+            break
+
+    text = strip_html_to_text(str(case.get("custom_preconds") or ""))
+    model: Dict[str, Any] = {
+        "case_type": role,
+        "name": name,
+        "variables": [],
+        "data_rows": None,
+        "steps": [],
+    }
+    notes: List[str] = []
+
+    if role == "var":
+        # A Var: case body is usually a flat key/value mapping, but the runner
+        # also supports step-based Var: cases (a steps list whose store_as
+        # results become run variables) — detect those and load them as steps.
+        step_parsed = None
+        if text.lstrip().startswith("-"):
+            try:
+                step_parsed = parse_yaml_lenient(fix_step_list_indent(text))
+            except Exception:
+                step_parsed = None
+        if isinstance(step_parsed, list) and any(isinstance(s, dict) for s in step_parsed):
+            nodes = [_dict_to_node(s) for s in step_parsed if isinstance(s, dict)]
+            model["steps"] = [n.model_dump() for n in nodes]
+            notes.append(
+                "Step-based Var: case — its steps run before the tests and "
+                "store_as results become run variables."
+            )
+            return {"model": model, "notes": notes, "raw_body": text}
+        try:
+            parsed = yaml.safe_load(text) if text else {}
+        except yaml.YAMLError:
+            parsed = None
+        if isinstance(parsed, dict):
+            model["variables"] = [{"key": str(k), "value": v} for k, v in parsed.items()]
+        else:
+            for line in text.splitlines():
+                line = line.strip()
+                if ":" in line and not line.startswith(("#", "-")):
+                    k, _, v = line.partition(":")
+                    if k.strip():
+                        model["variables"].append({"key": k.strip(), "value": v.strip()})
+        return {"model": model, "notes": notes, "raw_body": text}
+
+    if role == "test":
+        notes.append("Test: pointer cases route to local YAML files and are not editable here.")
+        return {"model": model, "notes": notes, "raw_body": text}
+
+    if text:
+        # Parameterized cases may carry a "JSON:\n[...]" data prefix — split it
+        # off the same way the runner does before parsing steps.
+        try:
+            from easybdd.core.testrail_runner import _extract_inline_data
+            data_sets, text = _extract_inline_data(text)
+            if data_sets:
+                model["data_rows"] = yaml.safe_dump(
+                    data_sets, default_flow_style=False, width=100000
+                ).rstrip()
+        except Exception:
+            pass
+        try:
+            fixed = fix_step_list_indent(text)
+            parsed = parse_yaml_lenient(fixed)
+        except Exception as exc:
+            notes.append(f"Could not parse existing body ({exc}); loaded as a single raw step.")
+            model["steps"] = [{"kind": "raw", "yaml_text": text}]
+            return {"model": model, "notes": notes, "raw_body": text}
+
+        steps: List[Any] = []
+        if isinstance(parsed, list):
+            steps = parsed
+        elif isinstance(parsed, dict):
+            variables = parsed.get("variables")
+            if isinstance(variables, dict):
+                model["variables"] = [{"key": str(k), "value": v} for k, v in variables.items()]
+            data = parsed.get("data")
+            if isinstance(data, list):
+                model["data_rows"] = yaml.safe_dump(data, default_flow_style=False, width=100000).rstrip()
+            if isinstance(parsed.get("steps"), list):
+                steps = parsed["steps"]
+            elif "action" in parsed:
+                steps = [parsed]
+        nodes = [_dict_to_node(s) for s in steps if isinstance(s, dict)]
+        model["steps"] = [n.model_dump() for n in nodes]
+        if any(n.kind == "raw" for n in nodes):
+            notes.append("Some steps could not be mapped to forms and were loaded as raw YAML steps.")
+
+        if not model["steps"] and text.strip():
+            # Legacy-format body (e.g. old pipe-delimited syntax) — surface it
+            # as a raw step so publishing never silently wipes the case.
+            notes.append(
+                "This case body is not in Easy BDD dot-notation (legacy format?) — "
+                "loaded as a raw step. Use the BDD migrator to convert legacy cases."
+            )
+            model["steps"] = [{"kind": "raw", "yaml_text": text}]
+
+    return {"model": model, "notes": notes, "raw_body": text}
+
+
+# --------------------------------------------------------------------------- #
+# TestRail client                                                               #
+# --------------------------------------------------------------------------- #
+
+_tr_service: Optional[TestRailService] = None
+
+
+def _tr() -> TestRailService:
+    global _tr_service
+    if _tr_service is None:
+        try:
+            _tr_service = TestRailService()
+        except TestRailError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+    return _tr_service
+
+
+def _tr_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except TestRailError as exc:
+        raise HTTPException(status_code=502, detail=f"TestRail error: {exc}")
+
+
+def _allowed_project_ids() -> Optional[set]:
+    raw = os.getenv("TESTRAIL_ALLOWED_PROJECT_IDS", "").strip()
+    if not raw:
+        return None
+    return {int(part) for part in raw.split(",") if part.strip()}
+
+
+def _case_link(case_id: int) -> str:
+    base = os.getenv("TESTRAIL_URL", "").rstrip("/")
+    return f"{base}/index.php?/cases/view/{case_id}" if base else ""
+
+
+def _run_link(run_id: int) -> str:
+    base = os.getenv("TESTRAIL_URL", "").rstrip("/")
+    return f"{base}/index.php?/runs/view/{run_id}" if base else ""
+
+
+# --------------------------------------------------------------------------- #
+# Routes                                                                        #
+# --------------------------------------------------------------------------- #
+
+@app.get("/")
+async def index():
+    return FileResponse(STATIC_DIR / "testrail_builder.html")
+
+
+@app.get("/api/catalog")
+async def get_catalog():
+    categories: Dict[str, List[Dict[str, Any]]] = {}
+    for action_id, definition in sorted(CATALOG.items()):
+        categories.setdefault(definition["category"], []).append(
+            {"id": action_id, **definition}
+        )
+    return {"categories": categories, "case_types": CASE_PREFIXES}
+
+
+# Section headers (verbatim, minus the "## " markdown prefix) to keep from
+# docs/writing-test-cases.md. The full doc runs ~2500 words; on the CPU-only
+# Ollama host this app talks to (~20 tok/s prompt processing, ~5.5 tok/s
+# generation — measured, no GPU), that alone would cost 2+ minutes of prompt
+# processing before the model can even start replying. These sections cover
+# the naming/format/assertion rules that are wrong most often; the full
+# per-action browser table is skipped in favor of the compact CATALOG-derived
+# list below, which already gives per-action required params.
+_FRAMEWORK_DOC_SECTIONS = (
+    "1. Case Naming",
+    "2. Var: Cases",
+    "3. Preconditions Field Format",
+    "6. Assertions",
+    "10. Selector Strategies",
+)
+
+
+def _load_framework_doc() -> str:
+    try:
+        text = (ROOT / "docs" / "writing-test-cases.md").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    kept = [
+        "## " + section
+        for section in text.split("\n## ")[1:]
+        if section.startswith(_FRAMEWORK_DOC_SECTIONS)
+    ]
+    return "\n\n".join(kept).strip()
+
+
+def _action_reference_markdown() -> str:
+    """Compact action list (id + required params only, no descriptions) grouped
+    by category, generated from the same CATALOG the builder's step palette
+    uses — keeps the assistant's knowledge of available actions in sync with
+    what the UI actually offers, without spending tokens on prose."""
+    by_category: Dict[str, List[str]] = {}
+    for action_id, definition in sorted(CATALOG.items()):
+        params = definition.get("parameters") or {}
+        required = [name for name, cfg in params.items() if cfg.get("required")]
+        entry = f"- `{action_id}`"
+        if required:
+            entry += f" (required: {', '.join(required)})"
+        by_category.setdefault(definition.get("category", "Other"), []).append(entry)
+
+    lines: List[str] = []
+    for category in sorted(by_category):
+        lines.append(f"### {category}")
+        lines.extend(by_category[category])
+    return "\n".join(lines)
+
+
+CHAT_SYSTEM_PROMPT = (
+    "You are the AI assistant embedded in the Easy BDD TestRail Test Builder. "
+    "You help the user author BDD-style TestRail test cases (Var:, Shared:, Setup:, "
+    "Teardown:, Feature:), pick the right builder actions, and troubleshoot the "
+    "Preconditions YAML the app generates. Use the framework reference and action "
+    "list below as ground truth — don't invent actions or syntax that aren't in them. "
+    "This model runs on CPU with no GPU, so keep answers short (a few sentences or "
+    "a short snippet) — long answers take a long time to generate.\n\n"
+    "If the user has a case open in the builder, its title, Preconditions YAML, and "
+    "current validation errors/warnings are provided in a separate 'Currently open "
+    "test case' message on every turn — treat that as ground truth about what they're "
+    "looking at, and don't ask them to paste a case ID that's already given there. "
+    "When TestRail access is configured you also have tools: `get_testrail_case` to "
+    "read any other case by ID, and `update_testrail_case` to write a title/Preconditions "
+    "change directly to TestRail. Only call `update_testrail_case` when the user has "
+    "explicitly asked you to save, apply, or publish a change — never write proactively.\n\n"
+    "# Framework syntax reference\n\n" + _load_framework_doc() + "\n\n"
+    "# Available builder actions (id and required params)\n\n" + _action_reference_markdown()
+)
+
+# Tool schema handed to Ollama for models with function-calling support (qwen2.5-coder
+# does). Kept to exactly the two operations the builder UI itself performs on a case
+# (read one, write title/Preconditions) — same TestRailService + .env credentials the
+# rest of this app and frontend/mcp_server.py's TestRail tools use, so the assistant's
+# read/write reach matches what the human already has through this app.
+TESTRAIL_CHAT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_testrail_case",
+            "description": (
+                "Look up any TestRail case by numeric ID and return its title and "
+                "Preconditions body. Use this for cases other than the one currently "
+                "open in the builder (that one is already given as context)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case_id": {
+                        "type": "integer",
+                        "description": "Numeric TestRail case ID, e.g. 18761858 for C18761858",
+                    }
+                },
+                "required": ["case_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_testrail_case",
+            "description": (
+                "Write a title and/or Preconditions change directly to a TestRail case. "
+                "This is a real write to the shared TestRail instance — only call it when "
+                "the user has explicitly asked you to save, apply, or publish a change."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "integer", "description": "Numeric TestRail case ID to update"},
+                    "title": {"type": "string", "description": "New case title (omit to leave unchanged)"},
+                    "preconditions": {
+                        "type": "string",
+                        "description": "New full Preconditions field YAML body (omit to leave unchanged)",
+                    },
+                },
+                "required": ["case_id"],
+            },
+        },
+    },
+]
+
+MAX_CHAT_TOOL_ROUNDS = 4
+
+
+def _testrail_configured() -> bool:
+    return bool(
+        os.getenv("TESTRAIL_URL") and os.getenv("TESTRAIL_USERNAME") and os.getenv("TESTRAIL_API_KEY")
+    )
+
+
+def _run_chat_tool(name: str, args: Dict[str, Any]) -> str:
+    """Execute a tool call the chat model requested, returning a JSON string
+    (never raises — errors are reported back to the model as tool output)."""
+    try:
+        if name == "get_testrail_case":
+            case_id = int(args["case_id"])
+            case = _tr().get_case(case_id)
+            body = strip_html_to_text(str(case.get("custom_preconds") or ""))
+            return json.dumps({"case_id": case_id, "title": case.get("title", ""), "preconditions": body})
+        if name == "update_testrail_case":
+            case_id = int(args["case_id"])
+            payload: Dict[str, Any] = {}
+            if args.get("title") is not None:
+                payload["title"] = args["title"]
+            if args.get("preconditions") is not None:
+                payload["custom_preconds"] = args["preconditions"]
+            if not payload:
+                return json.dumps({"error": "Nothing to update — provide title and/or preconditions."})
+            case = _tr().update_case(case_id, **payload)
+            return json.dumps({"ok": True, "case_id": case_id, "title": case.get("title", "")})
+        return json.dumps({"error": f"Unknown tool '{name}'"})
+    except TestRailError as exc:
+        return json.dumps({"error": f"TestRail error: {exc}"})
+    except Exception as exc:  # noqa: BLE001 - reported to the model, not raised
+        return json.dumps({"error": str(exc)})
+
+
+_TESTRAIL_TOOL_NAMES = {t["function"]["name"] for t in TESTRAIL_CHAT_TOOLS}
+
+
+def _parse_pseudo_tool_call(content: str) -> Optional[tuple]:
+    """qwen2.5-coder:7b (unlike larger tool-tuned models) doesn't reliably
+    populate Ollama's structured `message.tool_calls` — it often writes the
+    call as plain JSON text instead, e.g. {"name": "get_testrail_case",
+    "arguments": {"case_id": 123}}. Detect that shape as a fallback so tool
+    calling still works with this model."""
+    text = (content or "").strip()
+    if not text:
+        return None
+    if text.startswith("```"):
+        text = text.strip("`")
+        if "\n" in text:
+            text = text.split("\n", 1)[1]
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    name = obj.get("name")
+    if name not in _TESTRAIL_TOOL_NAMES:
+        return None
+    args = obj.get("arguments", {})
+    if not isinstance(args, dict):
+        return None
+    return name, args
+
+
+# The base system prompt (framework doc + action list) already runs ~3.5k
+# tokens on its own — see the num_ctx comment below. A case with a large
+# Preconditions body or dozens of validation issues (e.g. many duplicate-key
+# warnings) can otherwise inflate the per-turn prompt past what this CPU-only
+# host can process inside one request's timeout, so everything past this
+# cap is dropped rather than sent to the model.
+MAX_CASE_CONTEXT_ISSUES = 8
+MAX_CASE_CONTEXT_BODY_CHARS = 3000
+
+
+def _case_context_message(ctx: Optional[ChatCaseContext]) -> Optional[Dict[str, str]]:
+    if not ctx or not (ctx.case_id or ctx.title or ctx.body):
+        return None
+    lines = ["# Currently open test case in the builder",
+             "(unpublished edits — may not match TestRail yet)"]
+    if ctx.case_id:
+        lines.append(f"TestRail case ID: C{ctx.case_id}")
+    if ctx.title:
+        lines.append(f"Title: {ctx.title}")
+    if ctx.errors:
+        shown = ctx.errors[:MAX_CASE_CONTEXT_ISSUES]
+        suffix = f"\n- ...and {len(ctx.errors) - len(shown)} more" if len(ctx.errors) > len(shown) else ""
+        lines.append("Validation errors:\n" + "\n".join(f"- {e}" for e in shown) + suffix)
+    if ctx.warnings:
+        shown = ctx.warnings[:MAX_CASE_CONTEXT_ISSUES]
+        suffix = f"\n- ...and {len(ctx.warnings) - len(shown)} more" if len(ctx.warnings) > len(shown) else ""
+        lines.append("Validation warnings:\n" + "\n".join(f"- {w}" for w in shown) + suffix)
+    if ctx.body:
+        body = ctx.body
+        if len(body) > MAX_CASE_CONTEXT_BODY_CHARS:
+            body = body[:MAX_CASE_CONTEXT_BODY_CHARS] + f"\n... (truncated, {len(ctx.body)} chars total)"
+        lines.append("Current Preconditions YAML:\n```yaml\n" + body + "\n```")
+    return {"role": "system", "content": "\n\n".join(lines)}
+
+
+def _ollama_base_url() -> str:
+    return os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+
+
+def _chat_model() -> str:
+    return os.getenv("BUILDER_CHAT_MODEL", "qwen2.5-coder:7b")
+
+
+def _chat_num_ctx() -> int:
+    # The system prompt (framework doc + action list) alone runs ~3.5k tokens,
+    # and the "currently open case" context message adds more on top of that —
+    # 4096 left almost no headroom and caused real prompts to overflow/stall.
+    return int(os.getenv("BUILDER_CHAT_NUM_CTX", "8192"))
+
+
+def _chat_max_tokens() -> int:
+    # Caps worst-case generation time on the CPU-only host (~5.5 tok/s measured).
+    return int(os.getenv("BUILDER_CHAT_MAX_TOKENS", "350"))
+
+
+def _chat_keep_alive() -> str:
+    # Keep the model resident between turns so a mid-conversation pause doesn't
+    # evict it — that would force reprocessing the whole ~3k-token system
+    # prompt from scratch (~2.5 min) instead of the cached-prefix fast path
+    # (~10-30s, measured) that later turns in the same conversation get.
+    return os.getenv("BUILDER_CHAT_KEEP_ALIVE", "30m")
+
+
+@app.get("/api/chat/status")
+async def chat_status():
+    base = _ollama_base_url()
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{base}/api/tags")
+            resp.raise_for_status()
+    except httpx.HTTPError:
+        return {"configured": False, "model": _chat_model()}
+    return {"configured": True, "model": _chat_model()}
+
+
+@app.post("/api/chat")
+async def chat(req: ChatRequest):
+    base = _ollama_base_url()
+    messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+    case_msg = _case_context_message(req.case_context)
+    if case_msg:
+        messages.append(case_msg)
+    messages += [{"role": m.role, "content": m.content} for m in req.messages]
+
+    use_tools = _testrail_configured()
+    payload: Dict[str, Any] = {
+        "model": _chat_model(),
+        "stream": False,
+        "keep_alive": _chat_keep_alive(),
+        "options": {
+            "num_ctx": _chat_num_ctx(),
+            "num_predict": _chat_max_tokens(),
+        },
+    }
+    if use_tools:
+        payload["tools"] = TESTRAIL_CHAT_TOOLS
+
+    try:
+        # A single round with a full case-context prompt (~4.5k tokens) has been
+        # measured at ~130s on this CPU-only host; 240s cut it close for the
+        # heaviest real cases (many validation issues + a large body), so this
+        # leaves more headroom. Each round in the tool-call loop gets its own
+        # budget — a multi-round turn can legitimately take several minutes.
+        async with httpx.AsyncClient(timeout=300) as client:
+            for _ in range(MAX_CHAT_TOOL_ROUNDS):
+                resp = await client.post(f"{base}/api/chat", json={**payload, "messages": messages})
+                resp.raise_for_status()
+                data = resp.json()
+                message = data.get("message", {}) or {}
+                tool_calls = list(message.get("tool_calls") or [])
+                pseudo_call = None
+                if not tool_calls and use_tools:
+                    pseudo_call = _parse_pseudo_tool_call(message.get("content", ""))
+                if not tool_calls and not pseudo_call:
+                    return {"reply": message.get("content", "")}
+
+                messages.append(message)
+                if pseudo_call:
+                    name, args = pseudo_call
+                    result = _run_chat_tool(name, args)
+                    messages.append({"role": "tool", "content": result})
+                else:
+                    for call in tool_calls:
+                        fn = call.get("function", {}) or {}
+                        name = fn.get("name", "")
+                        args = fn.get("arguments") or {}
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except ValueError:
+                                args = {}
+                        result = _run_chat_tool(name, args)
+                        messages.append({"role": "tool", "content": result})
+            # Ran out of tool-call rounds — ask once more without tools so the
+            # model has to answer in plain text instead of looping forever.
+            final_payload = {k: v for k, v in payload.items() if k != "tools"}
+            resp = await client.post(f"{base}/api/chat", json={**final_payload, "messages": messages})
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=504,
+            detail="Ollama request timed out — the prompt may be too large for this CPU-only "
+                   "host, or the model is busy. Try again, or ask a shorter question.",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Ollama error: {exc}")
+    return {"reply": data.get("message", {}).get("content", "")}
+
+
+@app.get("/api/testrail/status")
+async def testrail_status():
+    url = os.getenv("TESTRAIL_URL", "")
+    user = os.getenv("TESTRAIL_USERNAME", "")
+    configured = bool(url and user and os.getenv("TESTRAIL_API_KEY"))
+    return {"configured": configured, "url": url, "username": user}
+
+
+@app.get("/api/testrail/projects")
+async def testrail_projects():
+    projects = _tr_call(_tr().get_projects)
+    allowed = _allowed_project_ids()
+    return [
+        {"id": p["id"], "name": p["name"], "suite_mode": p.get("suite_mode")}
+        for p in projects
+        if not p.get("is_completed") and (allowed is None or p["id"] in allowed)
+    ]
+
+
+@app.get("/api/testrail/suites")
+async def testrail_suites(project_id: int = Query(...)):
+    suites = _tr_call(_tr().get_suites, project_id)
+    return [{"id": s["id"], "name": s["name"]} for s in suites]
+
+
+@app.get("/api/testrail/sections")
+async def testrail_sections(project_id: int = Query(...), suite_id: Optional[int] = Query(None)):
+    sections = _tr_call(_tr().get_sections, project_id, suite_id)
+    return [
+        {"id": s["id"], "name": s["name"], "parent_id": s.get("parent_id"), "depth": s.get("depth", 0)}
+        for s in sections
+    ]
+
+
+def _classify_role(title: str) -> str:
+    for prefix, r in _ROLE_BY_PREFIX.items():
+        if title.startswith(prefix):
+            return r
+    return "other"
+
+
+def _var_keys_from_body(text: str) -> List[str]:
+    """Extract variable keys from a Var: case body (YAML or line-based)."""
+    if not text:
+        return []
+    try:
+        parsed = yaml.safe_load(text)
+        if isinstance(parsed, dict):
+            return [str(k).lstrip("$") for k in parsed.keys()]
+    except yaml.YAMLError:
+        pass
+    keys = []
+    for line in text.splitlines():
+        line = line.strip()
+        if ":" in line and not line.startswith(("#", "-")):
+            k = line.partition(":")[0].strip().strip('"').lstrip("$")
+            if k:
+                keys.append(k)
+    return keys
+
+
+def _step_var_outputs(text: str) -> List[str]:
+    """Variables a step-based Var: case defines (store_as / eval.set keys)."""
+    out: List[str] = []
+    try:
+        parsed = parse_yaml_lenient(fix_step_list_indent(text))
+    except Exception:
+        return out
+    if not isinstance(parsed, list):
+        return out
+
+    def walk(steps: List[Any]) -> None:
+        for s in steps:
+            if not isinstance(s, dict):
+                continue
+            for key, val in s.items():
+                if isinstance(val, dict):
+                    if isinstance(val.get("store_as"), str):
+                        out.append(val["store_as"].strip())
+                    if key == "eval.set" and isinstance(val.get("key"), str):
+                        out.append(val["key"].strip())
+            for sub in ("steps", "then", "else", "try", "except", "finally"):
+                if isinstance(s.get(sub), list):
+                    walk(s[sub])
+            if isinstance(s.get("store_as"), str):  # action-key format
+                out.append(s["store_as"].strip())
+
+    walk(parsed)
+    return out
+
+
+def _suite_context(cases: List[Dict[str, Any]]) -> tuple:
+    """Collect (var keys, shared names) defined across a suite's cases."""
+    known_vars: List[str] = []
+    known_shared: List[str] = []
+    for c in cases:
+        title = c.get("title", "") or ""
+        role = _classify_role(title)
+        if role == "var":
+            body = strip_html_to_text(str(c.get("custom_preconds") or ""))
+            if body.lstrip().startswith("-"):
+                known_vars.extend(_step_var_outputs(body))
+            else:
+                known_vars.extend(_var_keys_from_body(body))
+        elif role == "shared":
+            known_shared.append(title[len("Shared:"):].strip())
+    return sorted(set(known_vars)), sorted(set(known_shared))
+
+
+@app.get("/api/testrail/cases")
+async def testrail_cases(project_id: int = Query(...), suite_id: Optional[int] = Query(None)):
+    cases = _tr_call(_tr().get_cases, project_id, suite_id)
+    out = []
+    for c in cases:
+        title = c.get("title", "")
+        role = _classify_role(title)
+        item = {"id": c["id"], "title": title, "section_id": c.get("section_id"), "role": role}
+        if role == "var":
+            body = strip_html_to_text(str(c.get("custom_preconds") or ""))
+            item["var_keys"] = (
+                _step_var_outputs(body) if body.lstrip().startswith("-")
+                else _var_keys_from_body(body)
+            )
+        out.append(item)
+    return out
+
+
+@app.get("/api/testrail/case/{case_id}")
+async def testrail_case(case_id: int):
+    case = _tr_call(_tr().get_case, case_id)
+    result = parse_case_to_model(case)
+    result["case_id"] = case_id
+    result["section_id"] = case.get("section_id")
+    result["link"] = _case_link(case_id)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Import recorded steps (clipboard paste)
+# ---------------------------------------------------------------------------
+
+# Formats accepted by /api/import/recording.  JSON exports route through
+# RecorderConverter.detect_format; raw code routes by language heuristics.
+RECORDING_FORMATS = [
+    "auto", "playwright-js", "playwright-python", "chrome-devtools",
+    "selenium", "katalon", "playwright", "codegen", "cypress", "puppeteer",
+]
+
+_JS_CODE_RE = re.compile(
+    r"getBy[A-Z]|waitFor[A-Z]|toHave[A-Z]|toBe[A-Z]|frameLocator\(|"
+    r"@playwright/test|\bawait\s+expect\(|=>"
+)
+_PY_CODE_RE = re.compile(
+    r"\bget_by_\w+|\bwait_for_\w+|sync_playwright|async_playwright|"
+    r"to_be_\w+|to_have_\w+"
+)
+
+
+def convert_recording_text(raw: str, format_hint: str = "auto") -> Dict[str, Any]:
+    """Convert clipboard-pasted recorder output to Easy BDD test data.
+
+    Accepts JSON recorder exports (Chrome DevTools Recorder, Selenium IDE
+    .side, Katalon, Playwright test-generator, Cypress, Puppeteer) and raw
+    Playwright codegen source (JS/TS or Python).
+
+    Returns the converter's test-data dict plus a "format" label.
+    Raises ValueError when the text can't be recognized or converted.
+    """
+    import json
+
+    from easybdd.core.recorder_converter import RecorderConverter
+    from easybdd.crawler.crx_converter import PlaywrightTsConverter
+
+    text = (raw or "").strip()
+    if not text:
+        raise ValueError("Nothing to import — paste a recording first.")
+    fmt = (format_hint or "auto").strip().lower()
+    if fmt not in RECORDING_FORMATS:
+        raise ValueError(f"Unknown format '{format_hint}'. Supported: {', '.join(RECORDING_FORMATS)}")
+
+    converter = RecorderConverter()
+
+    # ── JSON recorder exports ──────────────────────────────────────────────
+    data = None
+    if text.startswith(("{", "[")):
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            if fmt in converter.converters:
+                raise ValueError(f"'{fmt}' expects a JSON export, but the text is not valid JSON: {exc}")
+            data = None
+    if data is not None:
+        detected = fmt if fmt in converter.converters else converter.detect_format(data)
+        if not detected:
+            raise ValueError(
+                "Could not recognize this JSON as a known recorder export. "
+                "Pick the format explicitly (chrome-devtools, selenium, katalon, "
+                "playwright, cypress, puppeteer)."
+            )
+        try:
+            if detected == "codegen":
+                # "codegen" JSON is a wrapper around raw code lines — its
+                # converter takes a code string, not (data, path)
+                code = "\n".join(str(s) for s in data.get("steps", []))
+                result = converter.convert_playwright_native_code(code)
+            else:
+                result = converter.convert(data, detected, Path("clipboard.json"))
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError(f"Failed to convert '{detected}' recording: {exc}")
+        result["format"] = detected
+        return result
+
+    # ── Raw code: Playwright codegen JS/TS vs Python ───────────────────────
+    if fmt == "playwright-js" or (fmt == "auto" and _JS_CODE_RE.search(text)):
+        result = PlaywrightTsConverter().convert(text, "clipboard")
+        result["format"] = "playwright-js"
+        return result
+    if fmt in ("playwright-python", "codegen") or (
+        fmt == "auto" and (_PY_CODE_RE.search(text) or "page." in text)
+    ):
+        result = converter.convert_playwright_native_code(text)
+        result["format"] = "playwright-python"
+        return result
+
+    raise ValueError(
+        "Could not recognize the pasted text as a recording. Supported: "
+        "Playwright codegen (JS/TS or Python), Chrome DevTools Recorder JSON, "
+        "Selenium IDE .side, Katalon, Cypress and Puppeteer JSON exports."
+    )
+
+
+class ImportRecordingRequest(BaseModel):
+    text: str
+    format: str = "auto"
+    include_logs: bool = False  # keep the auto-generated test.log narration steps
+
+
+@app.post("/api/import/recording")
+async def import_recording(req: ImportRecordingRequest):
+    """Convert clipboard-pasted recorder output into builder step nodes."""
+    try:
+        result = convert_recording_text(req.text, req.format)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    raw_steps = [s for s in result.get("steps") or [] if isinstance(s, dict)]
+    if not req.include_logs:
+        # The recorder pipeline interleaves a test.log narration step before
+        # each browser step — noise as separate rows in the builder.
+        raw_steps = [s for s in raw_steps if set(s) != {"test.log"}]
+
+    nodes = [_dict_to_node(s) for s in raw_steps]
+    warnings: List[str] = []
+    for i, node in enumerate(nodes, 1):
+        _sanitize_node(node)
+        if node.kind == "action" and not _schema_for(node.action or ""):
+            warnings.append(f"Step {i}: action '{node.action}' is not in the runner's action registry.")
+        elif node.kind == "raw":
+            warnings.append(f"Step {i} could not be mapped to a form — kept as raw YAML.")
+    if not nodes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Recognized the recording as {result['format']}, but found no convertible steps in it.",
+        )
+
+    variables = [
+        {"key": str(k), "value": v}
+        for k, v in (result.get("variables") or {}).items()
+    ]
+    return {
+        "format": result["format"],
+        "name": result.get("name") or "",
+        "steps": [n.model_dump() for n in nodes],
+        "variables": variables,
+        "warnings": warnings,
+    }
+
+
+@app.post("/api/preview")
+async def preview(model: CaseModel):
+    try:
+        body = serialize_case_body(model)
+    except (ValueError, yaml.YAMLError) as exc:
+        return {"title": "", "body": "", "error": str(exc)}
+    try:
+        title = case_title(model)
+    except ValueError as exc:
+        return {"title": "", "body": body, "error": str(exc)}
+    return {"title": title, "body": body, "error": None}
+
+
+class ValidateRequest(BaseModel):
+    model: CaseModel
+    known_vars: Optional[List[str]] = None
+    known_shared: Optional[List[str]] = None
+
+
+@app.post("/api/validate")
+async def validate(req: ValidateRequest):
+    return validate_case(req.model, known_vars=req.known_vars, known_shared=req.known_shared)
+
+
+class LintRequest(BaseModel):
+    project_id: int
+    suite_id: Optional[int] = None
+
+
+@app.post("/api/testrail/lint")
+async def lint_suite(req: LintRequest):
+    """Health-check every case in a suite with the builder's validation.
+
+    Catches damage from hand-edits in TestRail's rich-text field: broken
+    YAML, misspelled actions, missing required params, unknown ${variables},
+    dangling shared-step references, legacy-format bodies.
+    """
+    cases = _tr_call(_tr().get_cases, req.project_id, req.suite_id)
+    known_vars, known_shared = _suite_context(cases)
+    results = []
+    counts = {"checked": 0, "clean": 0, "errors": 0, "warnings": 0}
+    for c in cases:
+        title = c.get("title", "") or ""
+        role = _classify_role(title)
+        counts["checked"] += 1
+        errors: List[str] = []
+        warnings: List[str] = []
+        if role == "other":
+            warnings.append(
+                "Title has no recognized prefix (Feature:/Var:/Shared:/Setup:/Teardown:/Test:) — the runner will skip this case."
+            )
+        elif role == "test":
+            pass  # pointer cases route to local YAML; nothing to lint here
+        else:
+            parsed = parse_case_to_model(c)
+            for note in parsed.get("notes", []):
+                # purely informational notes aren't suite-health problems
+                if not note.startswith("Step-based Var:"):
+                    warnings.append(note)
+            try:
+                model = CaseModel(**parsed["model"])
+                v = validate_case(model, known_vars=known_vars, known_shared=known_shared)
+                errors.extend(v["errors"])
+                warnings.extend(v["warnings"])
+            except Exception as exc:
+                errors.append(f"Could not validate: {exc}")
+        if errors or warnings:
+            results.append({
+                "case_id": c["id"], "title": title, "role": role,
+                "section_id": c.get("section_id"),
+                "errors": errors, "warnings": warnings,
+                "link": _case_link(c["id"]),
+            })
+            counts["errors" if errors else "warnings"] += 1
+        else:
+            counts["clean"] += 1
+    return {"counts": counts, "issues": results}
+
+
+@app.get("/api/migrate/candidates")
+async def migrate_candidates(project_id: int = Query(...), suite_id: Optional[int] = Query(None)):
+    """Scan a suite for cases whose body looks like un-migrated legacy
+    (pipe-delimited mybdd) content, for the migration UI's case picker.
+    Reuses parse_case_to_model's own "legacy format?" detection — the same
+    signal /api/testrail/lint already surfaces per-case — rather than a
+    second, possibly-divergent heuristic."""
+    cases = _tr_call(_tr().get_cases, project_id, suite_id)
+    candidates = []
+    for c in cases:
+        title = c.get("title", "") or ""
+        role = _classify_role(title)
+        if role in ("other", "test"):
+            continue
+        parsed = parse_case_to_model(c)
+        notes = parsed.get("notes", [])
+        is_legacy = any(
+            "legacy format" in n or "Could not parse existing body" in n
+            for n in notes
+        )
+        if is_legacy:
+            candidates.append({
+                "case_id": c["id"], "title": title, "role": role,
+                "section_id": c.get("section_id"),
+            })
+    return {"candidates": candidates}
+
+
+class MigratePreviewRequest(BaseModel):
+    case_id: Optional[int] = None
+    # Paste mode — used when a case's live body has already been clobbered
+    # by a bad migration and the original legacy source only exists outside
+    # TestRail (the caller supplies it directly instead of case_id).
+    content: Optional[str] = None
+    name: Optional[str] = None
+    case_type: Optional[str] = None
+
+
+@app.post("/api/migrate/preview")
+async def migrate_preview(req: MigratePreviewRequest):
+    """Run the BDD migrator against either a live case's current body
+    (case_id) or pasted legacy content, and return the resulting Easy BDD
+    model + preview body — without publishing anything. Hand the returned
+    "model" straight to /api/testrail/publish to actually apply it."""
+    import bdd_migrator
+
+    old_body = None
+    if req.case_id:
+        case = _tr_call(_tr().get_case, req.case_id)
+        title = case.get("title", "") or ""
+        role = _classify_role(title)
+        if role in ("other", "test"):
+            raise HTTPException(status_code=400, detail=f"Case C{req.case_id} isn't a migratable case type (role={role!r})")
+        name = title
+        for prefix, r in _ROLE_BY_PREFIX.items():
+            if title.startswith(prefix):
+                name = title[len(prefix):].strip()
+                break
+        old_body = strip_html_to_text(str(case.get("custom_preconds") or ""))
+        # A case_id + pasted content together means: use this case's known
+        # title/type, but migrate the pasted text instead of the live body —
+        # for cases whose body was already overwritten by a bad migration,
+        # where the original legacy source only exists outside TestRail.
+        legacy_source = req.content if req.content else old_body
+    else:
+        if not req.content or not req.name or not req.case_type:
+            raise HTTPException(
+                status_code=400,
+                detail="content, name, and case_type are required when case_id is not given",
+            )
+        legacy_source = req.content
+        name = req.name
+        role = req.case_type
+
+    if not legacy_source.strip():
+        raise HTTPException(status_code=400, detail="Nothing to migrate — source content is empty")
+
+    try:
+        result = bdd_migrator.migrate(legacy_source)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Migration failed: {exc}")
+
+    migrator_warnings = list(result.get("warnings", []))
+    if not result.get("tests"):
+        raise HTTPException(status_code=422, detail="Migrator produced no steps — check the source content.")
+
+    parsed_yaml = yaml.safe_load(result["tests"][0]["yaml"]) or {}
+    raw_steps = parsed_yaml.get("steps") or []
+    nodes = [_dict_to_node(s) for s in raw_steps if isinstance(s, dict)]
+    data_rows = None
+    if parsed_yaml.get("data"):
+        data_rows = yaml.safe_dump(parsed_yaml["data"], default_flow_style=False, width=100000).rstrip()
+
+    model = CaseModel(
+        case_type=role,
+        name=name,
+        variables=[],
+        data_rows=data_rows,
+        steps=[n.model_dump() for n in nodes],
+    )
+
+    v = validate_case(model)
+    try:
+        title = case_title(model)
+    except ValueError:
+        title = name
+
+    return {
+        "case_id": req.case_id,
+        "title": title,
+        "model": model.model_dump(),
+        "old_body": old_body,
+        "new_body": v["body"],
+        "valid": v["valid"],
+        "errors": v["errors"],
+        "warnings": v["warnings"],
+        "migrator_warnings": migrator_warnings,
+    }
+
+
+@app.post("/api/testrail/section")
+async def create_section(req: SectionRequest):
+    payload: Dict[str, Any] = {"name": req.name}
+    if req.suite_id:
+        payload["suite_id"] = req.suite_id
+    if req.parent_id:
+        payload["parent_id"] = req.parent_id
+    section = _tr_call(_tr().add_section, req.project_id, **payload)
+    return {"id": section["id"], "name": section["name"]}
+
+
+@app.post("/api/testrail/publish")
+async def publish(req: PublishRequest):
+    known_vars = known_shared = None
+    try:
+        suite_cases = _tr().get_cases(req.project_id, req.suite_id)
+        known_vars, known_shared = _suite_context(suite_cases)
+    except Exception:
+        pass  # cross-reference warnings are best-effort; never block publish on them
+    result = validate_case(req.model, known_vars=known_vars, known_shared=known_shared)
+    if not result["valid"]:
+        raise HTTPException(status_code=422, detail={"errors": result["errors"]})
+
+    title = case_title(req.model)
+    body = result["body"]
+    tr = _tr()
+
+    if req.case_id:
+        case = _tr_call(tr.update_case, req.case_id, title=title, custom_preconds=body)
+        case_id = case.get("id", req.case_id) if isinstance(case, dict) else req.case_id
+        action = "updated"
+    else:
+        if not req.section_id:
+            raise HTTPException(status_code=422, detail="section_id is required to create a case")
+        # custom_automation_status is required in some projects but not all —
+        # retry without it if the project rejects it.
+        try:
+            case = tr.add_case(
+                req.section_id, title=title, custom_preconds=body, custom_automation_status=5
+            )
+        except TestRailError:
+            case = _tr_call(tr.add_case, req.section_id, title=title, custom_preconds=body)
+        if not isinstance(case, dict) or "id" not in case:
+            raise HTTPException(status_code=502, detail=f"add_case returned unexpected response: {case!r}")
+        case_id = case["id"]
+        action = "created"
+
+    return {
+        "case_id": case_id,
+        "title": title,
+        "action": action,
+        "link": _case_link(case_id),
+        "warnings": result["warnings"],
+    }
+
+
+@app.post("/api/testrail/run")
+async def create_run(req: RunRequest):
+    if not req.case_ids:
+        raise HTTPException(status_code=422, detail="Select at least one case for the run")
+    prefix = os.getenv("TESTRAIL_RUN_PREFIX", "EASY_BDD:")
+    name = req.name.strip()
+    if not name.startswith(prefix):
+        name = f"{prefix} {name}"
+    payload: Dict[str, Any] = {
+        "name": name,
+        "include_all": False,
+        "case_ids": req.case_ids,
+    }
+    if req.suite_id:
+        payload["suite_id"] = req.suite_id
+    if req.description:
+        payload["description"] = req.description
+    run = _tr_call(_tr().add_run, req.project_id, **payload)
+    return {"run_id": run["id"], "name": run["name"], "link": _run_link(run["id"])}
+
+
+# --------------------------------------------------------------------------- #
+# Run monitoring — browse runs, drill into tests, push results                  #
+# --------------------------------------------------------------------------- #
+
+# TestRail built-in result statuses. 3 (Untested) is the initial state and
+# cannot be set via the API.
+_BASE_STATUSES = {1: "Passed", 2: "Blocked", 3: "Untested", 4: "Retest", 5: "Failed"}
+_status_cache: Optional[Dict[int, str]] = None
+
+
+def _status_map() -> Dict[int, str]:
+    """id -> label for result statuses; instance custom statuses included."""
+    global _status_cache
+    if _status_cache is None:
+        statuses = dict(_BASE_STATUSES)
+        try:
+            for s in _tr().get_statuses():
+                label = s.get("label") or s.get("name") or ""
+                if s.get("id") and label:
+                    statuses[int(s["id"])] = label
+        except Exception:
+            pass  # offline / older instance — the built-ins still apply
+        _status_cache = statuses
+    return _status_cache
+
+
+def _run_summary(r: Dict[str, Any]) -> Dict[str, Any]:
+    counts = {
+        k: int(r.get(f"{k}_count") or 0)
+        for k in ("passed", "blocked", "untested", "retest", "failed")
+    }
+    return {
+        "id": r["id"],
+        "name": r.get("name", ""),
+        "is_completed": bool(r.get("is_completed")),
+        "created_on": r.get("created_on"),
+        "completed_on": r.get("completed_on"),
+        "counts": counts,
+        "total": sum(counts.values()),
+        "url": _run_link(r["id"]),
+    }
+
+
+@app.get("/api/testrail/runs")
+async def testrail_runs(project_id: int = Query(...), limit: int = Query(50)):
+    runs = _tr_call(_tr().get_runs, project_id)
+    runs.sort(key=lambda r: r.get("created_on") or 0, reverse=True)
+    return [_run_summary(r) for r in runs[: max(1, min(limit, 200))]]
+
+
+@app.get("/api/testrail/run/{run_id}/tests")
+async def testrail_run_tests(run_id: int):
+    run = _tr_call(_tr().get_run, run_id)
+    tests = _tr_call(_tr().get_tests, run_id)
+    smap = _status_map()
+    return {
+        "run": _run_summary(run),
+        "statuses": [{"id": sid, "label": label} for sid, label in sorted(smap.items())],
+        "tests": [
+            {
+                "id": t["id"],
+                "case_id": t.get("case_id"),
+                "title": t.get("title", ""),
+                "status_id": t.get("status_id"),
+                "status": smap.get(t.get("status_id"), f"status {t.get('status_id')}"),
+            }
+            for t in tests
+        ],
+    }
+
+
+class RunResultsRequest(BaseModel):
+    case_ids: List[int]
+    status_id: int = 4  # Retest
+    comment: str = ""
+
+
+@app.post("/api/testrail/run/{run_id}/results")
+async def testrail_run_results(run_id: int, req: RunResultsRequest):
+    """Set a result (default: Retest) on the selected cases in a run."""
+    if not req.case_ids:
+        raise HTTPException(status_code=422, detail="Select at least one test.")
+    if req.status_id == 3:
+        raise HTTPException(status_code=422, detail="Untested is TestRail's initial state and cannot be set via the API.")
+    if req.status_id not in _status_map():
+        raise HTTPException(status_code=422, detail=f"Unknown status_id {req.status_id}.")
+    results = []
+    for cid in req.case_ids:
+        entry: Dict[str, Any] = {"case_id": cid, "status_id": req.status_id}
+        if req.comment.strip():
+            entry["comment"] = req.comment.strip()
+        results.append(entry)
+    _tr_call(_tr().add_results_for_cases, run_id, results)
+    return {
+        "updated": len(results),
+        "status_id": req.status_id,
+        "status": _status_map().get(req.status_id, ""),
+        "run_url": _run_link(run_id),
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.getenv("BUILDER_PORT", "8091"))
+    uvicorn.run(app, host="0.0.0.0", port=port)

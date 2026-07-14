@@ -12,11 +12,11 @@ import json
 import sys
 from pathlib import Path
 
-# Add parent directory to path to import easy_bdd modules
+# Add parent directory to path to import easybdd modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
-    from easy_bdd.core.html_reporter import HTMLReporter
+    from easybdd.core.html_reporter import HTMLReporter
 except ImportError as e:
     print(f"❌ Error importing HTMLReporter: {e}")
     print(f"💡 Try using the virtual environment:")

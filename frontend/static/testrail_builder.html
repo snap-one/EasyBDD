@@ -1,0 +1,2382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Easy BDD · TestRail Test Builder</title>
+<style>
+:root {
+  --bg: #0f1419;
+  --bg-panel: #161c24;
+  --bg-card: #1c242e;
+  --bg-input: #12181f;
+  --bg-hover: #232d3a;
+  --border: #2a3542;
+  --border-focus: #3d7eff;
+  --text: #dbe4ee;
+  --text-dim: #8a99ab;
+  --text-faint: #5c6a7a;
+  --accent: #3d7eff;
+  --accent-hover: #5a92ff;
+  --green: #2ecc71;
+  --red: #e74c5c;
+  --amber: #f0a832;
+  --purple: #a06bff;
+  --mono: "SF Mono", "Cascadia Code", Consolas, Menlo, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg); color: var(--text); overflow: hidden;
+}
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+input, select, textarea {
+  font: inherit; color: var(--text); background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; width: 100%;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--border-focus); }
+input[type=checkbox] { width: auto; }
+textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #2c3947; border-radius: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- layout ---------- */
+#app { display: flex; flex-direction: column; height: 100vh; }
+#topbar {
+  display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 52px;
+  background: var(--bg-panel); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#topbar .logo { font-weight: 700; font-size: 15px; white-space: nowrap; }
+#topbar .logo span { color: var(--accent); }
+#conn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+#conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
+#conn.ok .dot { background: var(--green); }
+#conn.err .dot { background: var(--red); }
+#main { display: flex; flex: 1; min-height: 0; }
+
+/* ---------- sidebar ---------- */
+#sidebar {
+  width: 300px; flex-shrink: 0; background: var(--bg-panel);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0;
+}
+#sidebar .ctx { padding: 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+#sidebar label.small, .field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); }
+#case-search { margin: 10px 12px 4px; width: calc(100% - 24px); }
+#case-list { flex: 1; overflow-y: auto; padding: 6px 8px 20px; }
+.case-group-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); padding: 10px 6px 4px; }
+.case-item {
+  display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+  padding: 5px 8px; border-radius: 6px; color: var(--text-dim); font-size: 13px;
+}
+.case-item:hover { background: var(--bg-hover); color: var(--text); }
+.case-item.active { background: rgba(61,126,255,.15); color: var(--text); }
+.case-item .cid { margin-left: auto; font-size: 11px; color: var(--text-faint); font-family: var(--mono); }
+.role-badge {
+  font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+  text-transform: uppercase; letter-spacing: .03em;
+}
+.role-feature  { background: rgba(61,126,255,.18); color: #7aa5ff; }
+.role-var      { background: rgba(240,168,50,.18); color: #f0b95c; }
+.role-shared   { background: rgba(160,107,255,.18); color: #b98cff; }
+.role-setup    { background: rgba(46,204,113,.18); color: #5cdd97; }
+.role-teardown { background: rgba(231,76,92,.18);  color: #f08090; }
+.role-test, .role-other { background: rgba(138,153,171,.15); color: var(--text-dim); }
+
+/* ---------- editor ---------- */
+#editor { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#editor-head { padding: 14px 20px 10px; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+#type-row { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+.type-pill {
+  padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border);
+  font-size: 12.5px; color: var(--text-dim);
+}
+.type-pill:hover { border-color: var(--text-faint); color: var(--text); }
+.type-pill.active { border-color: var(--accent); background: rgba(61,126,255,.15); color: #7aa5ff; font-weight: 600; }
+#name-row { display: flex; gap: 10px; align-items: center; }
+#case-name { font-size: 15px; font-weight: 600; flex: 1; }
+#title-preview { font-family: var(--mono); font-size: 12px; color: var(--text-faint); white-space: nowrap; }
+#editor-body { flex: 1; overflow-y: auto; padding: 16px 20px 80px; }
+.section-box { margin-bottom: 18px; }
+.section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.section-head h3 { font-size: 13px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+.section-head .hint { font-size: 12px; color: var(--text-faint); }
+.kv-row { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+.kv-row input.k { width: 220px; flex-shrink: 0; font-family: var(--mono); font-size: 12.5px; }
+.kv-row input.v { flex: 1; font-family: var(--mono); font-size: 12.5px; }
+.icon-btn { color: var(--text-faint); padding: 4px 7px; border-radius: 5px; font-size: 13px; }
+.icon-btn:hover { color: var(--text); background: var(--bg-hover); }
+.icon-btn.danger:hover { color: var(--red); }
+.add-link { color: var(--accent); font-size: 13px; padding: 4px 2px; }
+.add-link:hover { color: var(--accent-hover); }
+
+/* step cards */
+.step-card {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 9px;
+  margin-bottom: 10px;
+}
+.step-card.control { border-left: 3px solid var(--purple); }
+.step-card.shared-card { border-left: 3px solid #b98cff; }
+.step-card.dragging { opacity: 0.5; box-shadow: 0 6px 18px rgba(0,0,0,.3); }
+.step-head { display: flex; align-items: center; gap: 9px; padding: 9px 12px; cursor: grab; user-select: none; }
+.drag-handle { color: var(--text-faint); flex-shrink: 0; }
+.step-head:hover .drag-handle { color: var(--text); }
+.step-card.dragging .step-head { cursor: grabbing; }
+.steps-toolbar { display: flex; gap: 6px; margin-bottom: 8px; }
+.step-head .num {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: var(--bg-input); border-radius: 4px; padding: 1px 6px; flex-shrink: 0;
+}
+.step-head .icon { font-size: 15px; }
+.step-head .titlebit { font-weight: 600; font-size: 13.5px; }
+.step-head .actid { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); }
+.step-head .summary { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.step-head .controls { margin-left: auto; display: flex; gap: 2px; flex-shrink: 0; }
+.step-body { padding: 4px 14px 12px; border-top: 1px solid var(--border); }
+.param-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; padding-top: 10px; }
+.param-field.wide { grid-column: 1 / -1; }
+.param-field label { display: flex; gap: 5px; align-items: baseline; font-size: 12px; color: var(--text-dim); margin-bottom: 3px; }
+.param-field label .req { color: var(--red); }
+.param-field .help { font-size: 11px; color: var(--text-faint); margin-top: 3px; }
+.param-field input, .param-field select { font-family: var(--mono); font-size: 12.5px; }
+.nested-zone { margin-top: 10px; border: 1px dashed var(--border); border-radius: 8px; padding: 10px; }
+.nested-zone > .zone-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--purple); margin-bottom: 8px; }
+.nested-zone .step-card { background: var(--bg-panel); }
+#add-step-row { display: flex; gap: 10px; }
+.big-add {
+  flex: 1; border: 1px dashed var(--border); border-radius: 9px; padding: 12px;
+  color: var(--text-dim); font-size: 13.5px; text-align: center;
+}
+.big-add:hover { border-color: var(--accent); color: var(--accent); background: rgba(61,126,255,.05); }
+.empty-note { color: var(--text-faint); font-size: 13px; padding: 8px 2px; }
+
+/* ---------- right panel ---------- */
+#right {
+  width: 420px; flex-shrink: 0; background: var(--bg-panel); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; min-height: 0;
+}
+#right-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#right-tabs button { flex: 1; padding: 10px; font-size: 13px; color: var(--text-dim); border-bottom: 2px solid transparent; }
+#right-tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+#right-tabs button .badge {
+  display: inline-block; min-width: 17px; padding: 0 5px; margin-left: 5px; border-radius: 9px;
+  font-size: 11px; font-weight: 700; background: var(--red); color: #fff;
+}
+#right-tabs button .badge.warn { background: var(--amber); color: #201500; }
+#preview-pane, #issues-pane, #chat-pane { flex: 1; overflow-y: auto; padding: 12px; display: none; flex-direction: column; min-height: 0; }
+#preview-pane.active, #issues-pane.active, #chat-pane.active { display: flex; }
+#chat-pane { padding: 0; }
+#chat-status { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-dim); padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#chat-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+#chat-status.ok .dot { background: var(--green); }
+#chat-status.err .dot { background: var(--red); }
+#chat-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+#chat-messages:empty::before { content: "Ask about builder actions, TestRail cases, or the Preconditions YAML."; color: var(--text-faint); font-size: 12.5px; }
+.chat-msg { max-width: 88%; padding: 8px 11px; border-radius: 10px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
+.chat-msg.assistant { align-self: flex-start; background: var(--bg-card); border: 1px solid var(--border); color: var(--text); }
+.chat-msg.assistant.thinking { color: var(--text-dim); font-style: italic; }
+.chat-msg.assistant.error { border-color: rgba(231,76,92,.4); background: rgba(231,76,92,.08); color: #f297a3; }
+.chat-error-actions { margin-top: 8px; }
+.chat-error-actions .btn { padding: 4px 12px; font-size: 12.5px; }
+#chat-input-row { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
+#chat-input { flex: 1; resize: none; height: 38px; font-size: 13px; }
+#chat-send:disabled { opacity: 0.5; }
+#preview-title { font-family: var(--mono); font-size: 12.5px; color: var(--amber); margin-bottom: 8px; word-break: break-all; }
+#preview-body {
+  font-family: var(--mono); font-size: 12px; white-space: pre; overflow-x: auto;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+  color: #b8c8da; min-height: 120px;
+}
+.copy-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.copy-row .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); }
+.issue { display: flex; gap: 8px; padding: 8px 10px; border-radius: 7px; margin-bottom: 7px; font-size: 13px; flex-shrink: 0; word-break: break-word; }
+.issue.error { background: rgba(231,76,92,.1); color: #f297a3; }
+.issue.warning { background: rgba(240,168,50,.1); color: #f0c37c; }
+.issue.okline { background: rgba(46,204,113,.1); color: #7bdfa5; }
+#publish-bar {
+  border-top: 1px solid var(--border); padding: 12px; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 9px; background: var(--bg-panel);
+}
+#publish-bar .row { display: flex; gap: 8px; align-items: center; }
+.btn {
+  padding: 8px 16px; border-radius: 7px; font-weight: 600; font-size: 13.5px;
+  background: var(--bg-hover); color: var(--text);
+}
+.btn:hover { background: #2c3947; }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.primary:disabled { background: #2a3542; color: var(--text-faint); cursor: not-allowed; }
+.btn.ghost { background: transparent; border: 1px solid var(--border); }
+
+/* ---------- modal ---------- */
+.modal-back {
+  position: fixed; inset: 0; background: rgba(5,8,12,.65); display: none;
+  align-items: center; justify-content: center; z-index: 40;
+}
+.modal-back.open { display: flex; }
+.modal {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px;
+  width: 720px; max-width: 92vw; max-height: 84vh; display: flex; flex-direction: column; overflow: hidden;
+}
+.modal-head { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.modal-head h2 { font-size: 15px; }
+.modal-head .icon-btn { margin-left: auto; }
+#palette-search-row { padding: 10px 16px; border-bottom: 1px solid var(--border); }
+#palette-main { display: flex; flex: 1; min-height: 0; }
+#palette-cats { width: 170px; border-right: 1px solid var(--border); overflow-y: auto; padding: 8px; flex-shrink: 0; }
+#palette-cats button { display: block; width: 100%; text-align: left; padding: 6px 10px; border-radius: 6px; color: var(--text-dim); font-size: 13px; }
+#palette-cats button:hover { background: var(--bg-hover); color: var(--text); }
+#palette-cats button.active { background: rgba(61,126,255,.15); color: #7aa5ff; }
+#palette-items { flex: 1; overflow-y: auto; padding: 10px; }
+.pal-item {
+  display: flex; gap: 10px; width: 100%; text-align: left; padding: 9px 11px;
+  border-radius: 8px; align-items: baseline;
+}
+.pal-item:hover { background: var(--bg-hover); }
+.pal-item .icon { font-size: 15px; }
+.pal-item .name { font-weight: 600; font-size: 13.5px; white-space: nowrap; }
+.pal-item .pid { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); }
+.pal-item .desc { font-size: 12px; color: var(--text-dim); }
+.modal .modal-body { padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.modal .modal-foot { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+
+/* run modal case picker */
+.run-case-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 5px; font-size: 13px; }
+.run-case-row:hover { background: var(--bg-hover); }
+.run-case-row .cid { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.sec-block { margin: 2px 0; }
+.sec-head {
+  display: flex; align-items: center; gap: 7px; padding: 5px 6px; border-radius: 6px;
+  font-size: 13px; font-weight: 600; color: var(--text-dim); cursor: pointer;
+}
+.sec-head:hover { background: var(--bg-hover); color: var(--text); }
+.sec-head .count { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--text-faint); }
+.sec-head .tw { width: 14px; text-align: center; color: var(--text-faint); font-size: 10px; flex-shrink: 0; }
+.sec-children { margin-left: 20px; border-left: 1px solid var(--border); padding-left: 8px; }
+#case-list .sec-children { margin-left: 12px; padding-left: 4px; }
+#case-list .sec-head { padding: 4px 5px; font-size: 12.5px; }
+#case-list .case-item { padding-left: 5px; }
+
+/* toasts */
+#toasts { position: fixed; bottom: 18px; right: 18px; z-index: 60; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 8px; padding: 11px 15px; min-width: 260px; max-width: 420px; font-size: 13px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.4); animation: slidein .18s ease-out;
+}
+.toast.ok { border-left-color: var(--green); }
+.toast.err { border-left-color: var(--red); }
+.toast a { color: var(--accent-hover); }
+@keyframes slidein { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--text-faint); border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.mono { font-family: var(--mono); }
+.dim { color: var(--text-dim); }
+select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div class="logo">Easy BDD <span>· TestRail Test Builder</span></div>
+    <div id="conn"><span class="dot"></span><span id="conn-text">connecting…</span></div>
+    <div style="flex:1"></div>
+    <button class="btn ghost" id="btn-runs-view" title="Browse test runs, check results, mark tests for retest">📊 Runs</button>
+    <button class="btn ghost" id="btn-run-modal" title="Assemble published cases into an EASY_BDD: run">🏃 Create Run</button>
+    <button class="btn ghost" id="btn-migrate-modal" title="Convert legacy pipe-delimited mybdd cases to Easy BDD actions">🔀 Migrate</button>
+    <button class="btn ghost" id="btn-new-case">＋ New Case</button>
+  </div>
+
+  <div id="main">
+    <!-- ============ sidebar ============ -->
+    <div id="sidebar">
+      <div class="ctx">
+        <div>
+          <label class="small">Project</label>
+          <select id="sel-project" class="compact"><option value="">loading…</option></select>
+        </div>
+        <div id="suite-wrap">
+          <label class="small">Suite</label>
+          <select id="sel-suite" class="compact"><option value="">—</option></select>
+        </div>
+      </div>
+      <div style="display:flex; gap:6px; margin:10px 12px 4px">
+        <input id="case-search" class="compact" placeholder="Filter cases…" style="margin:0; flex:1">
+        <button class="btn ghost" id="btn-expand-sections" title="Expand all sections" style="padding:5px 8px; font-size:12.5px">▾</button>
+        <button class="btn ghost" id="btn-collapse-sections" title="Collapse all sections" style="padding:5px 8px; font-size:12.5px">▸</button>
+        <button class="btn ghost" id="btn-lint" title="Validate every case in this suite with the runner's parser — catches hand-edits made in TestRail's raw text field" style="padding:5px 10px; font-size:12.5px">🩺</button>
+      </div>
+      <div id="case-list"><div class="empty-note" style="padding:12px">Select a project to browse cases.</div></div>
+    </div>
+
+    <!-- ============ editor ============ -->
+    <div id="editor">
+      <div id="editor-head">
+        <div id="type-row"></div>
+        <div id="name-row">
+          <input id="case-name" placeholder="Case name — e.g. Firmware upgrade via OvrC">
+          <span id="title-preview"></span>
+        </div>
+      </div>
+      <div id="editor-body"></div>
+    </div>
+
+    <!-- ============ right panel ============ -->
+    <div id="right">
+      <div id="right-tabs">
+        <button id="tab-preview" class="active">TestRail Preview</button>
+        <button id="tab-issues">Issues<span id="issue-badge" style="display:none" class="badge">0</span></button>
+        <button id="tab-chat">Assistant</button>
+      </div>
+      <div id="preview-pane" class="active">
+        <div id="preview-title"></div>
+        <div class="copy-row">
+          <span class="lbl">Preconditions field</span>
+          <button class="icon-btn" id="btn-copy" title="Copy body">📋 copy</button>
+        </div>
+        <div id="preview-body"></div>
+      </div>
+      <div id="issues-pane"></div>
+      <div id="chat-pane">
+        <div id="chat-status"><span class="dot"></span><span id="chat-status-text">Checking assistant…</span></div>
+        <div id="chat-messages"></div>
+        <div id="chat-input-row">
+          <textarea id="chat-input" placeholder="Ask the assistant…"></textarea>
+          <button id="chat-send" class="btn primary">Send</button>
+        </div>
+      </div>
+      <div id="publish-bar">
+        <div class="row">
+          <div style="flex:1">
+            <label class="small">Section</label>
+            <select id="sel-section" class="compact"><option value="">—</option></select>
+          </div>
+          <button class="icon-btn" id="btn-new-section" title="Create new section" style="margin-top:16px">＋</button>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="btn-publish" style="flex:1">Publish to TestRail</button>
+        </div>
+        <div id="publish-status" class="dim" style="font-size:12px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ palette modal ============ -->
+<div class="modal-back" id="palette-back">
+  <div class="modal" style="height:70vh">
+    <div class="modal-head">
+      <h2 id="palette-title">Add step</h2>
+      <button class="icon-btn" data-close="palette-back">✕</button>
+    </div>
+    <div id="palette-search-row"><input id="palette-search" placeholder="Search actions… (e.g. click, ssh, assert)"></div>
+    <div id="palette-main">
+      <div id="palette-cats"></div>
+      <div id="palette-items"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ new case modal ============ -->
+<div class="modal-back" id="newcase-back">
+  <div class="modal" style="width:560px">
+    <div class="modal-head"><h2>New case</h2><button class="icon-btn" data-close="newcase-back">✕</button></div>
+    <div class="modal-body" id="newcase-body"></div>
+  </div>
+</div>
+
+<!-- ============ new section modal ============ -->
+<div class="modal-back" id="section-back">
+  <div class="modal" style="width:460px">
+    <div class="modal-head"><h2>New section</h2><button class="icon-btn" data-close="section-back">✕</button></div>
+    <div class="modal-body">
+      <div><label class="small">Section name</label><input id="new-section-name" placeholder="e.g. Smoke — Firmware"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close="section-back">Cancel</button>
+      <button class="btn primary" id="btn-create-section">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ run modal ============ -->
+<div class="modal-back" id="run-back">
+  <div class="modal" style="width:640px; height:76vh">
+    <div class="modal-head"><h2>Create TestRail run</h2><button class="icon-btn" data-close="run-back">✕</button></div>
+    <div class="modal-body" style="flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:10px">
+      <div>
+        <label class="small">Run name (prefix added automatically so the runner picks it up)</label>
+        <input id="run-name" placeholder="e.g. WB-800 Smoke — FW 2.1.4">
+      </div>
+      <div class="row" style="display:flex; gap:8px">
+        <button class="add-link" id="run-select-all">Select all</button>
+        <button class="add-link" id="run-select-none">Select none</button>
+        <span class="dim" style="margin-left:auto; font-size:12px" id="run-count"></span>
+      </div>
+      <div id="run-cases" style="flex:1; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:6px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close="run-back">Cancel</button>
+      <button class="btn primary" id="btn-create-run">Create run</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ suite health modal ============ -->
+<div class="modal-back" id="lint-back">
+  <div class="modal" style="width:760px; height:80vh">
+    <div class="modal-head"><h2>Suite health check</h2><button class="icon-btn" data-close="lint-back">✕</button></div>
+    <div class="modal-body" id="lint-body" style="flex:1; min-height:0; overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- ============ migrate legacy cases modal ============ -->
+<div class="modal-back" id="migrate-back">
+  <div class="modal" style="width:min(1400px, 96vw); height:94vh">
+    <div class="modal-head"><h2>Migrate legacy cases</h2><button class="icon-btn" data-close="migrate-back">✕</button></div>
+    <div class="modal-body" style="flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:10px">
+      <div class="dim" style="font-size:12.5px">
+        Converts old pipe-delimited mybdd steps to Easy BDD actions. "Auto-detected" cases below
+        failed to parse as Easy BDD at all — pick any others too if you know they need it.
+        If a case was already run through a broken migration, its live body may look like valid
+        (but wrong) Easy BDD and won't be auto-detected — use Paste mode with the original source instead.
+        Reads from the suite selected in the sidebar; always <b>creates new cases</b> in the
+        destination below — it never updates or overwrites the source.
+      </div>
+      <div id="migrate-dest-warning" class="issue error" style="display:none">
+        Pick a destination suite different from the source suite before previewing or publishing.
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; flex-shrink:0">
+        <div style="flex:1">
+          <label class="small">Destination suite (required — must differ from source)</label>
+          <select id="migrate-dest-suite" class="compact"><option value="">— select destination suite —</option></select>
+        </div>
+        <div style="flex:1">
+          <label class="small">Destination section</label>
+          <select id="migrate-dest-section" class="compact"><option value="">— select section —</option></select>
+        </div>
+        <button class="icon-btn" id="migrate-dest-new-section" title="Create new section" style="margin-top:16px">＋</button>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center">
+        <button class="add-link" id="migrate-select-all">Select all</button>
+        <button class="add-link" id="migrate-select-flagged">Select auto-detected</button>
+        <button class="add-link" id="migrate-select-none">Select none</button>
+        <span class="dim" style="margin-left:auto; font-size:12px" id="migrate-count"></span>
+      </div>
+      <div id="migrate-cases" style="flex:0 0 auto; max-height:140px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:6px"></div>
+
+      <div class="copy-row" style="margin-top:2px; margin-bottom:0">
+        <span class="lbl">Paste mode (for cases whose live body is already broken)</span>
+      </div>
+      <div style="display:flex; gap:8px; flex-shrink:0">
+        <input id="migrate-paste-case-id" class="compact" placeholder="Case ID, e.g. 18761852" style="width:200px; margin:0">
+        <textarea id="migrate-paste-content" placeholder="Paste raw pipe-delimited legacy text…" style="flex:1; height:48px; font-family:var(--mono); font-size:12px; margin:0"></textarea>
+      </div>
+
+      <div id="migrate-results" style="flex:1; min-height:0; overflow-y:auto; border-top:1px solid var(--border); padding-top:8px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close="migrate-back">Close</button>
+      <button class="btn ghost" id="btn-migrate-preview">Preview</button>
+      <button class="btn primary" id="btn-migrate-publish-all" disabled>Publish all valid</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ runs view modal ============ -->
+<div class="modal-back" id="runsview-back">
+  <div class="modal" style="width:860px; height:85vh">
+    <div class="modal-head">
+      <h2 id="runsview-title">Test runs</h2>
+      <button class="icon-btn" data-close="runsview-back">✕</button>
+    </div>
+    <div class="modal-body" id="runsview-body" style="flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:6px"></div>
+    <div class="modal-foot" id="runsview-foot" style="display:none; align-items:center; gap:8px; justify-content:flex-start">
+      <span class="dim" style="font-size:12.5px" id="runsview-selcount">0 selected</span>
+      <select id="runsview-status" class="compact" style="width:auto; margin-left:auto"></select>
+      <input id="runsview-comment" class="compact" placeholder="Comment (optional)" style="width:220px">
+      <button class="btn primary" id="btn-runsview-apply" disabled>Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ import recording modal ============ -->
+<div class="modal-back" id="import-back">
+  <div class="modal" style="width:760px; max-height:85vh">
+    <div class="modal-head">
+      <h2>Import recorded steps</h2>
+      <button class="icon-btn" data-close="import-back">✕</button>
+    </div>
+    <div class="modal-body" style="display:flex; flex-direction:column; gap:10px; min-height:0">
+      <div class="dim" style="font-size:12.5px">
+        Paste the output of a UI recorder — Playwright codegen (JS/TS or Python),
+        Chrome DevTools Recorder JSON, Selenium IDE .side, Katalon, Cypress or
+        Puppeteer exports. Steps are converted to framework actions you can edit
+        like any other step.
+      </div>
+      <div style="display:flex; gap:10px; align-items:flex-end">
+        <div>
+          <label class="small">Format</label>
+          <select id="import-format" class="compact">
+            <option value="auto">Auto-detect</option>
+            <option value="playwright-js">Playwright codegen — JS/TS</option>
+            <option value="playwright-python">Playwright codegen — Python</option>
+            <option value="chrome-devtools">Chrome DevTools Recorder (JSON)</option>
+            <option value="selenium">Selenium IDE (.side JSON)</option>
+            <option value="katalon">Katalon (JSON)</option>
+            <option value="playwright">Playwright test generator (JSON)</option>
+            <option value="cypress">Cypress (JSON)</option>
+            <option value="puppeteer">Puppeteer (JSON)</option>
+          </select>
+        </div>
+        <button class="btn ghost" id="btn-import-clip" title="Read the recording straight from your clipboard">📋 Paste from clipboard</button>
+        <label class="small" style="margin-left:auto; display:flex; align-items:center; gap:5px; cursor:pointer">
+          <input type="checkbox" id="import-logs"> include log narration steps
+        </label>
+      </div>
+      <textarea id="import-text" rows="10" spellcheck="false"
+        placeholder="await page.goto('https://example.com');&#10;await page.getByRole('button', { name: 'Sign in' }).click();&#10;…"
+        style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12.5px; resize:vertical"></textarea>
+      <div id="import-result" style="min-height:0; overflow-y:auto; max-height:220px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close="import-back">Cancel</button>
+      <button class="btn primary" id="btn-import-add" disabled>Add steps</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+"use strict";
+/* ============================== state ============================== */
+const S = {
+  catalog: {},          // category -> [action defs]
+  actionsById: {},      // action id -> def
+  projects: [],
+  projectId: null,
+  suiteId: null,
+  suiteMode: 1,
+  sections: [],
+  cases: [],
+  model: null,          // current case model
+  editingCaseId: null,  // TestRail case id when editing existing
+  dirty: false,
+  valid: false,
+  lastIssues: { errors: [], warnings: [] },
+  paletteTarget: null,  // {list: array, allowControl: bool, onAdd: fn}
+  previewTimer: null,
+  collapsedSections: new Set(),  // sidebar section ids the user collapsed
+  stepsExpanded: true,  // default expand/collapse state for newly-rendered step cards
+  chatMessages: [],     // {role, content} history for the AI chat panel (session-only)
+  chatBusy: false,
+};
+
+let dragCtx = null;  // {list, fromIndex, card, container, pointerY, rafId} of the step drag in progress, or null
+let suppressStepClick = false;  // swallows the synthetic click mouseup fires after an actual drag
+
+// Pointer-based (not native HTML5 DnD) so we get reliable cross-browser behavior
+// and can drive auto-scroll of #editor-body ourselves while dragging. Grabbing the
+// whole header (rather than a tiny handle glyph) needs a move threshold so a plain
+// click still reaches the collapse/expand toggle instead of always starting a drag.
+function beginStepHeadDrag(e, list, index, card) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const startX = e.clientX, startY = e.clientY;
+  let moved = false;
+
+  const onMove = (ev) => {
+    if (!moved) {
+      if (Math.abs(ev.clientY - startY) < 4 && Math.abs(ev.clientX - startX) < 4) return;
+      moved = true;
+      suppressStepClick = true;
+      dragCtx = { list, fromIndex: index, card, container: card.parentElement, pointerY: ev.clientY, rafId: null };
+      card.classList.add("dragging");
+      document.body.style.cursor = "grabbing";
+      autoScrollStepDrag();
+    }
+    dragCtx.pointerY = ev.clientY;
+    reorderStepDragCard();
+  };
+
+  const onUp = () => {
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+    if (moved) finishStepDrag();
+  };
+
+  document.addEventListener("mousemove", onMove);
+  document.addEventListener("mouseup", onUp);
+}
+
+function reorderStepDragCard() {
+  const { container, card, pointerY } = dragCtx;
+  const siblings = Array.from(container.children).filter((c) => c !== card && c.classList.contains("step-card"));
+  let target = null;
+  for (const sib of siblings) {
+    const r = sib.getBoundingClientRect();
+    if (pointerY < r.top + r.height / 2) { target = sib; break; }
+  }
+  if (target) { if (target.previousElementSibling !== card) container.insertBefore(card, target); }
+  else if (container.lastElementChild !== card) container.appendChild(card);
+}
+
+function autoScrollStepDrag() {
+  if (!dragCtx) return;
+  const editorBody = $("#editor-body");
+  const rect = editorBody.getBoundingClientRect();
+  const margin = 56, maxSpeed = 16;
+  let dy = 0;
+  if (dragCtx.pointerY < rect.top + margin) dy = -maxSpeed * Math.min(1, (rect.top + margin - dragCtx.pointerY) / margin);
+  else if (dragCtx.pointerY > rect.bottom - margin) dy = maxSpeed * Math.min(1, (dragCtx.pointerY - (rect.bottom - margin)) / margin);
+  if (dy) { editorBody.scrollTop += dy; reorderStepDragCard(); }
+  dragCtx.rafId = requestAnimationFrame(autoScrollStepDrag);
+}
+
+function finishStepDrag() {
+  if (!dragCtx) return;
+  document.body.style.cursor = "";
+  cancelAnimationFrame(dragCtx.rafId);
+  const { list, fromIndex, card, container } = dragCtx;
+  card.classList.remove("dragging");
+  const newIndex = Array.from(container.children).indexOf(card);
+  dragCtx = null;
+  if (newIndex !== -1 && newIndex !== fromIndex) {
+    const [moved] = list.splice(fromIndex, 1);
+    list.splice(newIndex, 0, moved);
+    markDirty(); renderEditor();
+  }
+}
+
+const ROLE_ORDER = ["var", "setup", "shared", "feature", "teardown", "test", "other"];
+const ROLE_LABEL = { var: "Var — run variables", setup: "Setup", shared: "Shared — reusable steps",
+                     feature: "Feature — test cases", teardown: "Teardown", test: "Test — pointers", other: "Other" };
+const TYPE_INFO = [
+  ["feature",  "Feature",  "Primary test case. Steps run and report a result."],
+  ["var",      "Var",      "Key/value variables injected into every case in the run."],
+  ["shared",   "Shared",   "Reusable step library, called from Feature cases by name."],
+  ["setup",    "Setup",    "Runs once before the Feature cases (login, device prep)."],
+  ["teardown", "Teardown", "Runs once after all Feature cases (cleanup, logout)."],
+];
+const CONTROL_DEFS = [
+  { id: "_for_each",  icon: "🔁", name: "For each loop", desc: "Repeat steps for every item in a list" },
+  { id: "_while",     icon: "⏳", name: "While loop",    desc: "Repeat steps while a condition holds" },
+  { id: "_condition", icon: "🔀", name: "If / Else",     desc: "Run steps only when a condition is true" },
+  { id: "_try",       icon: "🛟", name: "Try / Except / Finally", desc: "Recover from failing steps" },
+];
+const COMPOSE_DEFS = [
+  { id: "_shared", icon: "🧩", name: "Shared step", desc: "Call a Shared: case from this suite by name" },
+  { id: "_raw",    icon: "📝", name: "Raw YAML step", desc: "Escape hatch — paste one step as YAML" },
+];
+
+/* ============================== helpers ============================== */
+const $ = (sel) => document.querySelector(sel);
+const el = (tag, attrs = {}, ...children) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined) n.setAttribute(k, v);
+  }
+  for (const c of children) {
+    if (c === null || c === undefined) continue;
+    n.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+  }
+  return n;
+};
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!r.ok) {
+    let detail = r.statusText;
+    try { const j = await r.json(); detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); } catch {}
+    throw new Error(detail);
+  }
+  return r.json();
+}
+
+function toast(msg, kind = "", html = false) {
+  const t = el("div", { class: `toast ${kind}` });
+  if (html) t.innerHTML = msg; else t.textContent = msg;
+  $("#toasts").appendChild(t);
+  setTimeout(() => t.remove(), kind === "err" ? 9000 : 6000);
+}
+
+function stripPrefix(title) { return title.replace(/^[A-Za-z]+:\s*/, ""); }
+function escapeHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+function knownVariables() {
+  const names = new Set(["last_status_code", "last_response"]);
+  for (const c of S.cases) for (const k of (c.var_keys || [])) names.add(k);
+  if (!S.model) return names;
+  for (const v of S.model.variables) if (v.key.trim()) names.add(v.key.trim());
+  const walk = (nodes) => {
+    for (const n of nodes || []) {
+      if (n.params && n.params.store_as) names.add(String(n.params.store_as));
+      if (n.loop_var) names.add(n.loop_var);
+      walk(n.steps); walk(n.then_steps); walk(n.else_steps); walk(n.except_steps); walk(n.finally_steps);
+    }
+  };
+  walk(S.model.steps);
+  return names;
+}
+
+function refreshVarDatalist() {
+  let dl = $("#var-datalist");
+  if (!dl) { dl = el("datalist", { id: "var-datalist" }); document.body.appendChild(dl); }
+  dl.innerHTML = "";
+  for (const n of knownVariables()) dl.appendChild(el("option", { value: "${" + n + "}" }));
+}
+
+/* ============================== model ============================== */
+function newModel(type) {
+  return { case_type: type, name: "", variables: [], data_rows: null, steps: [] };
+}
+function newNode(kind) {
+  return { kind, action: null, params: {}, name: null, items: null, loop_var: null,
+           expression: null, loop_limit: null, steps: [], then_steps: [], else_steps: [],
+           except_steps: [], finally_steps: [], yaml_text: null };
+}
+
+function markDirty() {
+  S.dirty = true;
+  schedulePreview();
+  saveState();
+}
+
+/* ============================== session persistence ============================== */
+const STATE_KEY = "testrail_builder_state_v1";
+
+function saveState() {
+  try {
+    sessionStorage.setItem(STATE_KEY, JSON.stringify({
+      projectId: S.projectId,
+      suiteId: S.suiteId,
+      sectionId: $("#sel-section").value || null,
+      editingCaseId: S.editingCaseId,
+      dirty: S.dirty,
+      model: S.model,
+      caseSearch: $("#case-search").value || "",
+      stepsExpanded: S.stepsExpanded,
+    }));
+  } catch (_) {}
+}
+
+function loadSavedState() {
+  try {
+    const raw = sessionStorage.getItem(STATE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
+/* ============================== boot ============================== */
+async function boot() {
+  try {
+    const cat = await api("/api/catalog");
+    S.catalog = cat.categories;
+    for (const items of Object.values(S.catalog)) for (const a of items) S.actionsById[a.id] = a;
+  } catch (e) { toast("Failed to load action catalog: " + e.message, "err"); }
+
+  const saved = loadSavedState();
+  S.model = (saved && saved.model) || newModel("feature");
+  S.editingCaseId = saved ? saved.editingCaseId : null;
+  S.dirty = saved ? !!saved.dirty : false;
+  if (saved && typeof saved.stepsExpanded === "boolean") S.stepsExpanded = saved.stepsExpanded;
+  if (saved && saved.caseSearch) $("#case-search").value = saved.caseSearch;
+  renderTypeRow(); renderEditor(); schedulePreview();
+  if (S.editingCaseId) $("#publish-status").textContent = `Editing C${S.editingCaseId} — publishing will update it.`;
+
+  try {
+    const st = await api("/api/testrail/status");
+    if (!st.configured) {
+      $("#conn").className = "err";
+      $("#conn-text").textContent = "TestRail credentials missing (.env)";
+      return;
+    }
+    const projects = await api("/api/testrail/projects");
+    S.projects = projects;
+    $("#conn").className = "ok";
+    $("#conn-text").textContent = st.url.replace(/^https?:\/\//, "");
+    const sel = $("#sel-project");
+    sel.innerHTML = "<option value=''>— select —</option>";
+    for (const p of projects) sel.appendChild(el("option", { value: p.id }, `${p.name} (#${p.id})`));
+
+    if (saved && saved.projectId && projects.some(p => p.id === saved.projectId)) {
+      sel.value = String(saved.projectId);
+      await onProjectChange(saved.suiteId);
+      const secSel = $("#sel-section");
+      if (saved.sectionId && [...secSel.options].some(o => o.value === String(saved.sectionId))) {
+        secSel.value = String(saved.sectionId);
+      }
+    }
+  } catch (e) {
+    $("#conn").className = "err";
+    $("#conn-text").textContent = "TestRail unreachable";
+    toast("TestRail: " + e.message, "err");
+  }
+}
+
+/* ============================== TestRail context ============================== */
+// preferredSuiteId is only passed when restoring a saved session; the DOM "change"
+// event invokes this with an Event object instead, which matches no suite and just
+// falls back to suites[0] below.
+async function onProjectChange(preferredSuiteId) {
+  S.projectId = Number($("#sel-project").value) || null;
+  S.suiteId = null;
+  S.sections = []; S.cases = [];
+  renderCaseList(); renderSections();
+  if (!S.projectId) { saveState(); return; }
+  const proj = S.projects.find(p => p.id === S.projectId);
+  S.suiteMode = proj ? proj.suite_mode : 1;
+  const suiteSel = $("#sel-suite");
+  suiteSel.innerHTML = "";
+  try {
+    const suites = await api(`/api/testrail/suites?project_id=${S.projectId}`);
+    for (const s of suites) suiteSel.appendChild(el("option", { value: s.id }, `${s.name} (#${s.id})`));
+    const chosen = suites.find(s => s.id === preferredSuiteId) || suites[0];
+    if (chosen) { S.suiteId = chosen.id; suiteSel.value = String(S.suiteId); }
+    $("#suite-wrap").style.display = suites.length > 1 ? "" : "none";
+    await reloadSuite();
+  } catch (e) { toast(e.message, "err"); }
+  saveState();
+}
+
+async function onSuiteChange() {
+  S.suiteId = Number($("#sel-suite").value) || null;
+  await reloadSuite();
+  saveState();
+}
+
+async function reloadSuite() {
+  if (!S.projectId) return;
+  S.collapsedSections.clear();
+  const q = `project_id=${S.projectId}` + (S.suiteId ? `&suite_id=${S.suiteId}` : "");
+  try {
+    [S.sections, S.cases] = await Promise.all([
+      api(`/api/testrail/sections?${q}`),
+      api(`/api/testrail/cases?${q}`),
+    ]);
+  } catch (e) { toast(e.message, "err"); S.sections = []; S.cases = []; }
+  renderSections(); renderCaseList();
+}
+
+function renderSections() {
+  const sel = $("#sel-section");
+  sel.innerHTML = "<option value=''>— select section —</option>";
+  for (const s of S.sections) {
+    sel.appendChild(el("option", { value: s.id }, `${"  ".repeat(s.depth || 0)}${s.name}`));
+  }
+}
+
+function caseListItem(c) {
+  return el("button", {
+    class: "case-item" + (S.editingCaseId === c.id ? " active" : ""),
+    onclick: () => loadCase(c.id),
+    title: c.title,
+  },
+    el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
+    el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
+    el("span", { class: "cid" }, `C${c.id}`),
+  );
+}
+
+function renderCaseList() {
+  const box = $("#case-list");
+  box.innerHTML = "";
+  const filter = $("#case-search").value.trim().toLowerCase();
+  if (!S.cases.length) {
+    box.appendChild(el("div", { class: "empty-note", style: "padding:12px" },
+      S.projectId ? "No cases in this suite yet." : "Select a project to browse cases."));
+    return;
+  }
+
+  const childSections = {};
+  for (const s of S.sections) {
+    const p = s.parent_id || 0;
+    (childSections[p] = childSections[p] || []).push(s);
+  }
+  const knownSections = new Set(S.sections.map(s => s.id));
+  const casesBySection = {};
+  const orphans = [];
+  for (const c of S.cases) {
+    if (filter && !c.title.toLowerCase().includes(filter)) continue;
+    if (c.section_id && knownSections.has(c.section_id)) {
+      (casesBySection[c.section_id] = casesBySection[c.section_id] || []).push(c);
+    } else orphans.push(c);
+  }
+
+  // Recursive section renderer; returns null for branches with no (matching) cases.
+  const buildSection = (sec) => {
+    const ownCases = casesBySection[sec.id] || [];
+    const childBlocks = (childSections[sec.id] || []).map(buildSection).filter(Boolean);
+    if (!ownCases.length && !childBlocks.length) return null;
+    const total = ownCases.length + childBlocks.reduce((n, b) => n + Number(b.dataset.count), 0);
+
+    const collapsed = !filter && S.collapsedSections.has(sec.id);
+    const tw = el("span", { class: "tw" }, collapsed ? "▸" : "▾");
+    const children = el("div", { class: "sec-children" }, ...ownCases.map(caseListItem), ...childBlocks);
+    if (collapsed) children.style.display = "none";
+    const head = el("div", { class: "sec-head", onclick: () => {
+        const open = children.style.display !== "none";
+        children.style.display = open ? "none" : "";
+        tw.textContent = open ? "▸" : "▾";
+        if (open) S.collapsedSections.add(sec.id); else S.collapsedSections.delete(sec.id);
+      } },
+      tw, el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, sec.name),
+      el("span", { class: "count" }, String(total)),
+    );
+    return el("div", { class: "sec-block", "data-count": total }, head, children);
+  };
+
+  let any = false;
+  for (const root of childSections[0] || []) {
+    const b = buildSection(root);
+    if (b) { box.appendChild(b); any = true; }
+  }
+  if (orphans.length) {
+    any = true;
+    box.appendChild(el("div", { class: "sec-block" },
+      el("div", { class: "sec-head", style: "cursor:default" },
+        el("span", { class: "tw" }, ""), el("span", {}, "No section"),
+        el("span", { class: "count" }, String(orphans.length))),
+      el("div", { class: "sec-children" }, ...orphans.map(caseListItem)),
+    ));
+  }
+  if (!any) box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "No cases match the filter."));
+}
+
+async function loadCase(caseId) {
+  if (S.dirty && !confirm("Discard unsaved changes in the editor?")) return;
+  try {
+    const res = await api(`/api/testrail/case/${caseId}`);
+    S.model = res.model;
+    S.model.variables = S.model.variables || [];
+    S.model.steps = S.model.steps || [];
+    S.editingCaseId = caseId;
+    S.dirty = false;
+    for (const note of res.notes || []) toast(note, "");
+    const c = S.cases.find(x => x.id === caseId);
+    if (c && c.section_id) $("#sel-section").value = String(c.section_id);
+    renderTypeRow(); renderEditor(); renderCaseList(); schedulePreview();
+    $("#publish-status").textContent = `Editing C${caseId} — publishing will update it.`;
+    saveState();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ============================== editor rendering ============================== */
+function renderTypeRow() {
+  const row = $("#type-row");
+  row.innerHTML = "";
+  for (const [key, label, desc] of TYPE_INFO) {
+    row.appendChild(el("button", {
+      class: "type-pill" + (S.model.case_type === key ? " active" : ""),
+      title: desc,
+      onclick: () => { S.model.case_type = key; markDirty(); renderTypeRow(); renderEditor(); },
+    }, `${label}:`));
+  }
+  if (S.editingCaseId) {
+    row.appendChild(el("span", { class: "dim", style: "font-size:12px; margin-left:6px" }, `editing C${S.editingCaseId}`));
+    row.appendChild(el("button", { class: "add-link", onclick: startFresh }, "start fresh"));
+  }
+  $("#case-name").value = S.model.name || "";
+}
+
+function startFresh() {
+  if (S.dirty && !confirm("Discard unsaved changes?")) return;
+  S.model = newModel(S.model.case_type);
+  S.editingCaseId = null; S.dirty = false;
+  $("#publish-status").textContent = "";
+  renderTypeRow(); renderEditor(); renderCaseList(); schedulePreview();
+  saveState();
+}
+
+function renderEditor() {
+  const body = $("#editor-body");
+  body.innerHTML = "";
+  refreshVarDatalist();
+
+  if (S.model.case_type === "var" && !(S.model.steps || []).length) {
+    body.appendChild(sectionBox(
+      "Variables", "Key/value pairs injected into every case in the run.",
+      kvEditor(S.model.variables, "variable"),
+    ));
+    return;
+  }
+  if (S.model.case_type === "var") {
+    // step-based Var: case — steps run before the tests; store_as results
+    // become run variables
+    const stepsWrap = el("div");
+    renderStepList(S.model.steps, stepsWrap, { allowControl: true });
+    body.appendChild(sectionBox(
+      "Steps (step-based Var: case)",
+      "Runs before the tests — store_as results become run variables.",
+      el("div", {}, stepsToolbar(), stepsWrap,
+        el("button", { class: "big-add", onclick: () => openPalette(S.model.steps, { allowControl: true }) },
+          "＋ Add step"))));
+    return;
+  }
+
+  // variables (scoped to case)
+  body.appendChild(sectionBox(
+    "Case variables", "Optional — scoped to this case. Reference anywhere as ${name}.",
+    kvEditor(S.model.variables, "variable"),
+  ));
+
+  // data rows for feature cases
+  if (S.model.case_type === "feature") {
+    const ta = el("textarea", {
+      rows: 3, placeholder: "- mac: D4:6A:91:29:0F:5A\n  product: WB-800\n- mac: A8:3B:76:11:CC:22\n  product: WB-250",
+      oninput: (e) => { S.model.data_rows = e.target.value || null; markDirty(); },
+    });
+    ta.value = S.model.data_rows || "";
+    body.appendChild(sectionBox(
+      "Data rows", "Optional — repeat all steps once per row (YAML list of mappings).", ta,
+    ));
+  }
+
+  // steps
+  const stepsWrap = el("div");
+  renderStepList(S.model.steps, stepsWrap, { allowControl: true });
+  const addBtn = el("button", { class: "big-add", onclick: () => openPalette(S.model.steps, { allowControl: true }) },
+    "＋ Add step — pick a framework tool");
+  const importBtn = el("button", {
+    class: "big-add", style: "flex:0 0 auto",
+    title: "Paste Playwright codegen, Chrome DevTools Recorder, Selenium IDE, Katalon… output and convert it to steps",
+    onclick: openImportModal,
+  }, "📋 Paste recording");
+  body.appendChild(sectionBox("Steps", "Executed top to bottom.", el("div", {}, stepsToolbar(), stepsWrap, el("div", { id: "add-step-row" }, addBtn, importBtn))));
+}
+
+function stepsToolbar() {
+  return el("div", { class: "steps-toolbar" },
+    el("button", { class: "icon-btn", title: "Expand all steps", onclick: () => { S.stepsExpanded = true; saveState(); renderEditor(); } }, "▾ Expand all"),
+    el("button", { class: "icon-btn", title: "Collapse all steps — compact view", onclick: () => { S.stepsExpanded = false; saveState(); renderEditor(); } }, "▸ Collapse all"),
+  );
+}
+
+function sectionBox(title, hint, content) {
+  return el("div", { class: "section-box" },
+    el("div", { class: "section-head" }, el("h3", {}, title), el("span", { class: "hint" }, hint)),
+    content);
+}
+
+function kvEditor(rows, noun) {
+  const wrap = el("div");
+  const render = () => {
+    wrap.innerHTML = "";
+    rows.forEach((row, i) => {
+      wrap.appendChild(el("div", { class: "kv-row" },
+        el("input", { class: "k compact", placeholder: "name", value: row.key,
+          oninput: (e) => { row.key = e.target.value; markDirty(); refreshVarDatalist(); } }),
+        el("input", { class: "v compact", placeholder: "value", value: row.value === null || row.value === undefined ? "" : (typeof row.value === "object" ? JSON.stringify(row.value) : String(row.value)),
+          list: "var-datalist",
+          oninput: (e) => { row.value = e.target.value; markDirty(); } }),
+        el("button", { class: "icon-btn danger", title: "Remove", onclick: () => { rows.splice(i, 1); markDirty(); render(); } }, "✕"),
+      ));
+    });
+    wrap.appendChild(el("button", { class: "add-link", onclick: () => { rows.push({ key: "", value: "" }); markDirty(); render(); } },
+      `＋ add ${noun}`));
+  };
+  render();
+  return wrap;
+}
+
+/* ---------- step list ---------- */
+function renderStepList(list, container, opts) {
+  container.innerHTML = "";
+  if (!list.length) {
+    container.appendChild(el("div", { class: "empty-note" }, "No steps yet."));
+  }
+  list.forEach((node, i) => container.appendChild(stepCard(node, list, i, opts)));
+}
+
+function stepSummary(node) {
+  if (node.kind === "action") {
+    const p = node.params || {};
+    for (const k of ["url", "selector", "name", "command", "expression", "message", "field", "host", "key", "code"]) {
+      if (p[k]) return `${k}: ${typeof p[k] === "object" ? JSON.stringify(p[k]) : p[k]}`;
+    }
+    return "";
+  }
+  if (node.kind === "shared") return node.name || "";
+  if (node.kind === "for_each") return `${JSON.stringify(node.items) || ""} as ${node.loop_var || "?"}`;
+  if (node.kind === "while" || node.kind === "condition") return node.expression || "";
+  if (node.kind === "raw") return (node.yaml_text || "").split("\n")[0];
+  return "";
+}
+
+function stepCard(node, list, index, opts) {
+  const isControl = ["for_each", "while", "condition", "try"].includes(node.kind);
+  const card = el("div", { class: "step-card" + (isControl ? " control" : "") + (node.kind === "shared" ? " shared-card" : "") });
+  const def = node.kind === "action" ? S.actionsById[node.action] : null;
+  const icon = def ? def.icon
+    : node.kind === "action" ? "⚠️"
+    : node.kind === "shared" ? "🧩"
+    : node.kind === "for_each" ? "🔁" : node.kind === "while" ? "⏳"
+    : node.kind === "condition" ? "🔀" : node.kind === "try" ? "🛟" : "📝";
+  const title = def ? def.label
+    : node.kind === "action" ? (node.action || "Unknown action")
+    : node.kind === "shared" ? "Shared step"
+    : node.kind === "for_each" ? "For each" : node.kind === "while" ? "While"
+    : node.kind === "condition" ? "If / Else" : node.kind === "try" ? "Try / Except" : "Raw YAML";
+
+  let bodyVisible = S.stepsExpanded;
+  const bodyEl = el("div", { class: "step-body", style: bodyVisible ? "" : "display:none" });
+  const summaryEl = el("span", { class: "summary" }, bodyVisible ? "" : stepSummary(node));
+
+  const dragHandle = el("span", { class: "drag-handle", title: "Drag to reorder" }, "⠿");
+
+  const head = el("div", {
+    class: "step-head",
+    onmousedown: (e) => { if (!e.target.closest(".controls")) beginStepHeadDrag(e, list, index, card); },
+    onclick: (e) => {
+      if (suppressStepClick) { suppressStepClick = false; return; }
+      if (e.target.closest(".controls")) return;
+      bodyVisible = !bodyVisible;
+      bodyEl.style.display = bodyVisible ? "" : "none";
+      summaryEl.textContent = bodyVisible ? "" : stepSummary(node);
+    },
+  },
+    dragHandle,
+    el("span", { class: "num" }, String(index + 1)),
+    el("span", { class: "icon" }, icon),
+    el("span", { class: "titlebit" }, title),
+    node.kind === "action" ? el("span", { class: "actid" }, node.action) : null,
+    summaryEl,
+    el("span", { class: "controls" },
+      el("button", { class: "icon-btn", title: "Move up", onclick: () => { if (index > 0) { list.splice(index - 1, 0, list.splice(index, 1)[0]); markDirty(); renderEditor(); } } }, "↑"),
+      el("button", { class: "icon-btn", title: "Move down", onclick: () => { if (index < list.length - 1) { list.splice(index + 1, 0, list.splice(index, 1)[0]); markDirty(); renderEditor(); } } }, "↓"),
+      el("button", { class: "icon-btn", title: "Duplicate", onclick: () => { list.splice(index + 1, 0, JSON.parse(JSON.stringify(node))); markDirty(); renderEditor(); } }, "⧉"),
+      el("button", { class: "icon-btn danger", title: "Delete", onclick: () => { list.splice(index, 1); markDirty(); renderEditor(); } }, "✕"),
+    ),
+  );
+  card.appendChild(head);
+
+  if (node.kind === "action") bodyEl.appendChild(actionForm(node));
+  else if (node.kind === "shared") bodyEl.appendChild(sharedForm(node));
+  else if (node.kind === "raw") bodyEl.appendChild(rawForm(node));
+  else bodyEl.appendChild(controlForm(node));
+  card.appendChild(bodyEl);
+  return card;
+}
+
+/* ---------- forms ---------- */
+function paramField(node, pname, pdef) {
+  const wide = ["textarea", "json", "keyvalue", "list", "object"].includes(pdef.type);
+  const wrap = el("div", { class: "param-field" + (wide ? " wide" : "") });
+  const label = el("label", {}, pdef.label || pname,
+    pdef.required ? el("span", { class: "req" }, "*") : null,
+    el("span", { class: "mono dim", style: "font-size:10.5px" }, pname));
+  wrap.appendChild(label);
+  const cur = node.params[pname];
+  const set = (v) => {
+    if (v === "" || v === null || v === undefined || v === false) delete node.params[pname];
+    else node.params[pname] = v;
+    markDirty(); refreshVarDatalist();
+  };
+
+  if (pdef.type === "select") {
+    const sel = el("select", { class: "compact", onchange: (e) => set(e.target.value) });
+    sel.appendChild(el("option", { value: "" }, pdef.required ? "— choose —" : "— default —"));
+    for (const o of pdef.options || []) sel.appendChild(el("option", { value: o }, String(o)));
+    if (cur !== undefined) sel.value = String(cur);
+    wrap.appendChild(sel);
+  } else if (pdef.type === "boolean") {
+    const cb = el("input", { type: "checkbox", onchange: (e) => set(e.target.checked ? true : "") });
+    cb.checked = cur === true || cur === "true";
+    wrap.appendChild(el("div", { style: "padding:6px 0" }, cb));
+  } else if (pdef.type === "number") {
+    const inp = el("input", { type: "text", class: "compact", placeholder: pdef.placeholder || "", list: "var-datalist",
+      oninput: (e) => set(e.target.value) });
+    if (cur !== undefined) inp.value = String(cur);
+    wrap.appendChild(inp);
+  } else if (["textarea", "json", "keyvalue", "list", "object"].includes(pdef.type)) {
+    const ta = el("textarea", { rows: pdef.type === "textarea" ? 4 : 3,
+      placeholder: pdef.placeholder || (pdef.type === "json" || pdef.type === "keyvalue" || pdef.type === "object"
+        ? '{key: value, other: "${var}"}' : pdef.type === "list" ? "[item1, item2]" : ""),
+      oninput: (e) => set(e.target.value) });
+    if (cur !== undefined) ta.value = typeof cur === "object" ? JSON.stringify(cur) : String(cur);
+    wrap.appendChild(ta);
+  } else {
+    const inp = el("input", { type: "text", class: "compact", placeholder: pdef.placeholder || "", list: "var-datalist",
+      oninput: (e) => set(e.target.value) });
+    if (cur !== undefined) inp.value = typeof cur === "object" ? JSON.stringify(cur) : String(cur);
+    wrap.appendChild(inp);
+  }
+  if (pdef.help) wrap.appendChild(el("div", { class: "help" }, pdef.help));
+  return wrap;
+}
+
+function actionForm(node) {
+  const def = S.actionsById[node.action] || { parameters: {} };
+  const grid = el("div", { class: "param-grid" });
+  const declared = Object.keys(def.parameters || {});
+  for (const [pname, pdef] of Object.entries(def.parameters || {})) {
+    grid.appendChild(paramField(node, pname, pdef));
+  }
+  // extra params not in the schema
+  const extras = Object.keys(node.params || {}).filter(k => !declared.includes(k));
+  const extraWrap = el("div", { class: "param-field wide" });
+  const renderExtras = () => {
+    extraWrap.innerHTML = "";
+    for (const k of Object.keys(node.params).filter(x => !declared.includes(x))) {
+      extraWrap.appendChild(el("div", { class: "kv-row" },
+        el("input", { class: "k compact", value: k, disabled: true }),
+        el("input", { class: "v compact", value: typeof node.params[k] === "object" ? JSON.stringify(node.params[k]) : String(node.params[k]),
+          list: "var-datalist",
+          oninput: (e) => { node.params[k] = e.target.value; markDirty(); } }),
+        el("button", { class: "icon-btn danger", onclick: () => { delete node.params[k]; markDirty(); renderExtras(); } }, "✕"),
+      ));
+    }
+    extraWrap.appendChild(el("button", { class: "add-link", onclick: () => {
+      const k = prompt("Parameter name:");
+      if (k && k.trim()) { node.params[k.trim()] = ""; markDirty(); renderExtras(); }
+    } }, "＋ add parameter"));
+  };
+  renderExtras();
+  grid.appendChild(extraWrap);
+  if (def.description) grid.prepend(el("div", { class: "param-field wide help", style: "margin-top:8px" }, def.description));
+  return grid;
+}
+
+function sharedForm(node) {
+  const wrap = el("div", { class: "param-grid" });
+  const shared = S.cases.filter(c => c.role === "shared").map(c => stripPrefix(c.title));
+  const field = el("div", { class: "param-field wide" });
+  field.appendChild(el("label", {}, "Shared step name", el("span", { class: "req" }, "*")));
+  if (shared.length) {
+    const sel = el("select", { class: "compact", onchange: (e) => { node.name = e.target.value || null; markDirty(); } });
+    sel.appendChild(el("option", { value: "" }, "— choose from suite —"));
+    for (const s of shared) sel.appendChild(el("option", { value: s }, s));
+    if (node.name && !shared.includes(node.name)) sel.appendChild(el("option", { value: node.name }, node.name + " (not in suite)"));
+    if (node.name) sel.value = node.name;
+    field.appendChild(sel);
+    field.appendChild(el("div", { class: "help" }, "Shared: cases found in the selected suite. The runner matches by name."));
+  } else {
+    const inp = el("input", { class: "compact", placeholder: "e.g. Authenticate", value: node.name || "",
+      oninput: (e) => { node.name = e.target.value || null; markDirty(); } });
+    field.appendChild(inp);
+    field.appendChild(el("div", { class: "help" }, "No Shared: cases found in the selected suite — type a name."));
+  }
+  wrap.appendChild(field);
+  return wrap;
+}
+
+function rawForm(node) {
+  const wrap = el("div", { class: "param-grid" });
+  const field = el("div", { class: "param-field wide" });
+  field.appendChild(el("label", {}, "Raw YAML (one step)"));
+  const ta = el("textarea", { rows: 5, placeholder: "- service.verb:\n    param: value",
+    oninput: (e) => { node.yaml_text = e.target.value; markDirty(); } });
+  ta.value = node.yaml_text || "";
+  field.appendChild(ta);
+  wrap.appendChild(field);
+  return wrap;
+}
+
+function controlForm(node) {
+  const wrap = el("div");
+  const grid = el("div", { class: "param-grid" });
+
+  if (node.kind === "for_each") {
+    grid.appendChild(simpleField("Items (YAML list or ${variable})", node.items ?? "", "[1, 10, 30] or ${device_list}",
+      (v) => { node.items = v; }, true));
+    grid.appendChild(simpleField("Loop variable", node.loop_var || "", "item",
+      (v) => { node.loop_var = v || null; }));
+  } else if (node.kind === "while") {
+    grid.appendChild(simpleField("Condition (loops while true)", node.expression || "", "device_state != 'ready'",
+      (v) => { node.expression = v || null; }));
+    grid.appendChild(simpleField("Loop limit", node.loop_limit ?? "", "30",
+      (v) => { node.loop_limit = v ? Number(v) : null; }));
+  } else if (node.kind === "condition") {
+    grid.appendChild(simpleField("Condition", node.expression || "", "current_version != target_version",
+      (v) => { node.expression = v || null; }, true));
+  }
+  wrap.appendChild(grid);
+
+  const zones = node.kind === "condition"
+    ? [["then_steps", "Then — when condition is true"], ["else_steps", "Else — when condition is false (optional)"]]
+    : node.kind === "try"
+      ? [["steps", "Try"], ["except_steps", "Except — on failure (optional)"], ["finally_steps", "Finally — always runs (optional)"]]
+      : [["steps", "Loop body"]];
+
+  for (const [key, label] of zones) {
+    const zone = el("div", { class: "nested-zone" });
+    zone.appendChild(el("div", { class: "zone-label" }, label));
+    const listWrap = el("div");
+    renderStepList(node[key], listWrap, { allowControl: false });
+    zone.appendChild(listWrap);
+    zone.appendChild(el("button", { class: "add-link", onclick: () => openPalette(node[key], { allowControl: false }) }, "＋ add step"));
+    wrap.appendChild(zone);
+  }
+  return wrap;
+}
+
+function simpleField(label, value, placeholder, onset, wide) {
+  const f = el("div", { class: "param-field" + (wide ? " wide" : "") });
+  f.appendChild(el("label", {}, label));
+  const v = typeof value === "object" && value !== null ? JSON.stringify(value) : String(value ?? "");
+  f.appendChild(el("input", { class: "compact", placeholder, value: v, list: "var-datalist",
+    oninput: (e) => { onset(e.target.value); markDirty(); } }));
+  return f;
+}
+
+/* ============================== palette ============================== */
+let paletteCat = null;
+function openPalette(targetList, opts) {
+  S.paletteTarget = { list: targetList, allowControl: opts.allowControl };
+  $("#palette-title").textContent = opts.allowControl ? "Add step" : "Add nested step";
+  $("#palette-search").value = "";
+  paletteCat = null;
+  renderPaletteCats(); renderPaletteItems();
+  $("#palette-back").classList.add("open");
+  setTimeout(() => $("#palette-search").focus(), 50);
+}
+
+function renderPaletteCats() {
+  const box = $("#palette-cats");
+  box.innerHTML = "";
+  const cats = ["All", "★ Composition", ...Object.keys(S.catalog).sort()];
+  for (const c of cats) {
+    box.appendChild(el("button", {
+      class: (paletteCat === c || (!paletteCat && c === "All")) ? "active" : "",
+      onclick: () => { paletteCat = c === "All" ? null : c; renderPaletteCats(); renderPaletteItems(); },
+    }, c));
+  }
+}
+
+function renderPaletteItems() {
+  const box = $("#palette-items");
+  const q = $("#palette-search").value.trim().toLowerCase();
+  box.innerHTML = "";
+  const allowControl = S.paletteTarget?.allowControl;
+
+  const addSpecial = (defs) => {
+    for (const d of defs) {
+      if (q && !(d.name + d.desc + d.id).toLowerCase().includes(q)) continue;
+      box.appendChild(el("button", { class: "pal-item", onclick: () => pickSpecial(d.id) },
+        el("span", { class: "icon" }, d.icon),
+        el("span", {}, el("div", { class: "name" }, d.name), el("div", { class: "desc" }, d.desc)),
+      ));
+    }
+  };
+
+  if (!paletteCat || paletteCat === "★ Composition") {
+    addSpecial(COMPOSE_DEFS);
+    if (allowControl) addSpecial(CONTROL_DEFS);
+    if (paletteCat === "★ Composition") return;
+  }
+
+  for (const [cat, items] of Object.entries(S.catalog).sort()) {
+    if (paletteCat && paletteCat !== cat) continue;
+    for (const a of items) {
+      if (q && !(a.id + a.label + a.description).toLowerCase().includes(q)) continue;
+      box.appendChild(el("button", { class: "pal-item", onclick: () => pickAction(a.id) },
+        el("span", { class: "icon" }, a.icon || "⚙️"),
+        el("span", {},
+          el("div", {}, el("span", { class: "name" }, a.label + " "), el("span", { class: "pid" }, a.id)),
+          el("div", { class: "desc" }, a.description || cat)),
+      ));
+    }
+  }
+  if (!box.children.length) box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "No matches."));
+}
+
+function pickAction(actionId) {
+  const node = newNode("action");
+  node.action = actionId;
+  const def = S.actionsById[actionId];
+  if (def) {
+    for (const [pname, pdef] of Object.entries(def.parameters || {})) {
+      if (pdef.default !== undefined && pdef.default !== null && pdef.default !== "") node.params[pname] = pdef.default;
+    }
+  }
+  S.paletteTarget.list.push(node);
+  $("#palette-back").classList.remove("open");
+  markDirty(); renderEditor();
+}
+
+function pickSpecial(id) {
+  const kind = id.replace(/^_/, "");
+  const node = newNode(kind);
+  if (kind === "while") node.loop_limit = 30;
+  S.paletteTarget.list.push(node);
+  $("#palette-back").classList.remove("open");
+  markDirty(); renderEditor();
+}
+
+/* ============================== preview / validation ============================== */
+function schedulePreview() {
+  clearTimeout(S.previewTimer);
+  S.previewTimer = setTimeout(runPreview, 350);
+  $("#title-preview").textContent = "";
+}
+
+async function runPreview() {
+  if (!S.model) return;
+  S.model.name = $("#case-name").value;
+  const ctx = S.projectId ? {
+    known_vars: [...new Set(S.cases.flatMap(c => c.var_keys || []))],
+    known_shared: S.cases.filter(c => c.role === "shared").map(c => stripPrefix(c.title)),
+  } : {};
+  try {
+    const [prev, val] = await Promise.all([
+      api("/api/preview", { method: "POST", body: S.model }),
+      api("/api/validate", { method: "POST", body: { model: S.model, ...ctx } }),
+    ]);
+    $("#preview-title").textContent = prev.title || "";
+    $("#title-preview").textContent = prev.title || "";
+    $("#preview-body").textContent = prev.error ? `⚠ ${prev.error}` : (prev.body || "(empty)");
+    renderIssues(val);
+  } catch (e) {
+    renderIssues({ valid: false, errors: ["Preview failed: " + e.message], warnings: [] });
+  }
+}
+
+function renderIssues(val) {
+  S.valid = val.valid;
+  S.lastIssues = { errors: val.errors || [], warnings: val.warnings || [] };
+  const pane = $("#issues-pane");
+  pane.innerHTML = "";
+  const badge = $("#issue-badge");
+  const count = val.errors.length + val.warnings.length;
+  if (count) {
+    badge.style.display = "";
+    badge.textContent = String(count);
+    badge.className = "badge" + (val.errors.length ? "" : " warn");
+  } else badge.style.display = "none";
+
+  if (!val.errors.length && !val.warnings.length) {
+    pane.appendChild(el("div", { class: "issue okline" }, "✓ Case is valid — the generated body parses with the runner's own parser."));
+  }
+  for (const e of val.errors) pane.appendChild(el("div", { class: "issue error" }, "✕ " + e));
+  for (const w of val.warnings) pane.appendChild(el("div", { class: "issue warning" }, "⚠ " + w));
+  $("#btn-publish").disabled = !val.valid || !S.projectId;
+  if (!S.projectId) $("#publish-status").textContent = "Select a TestRail project to publish.";
+}
+
+/* ============================== publish ============================== */
+async function publish() {
+  S.model.name = $("#case-name").value;
+  const sectionId = Number($("#sel-section").value) || null;
+  if (!S.editingCaseId && !sectionId) { toast("Pick a section (or create one with ＋) before publishing.", "err"); return; }
+  const btn = $("#btn-publish");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publishing…';
+  try {
+    const res = await api("/api/testrail/publish", { method: "POST", body: {
+      model: S.model, project_id: S.projectId, suite_id: S.suiteId,
+      section_id: sectionId, case_id: S.editingCaseId,
+    } });
+    S.editingCaseId = res.case_id;
+    S.dirty = false;
+    toast(`Case ${res.action}: <b>${escapeHtml(res.title)}</b> — <a href="${res.link}" target="_blank">open C${res.case_id} in TestRail ↗</a>`, "ok", true);
+    $("#publish-status").textContent = `Editing C${res.case_id} — publishing will update it.`;
+    await reloadSuite();
+    saveState();
+  } catch (e) {
+    toast("Publish failed: " + e.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "Publish to TestRail";
+  }
+}
+
+/* ============================== new case / section / run ============================== */
+function openNewCase() {
+  const body = $("#newcase-body");
+  body.innerHTML = "";
+  for (const [key, label, desc] of TYPE_INFO) {
+    body.appendChild(el("button", { class: "pal-item", onclick: () => {
+      if (S.dirty && !confirm("Discard unsaved changes?")) return;
+      S.model = newModel(key); S.editingCaseId = null; S.dirty = false;
+      $("#newcase-back").classList.remove("open");
+      $("#publish-status").textContent = "";
+      renderTypeRow(); renderEditor(); renderCaseList(); schedulePreview();
+      $("#case-name").focus();
+      saveState();
+    } },
+      el("span", { class: `role-badge role-${key}`, style: "align-self:center" }, key),
+      el("span", {}, el("div", { class: "name" }, label + ":"), el("div", { class: "desc" }, desc)),
+    ));
+  }
+  $("#newcase-back").classList.add("open");
+}
+
+async function createSection() {
+  const name = $("#new-section-name").value.trim();
+  if (!name) return;
+  try {
+    const res = await api("/api/testrail/section", { method: "POST", body: {
+      project_id: S.projectId, suite_id: S.suiteId, name,
+    } });
+    toast(`Section created: ${res.name}`, "ok");
+    $("#section-back").classList.remove("open");
+    await reloadSuite();
+    $("#sel-section").value = String(res.id);
+  } catch (e) { toast(e.message, "err"); }
+}
+
+function caseRow(c) {
+  return el("label", { class: "run-case-row" },
+    el("input", { type: "checkbox", "data-cid": c.id, onchange: onRunCaseToggle }),
+    el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
+    el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
+    el("span", { class: "cid" }, `C${c.id}`),
+  );
+}
+
+function openRunModal() {
+  if (!S.projectId) { toast("Select a project first.", "err"); return; }
+  const box = $("#run-cases");
+  box.innerHTML = "";
+
+  const childSections = {};
+  for (const s of S.sections) {
+    const p = s.parent_id || 0;
+    (childSections[p] = childSections[p] || []).push(s);
+  }
+  const casesBySection = {};
+  const knownSections = new Set(S.sections.map(s => s.id));
+  const orphans = [];
+  for (const c of S.cases) {
+    if (c.section_id && knownSections.has(c.section_id)) {
+      (casesBySection[c.section_id] = casesBySection[c.section_id] || []).push(c);
+    } else orphans.push(c);
+  }
+
+  // Build a section subtree; returns null when no cases live anywhere below.
+  const buildSection = (sec) => {
+    const ownCases = casesBySection[sec.id] || [];
+    const childBlocks = (childSections[sec.id] || []).map(buildSection).filter(Boolean);
+    if (!ownCases.length && !childBlocks.length) return null;
+    const total = ownCases.length + childBlocks.reduce((n, b) => n + Number(b.dataset.count), 0);
+
+    const secCb = el("input", { type: "checkbox", "data-sec": sec.id,
+      onclick: (e) => e.stopPropagation(),
+      onchange: (e) => {
+        block.querySelectorAll("input[data-cid]").forEach(cb => { cb.checked = e.target.checked; });
+        onRunCaseToggle();
+      } });
+    const tw = el("span", { class: "tw" }, "▾");
+    const children = el("div", { class: "sec-children" }, ...ownCases.map(caseRow), ...childBlocks);
+    const head = el("div", { class: "sec-head", onclick: () => {
+        const open = children.style.display !== "none";
+        children.style.display = open ? "none" : "";
+        tw.textContent = open ? "▸" : "▾";
+      } },
+      tw, secCb, el("span", {}, sec.name),
+      el("span", { class: "count" }, `${total} case${total === 1 ? "" : "s"}`),
+    );
+    const block = el("div", { class: "sec-block", "data-count": total }, head, children);
+    return block;
+  };
+
+  for (const root of childSections[0] || []) {
+    const b = buildSection(root);
+    if (b) box.appendChild(b);
+  }
+  if (orphans.length) {
+    box.appendChild(el("div", { class: "sec-block" },
+      el("div", { class: "sec-head", style: "cursor:default" },
+        el("span", { class: "tw" }, ""), el("span", {}, "No section"),
+        el("span", { class: "count" }, `${orphans.length}`)),
+      el("div", { class: "sec-children" }, ...orphans.map(caseRow)),
+    ));
+  }
+  if (!box.children.length) box.appendChild(el("div", { class: "empty-note", style: "padding:10px" }, "No cases in this suite."));
+
+  onRunCaseToggle();
+  $("#run-back").classList.add("open");
+}
+
+/* Roll selection state up the section tree: checked / unchecked / indeterminate */
+function onRunCaseToggle() {
+  document.querySelectorAll("#run-cases .sec-block").forEach(block => {
+    const secCb = block.querySelector(":scope > .sec-head input[data-sec]");
+    if (!secCb) return;
+    const caseCbs = block.querySelectorAll("input[data-cid]");
+    const checked = [...caseCbs].filter(cb => cb.checked).length;
+    secCb.checked = caseCbs.length > 0 && checked === caseCbs.length;
+    secCb.indeterminate = checked > 0 && checked < caseCbs.length;
+  });
+  const n = document.querySelectorAll("#run-cases input[data-cid]:checked").length;
+  $("#run-count").textContent = `${n} case${n === 1 ? "" : "s"} selected`;
+}
+
+async function createRun() {
+  const name = $("#run-name").value.trim();
+  if (!name) { toast("Give the run a name.", "err"); return; }
+  const ids = [...document.querySelectorAll("#run-cases input[data-cid]:checked")].map(cb => Number(cb.dataset.cid));
+  if (!ids.length) { toast("Select at least one case.", "err"); return; }
+  const btn = $("#btn-create-run");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Creating…';
+  try {
+    const res = await api("/api/testrail/run", { method: "POST", body: {
+      project_id: S.projectId, suite_id: S.suiteId, name, case_ids: ids,
+    } });
+    $("#run-back").classList.remove("open");
+    toast(`Run created: <b>${escapeHtml(res.name)}</b> — <a href="${res.link}" target="_blank">open R${res.run_id} ↗</a><br>` +
+          `<span class="dim">Execute with: <code>python -m easybdd testrail-run --run-id ${res.run_id}</code></span>`, "ok", true);
+  } catch (e) { toast(e.message, "err"); }
+  finally { btn.disabled = false; btn.textContent = "Create run"; }
+}
+
+/* ============================== suite health check ============================== */
+async function runLint() {
+  if (!S.projectId) { toast("Select a project first.", "err"); return; }
+  const btn = $("#btn-lint");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  const body = $("#lint-body");
+  body.innerHTML = "";
+  $("#lint-back").classList.add("open");
+  body.appendChild(el("div", { class: "empty-note" }, "Checking every case in the suite…"));
+  try {
+    const res = await api("/api/testrail/lint", { method: "POST", body: { project_id: S.projectId, suite_id: S.suiteId } });
+    body.innerHTML = "";
+    const c = res.counts;
+    const summary = el("div", { class: "issue " + (c.errors ? "error" : c.warnings ? "warning" : "okline") },
+      c.errors || c.warnings
+        ? `Checked ${c.checked} cases — ${c.clean} clean, ${c.errors} with errors, ${c.warnings} with warnings.`
+        : `✓ All ${c.checked} cases are clean — every body parses and every action checks out.`);
+    body.appendChild(summary);
+    for (const item of res.issues) {
+      const card = el("div", { class: "step-card", style: "margin-top:10px" });
+      card.appendChild(el("div", { class: "step-head", onclick: () => {
+          $("#lint-back").classList.remove("open");
+          loadCase(item.case_id);
+        }, title: "Open in the editor" },
+        el("span", { class: `role-badge role-${item.role}` }, item.role === "other" ? "?" : item.role),
+        el("span", { class: "titlebit", style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(item.title) || item.title),
+        el("span", { class: "actid", style: "margin-left:auto; flex-shrink:0" }, `C${item.case_id}`),
+      ));
+      const det = el("div", { style: "padding: 4px 12px 10px" });
+      for (const e of item.errors) det.appendChild(el("div", { class: "issue error" }, "✕ " + e));
+      for (const w of item.warnings) det.appendChild(el("div", { class: "issue warning" }, "⚠ " + w));
+      card.appendChild(det);
+      body.appendChild(card);
+    }
+  } catch (e) {
+    body.innerHTML = "";
+    body.appendChild(el("div", { class: "issue error" }, "Health check failed: " + e.message));
+  } finally {
+    btn.disabled = false; btn.textContent = "🩺";
+  }
+}
+
+/* ============================== migrate legacy cases ============================== */
+// case_id -> latest /api/migrate/preview result, so "Publish all valid" and
+// per-case publish buttons don't need to re-fetch.
+S.migrateResults = {};
+
+function migrateCaseRow(c, flagged) {
+  return el("label", { class: "run-case-row" },
+    el("input", { type: "checkbox", "data-mcid": c.id, checked: flagged || null }),
+    el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
+    el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
+    flagged ? el("span", { class: "dim", style: "font-size:11px" }, "auto-detected") : null,
+    el("span", { class: "cid" }, `C${c.id}`),
+  );
+}
+
+function migrateSelectionCount() {
+  const n = document.querySelectorAll("#migrate-cases input[data-mcid]:checked").length;
+  $("#migrate-count").textContent = `${n} case${n === 1 ? "" : "s"} selected`;
+}
+
+// Migration always CREATES cases in a destination suite/section chosen here —
+// it must never reuse the source suite or a source case_id, which is what let
+// a prior run silently overwrite the live legacy suite via update_case().
+async function migratePopulateDestSuites() {
+  const sel = $("#migrate-dest-suite");
+  sel.innerHTML = '<option value="">— select destination suite —</option>';
+  $("#migrate-dest-section").innerHTML = '<option value="">— select section —</option>';
+  if (!S.projectId) { migrateUpdateDestValidity(); return; }
+  try {
+    const suites = await api(`/api/testrail/suites?project_id=${S.projectId}`);
+    for (const s of suites) {
+      if (s.id === S.suiteId) continue; // never offer the source suite as a destination
+      sel.appendChild(el("option", { value: s.id }, `${s.name} (#${s.id})`));
+    }
+  } catch (e) { toast("Could not load destination suites: " + e.message, "err"); }
+  migrateUpdateDestValidity();
+}
+
+async function migratePopulateDestSections() {
+  const sel = $("#migrate-dest-section");
+  sel.innerHTML = '<option value="">— select section —</option>';
+  const destSuiteId = Number($("#migrate-dest-suite").value) || null;
+  if (destSuiteId) {
+    try {
+      const sections = await api(`/api/testrail/sections?project_id=${S.projectId}&suite_id=${destSuiteId}`);
+      for (const s of sections) sel.appendChild(el("option", { value: s.id }, `${"  ".repeat(s.depth || 0)}${s.name}`));
+    } catch (e) { toast("Could not load destination sections: " + e.message, "err"); }
+  }
+  migrateUpdateDestValidity();
+}
+
+async function createMigrateDestSection() {
+  const destSuiteId = Number($("#migrate-dest-suite").value) || null;
+  if (!destSuiteId) { toast("Pick a destination suite first.", "err"); return; }
+  const name = (prompt("New section name:") || "").trim();
+  if (!name) return;
+  try {
+    const res = await api("/api/testrail/section", { method: "POST", body: {
+      project_id: S.projectId, suite_id: destSuiteId, name,
+    } });
+    await migratePopulateDestSections();
+    $("#migrate-dest-section").value = String(res.id);
+    toast(`Section created: ${res.name}`, "ok");
+  } catch (e) { toast("Could not create section: " + e.message, "err"); }
+  migrateUpdateDestValidity();
+}
+
+function migrateDestValid() {
+  const destSuiteId = Number($("#migrate-dest-suite").value) || null;
+  const destSectionId = Number($("#migrate-dest-section").value) || null;
+  return !!destSuiteId && destSuiteId !== S.suiteId && !!destSectionId;
+}
+
+function migrateUpdateDestValidity() {
+  const valid = migrateDestValid();
+  $("#migrate-dest-warning").style.display = valid ? "none" : "";
+  $("#btn-migrate-preview").disabled = !valid;
+  const anyValid = Object.values(S.migrateResults).some(r => r.valid);
+  $("#btn-migrate-publish-all").disabled = !valid || !anyValid;
+  return valid;
+}
+
+async function openMigrateModal() {
+  if (!S.projectId) { toast("Select a project first.", "err"); return; }
+  const box = $("#migrate-cases");
+  box.innerHTML = "";
+  $("#migrate-results").innerHTML = "";
+  $("#migrate-paste-case-id").value = "";
+  $("#migrate-paste-content").value = "";
+  S.migrateResults = {};
+  $("#btn-migrate-publish-all").disabled = true;
+  box.appendChild(el("div", { class: "empty-note" }, "Scanning suite for legacy-format cases…"));
+  $("#migrate-back").classList.add("open");
+  migratePopulateDestSuites();
+
+  let flaggedIds = new Set();
+  try {
+    const res = await api(`/api/migrate/candidates?project_id=${S.projectId}&suite_id=${S.suiteId || ""}`);
+    flaggedIds = new Set(res.candidates.map(c => c.case_id));
+  } catch (e) {
+    toast("Could not scan for candidates: " + e.message, "err");
+  }
+
+  box.innerHTML = "";
+  const migratable = S.cases.filter(c => c.role !== "other" && c.role !== "test");
+  if (!migratable.length) {
+    box.appendChild(el("div", { class: "empty-note" }, "No migratable cases in this suite."));
+  } else {
+    // Flagged (auto-detected) cases first, so they're immediately visible.
+    const sorted = [...migratable].sort((a, b) => (flaggedIds.has(b.id) ? 1 : 0) - (flaggedIds.has(a.id) ? 1 : 0));
+    for (const c of sorted) {
+      const row = migrateCaseRow(c, flaggedIds.has(c.id));
+      row.querySelector("input").addEventListener("change", migrateSelectionCount);
+      box.appendChild(row);
+    }
+  }
+  migrateSelectionCount();
+}
+
+function renderMigrateResult(result) {
+  const card = el("div", { class: "step-card", style: "margin-bottom:10px" });
+  card.appendChild(el("div", { class: "step-head" },
+    el("span", { class: "titlebit", style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, result.title || "(untitled)"),
+    result.case_id ? el("span", { class: "actid", style: "margin-left:auto; flex-shrink:0" }, `C${result.case_id}`) : null,
+  ));
+  const det = el("div", { style: "padding: 4px 12px 10px; display:flex; flex-direction:column; gap:8px" });
+
+  for (const w of (result.migrator_warnings || [])) det.appendChild(el("div", { class: "issue warning" }, "⚠ migrator: " + w));
+  for (const e of (result.errors || [])) det.appendChild(el("div", { class: "issue error" }, "✕ " + e));
+  for (const w of (result.warnings || [])) det.appendChild(el("div", { class: "issue warning" }, "⚠ " + w));
+  if (!result.errors?.length && !result.warnings?.length && !result.migrator_warnings?.length) {
+    det.appendChild(el("div", { class: "issue okline" }, "✓ Migrated cleanly, no issues."));
+  }
+
+  const bodyPreStyle = "font-family:var(--mono); font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-word; " +
+    "background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:12px; " +
+    "height:52vh; max-height:640px; overflow-y:auto; margin:0";
+  const bodies = el("div", { style: "display:flex; gap:14px" });
+  if (result.old_body !== null && result.old_body !== undefined) {
+    const oldCol = el("div", { style: "flex:1; min-width:0" },
+      el("div", { class: "dim", style: "font-size:11.5px; margin-bottom:4px; letter-spacing:.03em" }, "CURRENT (live) BODY"),
+      el("pre", { style: bodyPreStyle }, result.old_body || "(empty)"));
+    bodies.appendChild(oldCol);
+  }
+  const newCol = el("div", { style: "flex:1; min-width:0" },
+    el("div", { class: "dim", style: "font-size:11.5px; margin-bottom:4px; letter-spacing:.03em" }, "MIGRATED (proposed) BODY"),
+    el("pre", { style: bodyPreStyle }, result.new_body || "(empty)"));
+  bodies.appendChild(newCol);
+  det.appendChild(bodies);
+
+  const actions = el("div", { style: "display:flex; gap:8px; align-items:center" });
+  const publishBtn = el("button", { class: "btn primary", style: "padding:5px 12px; font-size:12.5px" }, "Publish this case");
+  if (!result.valid) publishBtn.disabled = true;
+  publishBtn.addEventListener("click", () => publishMigratedCase(result, publishBtn).catch(() => {}));
+  actions.appendChild(publishBtn);
+  det.appendChild(actions);
+
+  card.appendChild(det);
+  return card;
+}
+
+async function publishMigratedCase(result, btn) {
+  if (!migrateDestValid()) {
+    const msg = "Pick a destination suite and section (different from the source suite) before publishing.";
+    toast(msg, "err");
+    throw new Error(msg);
+  }
+  const destSuiteId = Number($("#migrate-dest-suite").value);
+  const destSectionId = Number($("#migrate-dest-section").value);
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publishing…'; }
+  try {
+    // Never pass case_id here — that tells the backend to update_case() in
+    // place. Migration must always create a fresh case in the destination.
+    const res = await api("/api/testrail/publish", { method: "POST", body: {
+      model: result.model, project_id: S.projectId, suite_id: destSuiteId,
+      section_id: destSectionId,
+    } });
+    const from = result.case_id ? ` (from C${result.case_id})` : "";
+    toast(`Published${from} — <a href="${res.link}" target="_blank">open ↗</a>`, "ok", true);
+    if (btn) { btn.textContent = "✓ Published"; }
+  } catch (e) {
+    toast(`Publish failed for C${result.case_id}: ` + e.message, "err");
+    if (btn) { btn.disabled = false; btn.textContent = "Publish this case"; }
+    throw e;
+  }
+}
+
+async function migratePreviewSelected() {
+  if (!migrateDestValid()) {
+    toast("Pick a destination suite and section (different from the source suite) before previewing.", "err");
+    return;
+  }
+  const results = $("#migrate-results");
+  results.innerHTML = "";
+  S.migrateResults = {};
+  $("#btn-migrate-publish-all").disabled = true;
+
+  const ids = [...document.querySelectorAll("#migrate-cases input[data-mcid]:checked")].map(cb => Number(cb.dataset.mcid));
+  const pasteCaseId = Number($("#migrate-paste-case-id").value.trim() || 0);
+  const pasteContent = $("#migrate-paste-content").value.trim();
+  if (pasteContent && !pasteCaseId) { toast("Enter a Case ID to use paste mode.", "err"); return; }
+  if (!ids.length && !pasteContent) { toast("Select at least one case, or use paste mode.", "err"); return; }
+
+  const btn = $("#btn-migrate-preview");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Previewing…';
+  results.appendChild(el("div", { class: "empty-note" }, "Running migrator…"));
+  try {
+    const requests = ids.map(case_id => api("/api/migrate/preview", { method: "POST", body: { case_id } }).catch(e => ({ error: e.message, case_id })));
+    if (pasteCaseId) {
+      requests.push(api("/api/migrate/preview", { method: "POST", body: { case_id: pasteCaseId, content: pasteContent } }).catch(e => ({ error: e.message, case_id: pasteCaseId })));
+    }
+    const settled = await Promise.all(requests);
+    results.innerHTML = "";
+    let anyValid = false;
+    for (const r of settled) {
+      if (r.error) {
+        results.appendChild(el("div", { class: "issue error" }, `✕ C${r.case_id}: ${r.error}`));
+        continue;
+      }
+      S.migrateResults[r.case_id] = r;
+      if (r.valid) anyValid = true;
+      results.appendChild(renderMigrateResult(r));
+    }
+    $("#btn-migrate-publish-all").disabled = !anyValid || !migrateDestValid();
+  } catch (e) {
+    results.innerHTML = "";
+    results.appendChild(el("div", { class: "issue error" }, "Preview failed: " + e.message));
+  } finally {
+    btn.disabled = false; btn.textContent = "Preview";
+  }
+}
+
+async function migratePublishAllValid() {
+  if (!migrateDestValid()) {
+    toast("Pick a destination suite and section (different from the source suite) before publishing.", "err");
+    return;
+  }
+  const btn = $("#btn-migrate-publish-all");
+  const valid = Object.values(S.migrateResults).filter(r => r.valid);
+  if (!valid.length) return;
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publishing…';
+  let ok = 0, fail = 0;
+  for (const r of valid) {
+    try { await publishMigratedCase(r, null); ok++; }
+    catch { fail++; }
+  }
+  btn.disabled = false; btn.textContent = "Publish all valid";
+  toast(`Published ${ok} case${ok === 1 ? "" : "s"}${fail ? `, ${fail} failed` : ""}.`, fail ? "err" : "ok");
+  await reloadSuite();
+}
+
+/* ============================== wire up ============================== */
+$("#btn-lint").addEventListener("click", runLint);
+$("#btn-migrate-modal").addEventListener("click", openMigrateModal);
+$("#migrate-select-all").addEventListener("click", () => {
+  document.querySelectorAll("#migrate-cases input[data-mcid]").forEach(cb => cb.checked = true);
+  migrateSelectionCount();
+});
+$("#migrate-select-flagged").addEventListener("click", () => {
+  document.querySelectorAll("#migrate-cases .run-case-row").forEach(row => {
+    const cb = row.querySelector("input[data-mcid]");
+    cb.checked = !!row.querySelector(".dim");
+  });
+  migrateSelectionCount();
+});
+$("#migrate-select-none").addEventListener("click", () => {
+  document.querySelectorAll("#migrate-cases input[data-mcid]").forEach(cb => cb.checked = false);
+  migrateSelectionCount();
+});
+$("#btn-migrate-preview").addEventListener("click", migratePreviewSelected);
+$("#btn-migrate-publish-all").addEventListener("click", migratePublishAllValid);
+$("#migrate-dest-suite").addEventListener("change", migratePopulateDestSections);
+$("#migrate-dest-section").addEventListener("change", migrateUpdateDestValidity);
+$("#migrate-dest-new-section").addEventListener("click", createMigrateDestSection);
+$("#btn-expand-sections").addEventListener("click", () => { S.collapsedSections.clear(); renderCaseList(); });
+$("#btn-collapse-sections").addEventListener("click", () => { for (const s of S.sections) S.collapsedSections.add(s.id); renderCaseList(); });
+$("#sel-project").addEventListener("change", onProjectChange);
+$("#sel-suite").addEventListener("change", onSuiteChange);
+$("#case-search").addEventListener("input", () => { renderCaseList(); saveState(); });
+$("#case-name").addEventListener("input", () => { S.model.name = $("#case-name").value; markDirty(); });
+$("#btn-publish").addEventListener("click", publish);
+$("#btn-new-case").addEventListener("click", openNewCase);
+$("#btn-new-section").addEventListener("click", () => {
+  if (!S.projectId) { toast("Select a project first.", "err"); return; }
+  $("#new-section-name").value = "";
+  $("#section-back").classList.add("open");
+});
+$("#btn-create-section").addEventListener("click", createSection);
+$("#btn-run-modal").addEventListener("click", openRunModal);
+$("#btn-create-run").addEventListener("click", createRun);
+$("#run-select-all").addEventListener("click", () => { document.querySelectorAll("#run-cases input[data-cid]").forEach(cb => cb.checked = true); onRunCaseToggle(); });
+$("#run-select-none").addEventListener("click", () => { document.querySelectorAll("#run-cases input[data-cid]").forEach(cb => cb.checked = false); onRunCaseToggle(); });
+$("#palette-search").addEventListener("input", renderPaletteItems);
+$("#tab-preview").addEventListener("click", () => switchTab("preview"));
+$("#tab-issues").addEventListener("click", () => switchTab("issues"));
+$("#btn-copy").addEventListener("click", () => {
+  navigator.clipboard.writeText($("#preview-body").textContent).then(() => toast("Copied Preconditions body.", "ok"));
+});
+
+/* ============================== runs view ============================== */
+const RV = { runs: [], detail: null, filter: "all", selected: new Set() };
+
+const STATUS_COLORS = {
+  "Passed": "var(--green)", "Failed": "var(--red)", "Retest": "var(--amber)",
+  "Blocked": "var(--purple)", "Untested": "var(--text-faint)",
+};
+function statusColor(label) { return STATUS_COLORS[label] || "var(--accent)"; }
+function runDate(ts) { return ts ? new Date(ts * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""; }
+
+function runProgressBar(counts, total) {
+  const bar = el("div", { style: "display:flex; height:6px; border-radius:3px; overflow:hidden; background:var(--bg-input); min-width:160px; flex:1" });
+  if (!total) return bar;
+  for (const [key, label] of [["passed", "Passed"], ["failed", "Failed"], ["retest", "Retest"], ["blocked", "Blocked"], ["untested", "Untested"]]) {
+    const n = counts[key] || 0;
+    if (n) bar.appendChild(el("div", { style: `width:${(n / total) * 100}%; background:${statusColor(label)}`, title: `${label}: ${n}` }));
+  }
+  return bar;
+}
+
+async function openRunsView() {
+  if (!S.projectId) { toast("Select a project first.", "err"); return; }
+  RV.detail = null; RV.selected.clear();
+  $("#runsview-back").classList.add("open");
+  $("#runsview-title").textContent = "Test runs";
+  $("#runsview-foot").style.display = "none";
+  const body = $("#runsview-body");
+  body.innerHTML = "<div class='empty-note' style='padding:12px'>Loading runs…</div>";
+  try {
+    RV.runs = await api(`/api/testrail/runs?project_id=${S.projectId}`);
+    renderRunsList();
+  } catch (e) {
+    body.innerHTML = "";
+    body.appendChild(el("div", { style: "color:var(--red); padding:12px" }, e.message));
+  }
+}
+
+function renderRunsList() {
+  RV.detail = null; RV.selected.clear();
+  $("#runsview-title").textContent = "Test runs";
+  $("#runsview-foot").style.display = "none";
+  const body = $("#runsview-body");
+  body.innerHTML = "";
+  if (!RV.runs.length) {
+    body.innerHTML = "<div class='empty-note' style='padding:12px'>No runs in this project yet — use 🏃 Create Run.</div>";
+    return;
+  }
+  for (const r of RV.runs) {
+    const row = el("div", {
+      style: "display:flex; align-items:center; gap:12px; padding:9px 12px; border:1px solid var(--border); border-radius:8px; cursor:pointer; background:var(--bg-card)",
+      onclick: () => openRunDetail(r.id),
+      onmouseenter: (e) => e.currentTarget.style.background = "var(--bg-hover)",
+      onmouseleave: (e) => e.currentTarget.style.background = "var(--bg-card)",
+    },
+      el("div", { style: "flex:1; min-width:0" },
+        el("div", { style: "font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" },
+          r.name, r.is_completed ? el("span", { class: "dim", style: "font-weight:400; font-size:11.5px; margin-left:8px; border:1px solid var(--border); border-radius:4px; padding:1px 6px" }, "completed") : null),
+        el("div", { class: "dim", style: "font-size:11.5px; margin-top:2px" },
+          `${runDate(r.created_on)} — ${r.total} tests · ${r.counts.passed} passed · ${r.counts.failed} failed · ${r.counts.retest} retest · ${r.counts.untested} untested`)),
+      runProgressBar(r.counts, r.total),
+      el("a", { href: r.url, target: "_blank", class: "icon-btn", title: "Open in TestRail", onclick: (e) => e.stopPropagation() }, "↗"),
+    );
+    body.appendChild(row);
+  }
+}
+
+async function openRunDetail(runId) {
+  const body = $("#runsview-body");
+  body.innerHTML = "<div class='empty-note' style='padding:12px'>Loading tests…</div>";
+  try {
+    RV.detail = await api(`/api/testrail/run/${runId}/tests`);
+    RV.filter = "all"; RV.selected.clear();
+    renderRunDetail();
+  } catch (e) {
+    body.innerHTML = "";
+    body.appendChild(el("div", { style: "color:var(--red); padding:12px" }, e.message));
+  }
+}
+
+function renderRunDetail() {
+  const d = RV.detail;
+  const body = $("#runsview-body");
+  body.innerHTML = "";
+  $("#runsview-title").textContent = d.run.name;
+
+  // header: back + TestRail link
+  body.appendChild(el("div", { style: "display:flex; align-items:center; gap:10px" },
+    el("button", { class: "add-link", onclick: renderRunsList }, "← All runs"),
+    el("span", { class: "dim", style: "font-size:12px" }, runDate(d.run.created_on)),
+    d.run.is_completed ? el("span", { class: "dim", style: "font-size:11.5px; border:1px solid var(--border); border-radius:4px; padding:1px 6px" }, "completed — read only") : null,
+    el("a", { href: d.run.url, target: "_blank", class: "add-link", style: "margin-left:auto" }, "Open in TestRail ↗"),
+  ));
+
+  // status filter chips
+  const byStatus = {};
+  for (const t of d.tests) byStatus[t.status] = (byStatus[t.status] || 0) + 1;
+  const chips = el("div", { style: "display:flex; gap:6px; flex-wrap:wrap" });
+  const mkChip = (key, label, count) => el("button", {
+    class: "btn ghost",
+    style: `padding:3px 10px; font-size:12px; ${RV.filter === key ? "border-color:var(--accent); color:var(--text)" : ""}`,
+    onclick: () => { RV.filter = key; renderRunDetail(); },
+  }, `${label} (${count})`);
+  chips.appendChild(mkChip("all", "All", d.tests.length));
+  for (const [status, count] of Object.entries(byStatus).sort((a, b) => b[1] - a[1])) {
+    chips.appendChild(mkChip(status, status, count));
+  }
+  body.appendChild(chips);
+
+  // selection helpers
+  const shown = d.tests.filter(t => RV.filter === "all" || t.status === RV.filter);
+  if (!d.run.is_completed && shown.length) {
+    body.appendChild(el("div", { style: "display:flex; gap:12px; font-size:12px" },
+      el("button", { class: "add-link", onclick: () => { shown.forEach(t => RV.selected.add(t.case_id)); renderRunDetail(); } }, "Select shown"),
+      el("button", { class: "add-link", onclick: () => { RV.selected.clear(); renderRunDetail(); } }, "Clear selection"),
+    ));
+  }
+
+  // test rows
+  const list = el("div", { style: "display:flex; flex-direction:column; gap:2px" });
+  for (const t of shown) {
+    const row = el("label", {
+      style: "display:flex; align-items:center; gap:9px; padding:5px 8px; border-radius:6px; cursor:pointer; font-size:13px; background:" +
+        (RV.selected.has(t.case_id) ? "var(--bg-hover)" : "transparent"),
+    });
+    if (!d.run.is_completed) {
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = RV.selected.has(t.case_id);
+      cb.addEventListener("change", () => {
+        cb.checked ? RV.selected.add(t.case_id) : RV.selected.delete(t.case_id);
+        updateRunsFoot();
+        row.style.background = cb.checked ? "var(--bg-hover)" : "transparent";
+      });
+      row.appendChild(cb);
+    }
+    row.appendChild(el("span", {
+      style: `flex:0 0 74px; text-align:center; font-size:11px; font-weight:600; border-radius:4px; padding:2px 0; color:#0f1419; background:${statusColor(t.status)}`,
+    }, t.status));
+    row.appendChild(el("span", { style: "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, t.title));
+    row.appendChild(el("span", { class: "dim", style: "font-size:11.5px" }, `C${t.case_id}`));
+    list.appendChild(row);
+  }
+  if (!shown.length) list.appendChild(el("div", { class: "empty-note", style: "padding:10px" }, "No tests match this filter."));
+  body.appendChild(list);
+
+  // footer controls
+  const foot = $("#runsview-foot");
+  if (d.run.is_completed) {
+    foot.style.display = "none";
+  } else {
+    foot.style.display = "flex";
+    const sel = $("#runsview-status");
+    sel.innerHTML = "";
+    for (const s of d.statuses) {
+      if (s.label === "Untested") continue;  // initial state — not settable
+      sel.appendChild(el("option", { value: s.id }, s.label));
+    }
+    sel.value = "4";  // Retest by default
+    updateRunsFoot();
+  }
+}
+
+function updateRunsFoot() {
+  const n = RV.selected.size;
+  $("#runsview-selcount").textContent = `${n} selected`;
+  $("#btn-runsview-apply").disabled = !n;
+  $("#btn-runsview-apply").textContent = n ? `Apply to ${n} test${n === 1 ? "" : "s"}` : "Apply";
+}
+
+$("#btn-runsview-apply").addEventListener("click", async () => {
+  if (!RV.detail || !RV.selected.size) return;
+  const btn = $("#btn-runsview-apply");
+  btn.disabled = true;
+  try {
+    const r = await api(`/api/testrail/run/${RV.detail.run.id}/results`, { method: "POST", body: {
+      case_ids: [...RV.selected],
+      status_id: Number($("#runsview-status").value),
+      comment: $("#runsview-comment").value,
+    }});
+    toast(`Marked ${r.updated} test${r.updated === 1 ? "" : "s"} as ${r.status}.`, "ok");
+    $("#runsview-comment").value = "";
+    await openRunDetail(RV.detail.run.id);  // refresh statuses
+  } catch (e) {
+    toast(e.message, "err");
+    btn.disabled = false;
+  }
+});
+
+$("#btn-runs-view").addEventListener("click", openRunsView);
+
+/* ============================== import recording ============================== */
+let importResult = null;
+let importTimer = null;
+
+function openImportModal() {
+  importResult = null;
+  $("#import-text").value = "";
+  $("#import-result").innerHTML = "";
+  const add = $("#btn-import-add");
+  add.disabled = true;
+  add.textContent = "Add steps";
+  $("#import-back").classList.add("open");
+  $("#import-text").focus();
+}
+
+function stepSummary(node) {
+  if (node.kind === "raw") return { icon: "📄", label: "raw YAML", detail: node.yaml_text || "" };
+  const def = S.actionsById[node.action] || {};
+  const detail = Object.entries(node.params || {})
+    .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
+    .join("  ");
+  return { icon: def.icon || "⚙️", label: node.action, detail };
+}
+
+function renderImportResult(r) {
+  const box = $("#import-result");
+  box.innerHTML = "";
+  box.appendChild(el("div", { class: "dim", style: "font-size:12px; margin-bottom:6px" },
+    `Detected: ${r.format}` + (r.name ? ` — “${r.name}”` : "")));
+  for (const w of r.warnings || []) {
+    box.appendChild(el("div", { style: "color: var(--yellow, #d7a53f); font-size:12px; margin-bottom:4px" }, `⚠ ${w}`));
+  }
+  const list = el("div", { style: "display:flex; flex-direction:column; gap:2px" });
+  r.steps.forEach((n, i) => {
+    const s = stepSummary(n);
+    list.appendChild(el("div", {
+      style: "display:flex; gap:8px; align-items:baseline; font-size:12.5px; padding:3px 6px; border-radius:5px; background: var(--bg-hover, rgba(255,255,255,.04))",
+    },
+      el("span", { class: "dim", style: "flex:0 0 18px; text-align:right" }, String(i + 1)),
+      el("span", {}, s.icon),
+      el("span", { style: "font-weight:600; white-space:nowrap" }, s.label),
+      el("span", { class: "dim", style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, s.detail),
+    ));
+  });
+  box.appendChild(list);
+}
+
+async function previewImport() {
+  const text = $("#import-text").value.trim();
+  const box = $("#import-result");
+  const add = $("#btn-import-add");
+  importResult = null;
+  add.disabled = true;
+  add.textContent = "Add steps";
+  if (!text) { box.innerHTML = ""; return; }
+  try {
+    const r = await api("/api/import/recording", { method: "POST", body: {
+      text, format: $("#import-format").value, include_logs: $("#import-logs").checked,
+    }});
+    importResult = r;
+    renderImportResult(r);
+    add.disabled = false;
+    add.textContent = `Add ${r.steps.length} step${r.steps.length === 1 ? "" : "s"}`;
+  } catch (e) {
+    box.innerHTML = "";
+    box.appendChild(el("div", { style: "color: var(--red, #e5484d); font-size:12.5px" }, e.message));
+  }
+}
+
+function scheduleImportPreview() {
+  clearTimeout(importTimer);
+  importTimer = setTimeout(previewImport, 350);
+}
+
+$("#import-text").addEventListener("input", scheduleImportPreview);
+$("#import-format").addEventListener("change", previewImport);
+$("#import-logs").addEventListener("change", previewImport);
+
+$("#btn-import-clip").addEventListener("click", async () => {
+  try {
+    const t = await navigator.clipboard.readText();
+    if (!t.trim()) { toast("Clipboard is empty.", "err"); return; }
+    $("#import-text").value = t;
+    previewImport();
+  } catch {
+    toast("Couldn't read the clipboard — paste into the text box instead (Ctrl/⌘+V).", "err");
+    $("#import-text").focus();
+  }
+});
+
+$("#btn-import-add").addEventListener("click", () => {
+  if (!importResult) return;
+  S.model.steps = S.model.steps || [];
+  S.model.steps.push(...importResult.steps);
+  // Merge recorder-derived variables (e.g. base_url) without clobbering
+  const existing = new Set((S.model.variables || []).map(v => v.key));
+  for (const v of importResult.variables || []) {
+    if (!existing.has(v.key)) S.model.variables.push(v);
+  }
+  if (!S.model.name && importResult.name) {
+    S.model.name = importResult.name;
+    $("#case-name").value = importResult.name;
+  }
+  markDirty();
+  renderEditor();
+  $("#import-back").classList.remove("open");
+  toast(`Imported ${importResult.steps.length} steps (${importResult.format}).`, "ok");
+});
+document.querySelectorAll("[data-close]").forEach(b =>
+  b.addEventListener("click", () => $("#" + b.dataset.close).classList.remove("open")));
+document.querySelectorAll(".modal-back").forEach(m =>
+  m.addEventListener("mousedown", (e) => { if (e.target === m) m.classList.remove("open"); }));
+window.addEventListener("beforeunload", (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+function switchTab(name) {
+  $("#tab-preview").classList.toggle("active", name === "preview");
+  $("#tab-issues").classList.toggle("active", name === "issues");
+  $("#tab-chat").classList.toggle("active", name === "chat");
+  $("#preview-pane").classList.toggle("active", name === "preview");
+  $("#issues-pane").classList.toggle("active", name === "issues");
+  $("#chat-pane").classList.toggle("active", name === "chat");
+}
+
+/* ============================== AI chat assistant ============================== */
+async function checkChatStatus() {
+  const box = $("#chat-status"), text = $("#chat-status-text");
+  try {
+    const st = await api("/api/chat/status");
+    box.className = st.configured ? "ok" : "err";
+    text.textContent = st.configured ? `Connected — ${st.model}` : "Assistant unreachable (Ollama down?)";
+  } catch (e) {
+    box.className = "err";
+    text.textContent = "Assistant unreachable";
+  }
+}
+
+function renderChatMessage(role, content) {
+  const node = el("div", { class: `chat-msg ${role}` }, content);
+  $("#chat-messages").appendChild(node);
+  const pane = $("#chat-messages");
+  pane.scrollTop = pane.scrollHeight;
+  return node;
+}
+
+// Snapshot of the case currently open in the editor, sent with every chat
+// turn so the assistant already knows what the user is looking at instead
+// of needing a case ID pasted into the message.
+function currentCaseContext() {
+  const hasCase = S.editingCaseId || ($("#case-name").value || "").trim() || (S.model && S.model.steps || []).length;
+  if (!hasCase) return null;
+  return {
+    case_id: S.editingCaseId || null,
+    title: $("#preview-title").textContent || (S.model && S.model.name) || null,
+    body: $("#preview-body").textContent || null,
+    errors: S.lastIssues.errors,
+    warnings: S.lastIssues.warnings,
+  };
+}
+
+function renderChatError(message, onRetry) {
+  const node = el("div", { class: "chat-msg assistant error" }, "⚠ " + message);
+  const actions = el("div", { class: "chat-error-actions" });
+  actions.appendChild(el("button", {
+    class: "btn ghost",
+    onclick: () => { node.remove(); onRetry(); },
+  }, "↻ Retry"));
+  node.appendChild(actions);
+  $("#chat-messages").appendChild(node);
+  const pane = $("#chat-messages");
+  pane.scrollTop = pane.scrollHeight;
+  return node;
+}
+
+// Sends whatever is currently in S.chatMessages (the pending user turn is
+// already appended) and renders the result — split out from sendChatMessage
+// so a failed turn's Retry button can resend without duplicating the user
+// message or re-reading the input box.
+async function submitChatTurn() {
+  const isFirstTurn = !S.chatMessages.some((m) => m.role === "assistant");
+  S.chatBusy = true;
+  $("#chat-send").disabled = true;
+  const thinking = renderChatMessage("assistant thinking", isFirstTurn
+    ? "Thinking… the first reply loads framework context into the model and can take a couple of minutes. Later replies in this conversation will be much faster."
+    : "Thinking…");
+  try {
+    const res = await api("/api/chat", {
+      method: "POST",
+      body: { messages: S.chatMessages, case_context: currentCaseContext() },
+    });
+    S.chatMessages.push({ role: "assistant", content: res.reply });
+    thinking.remove();
+    renderChatMessage("assistant", res.reply);
+  } catch (e) {
+    thinking.remove();
+    renderChatError(e.message, submitChatTurn);
+  } finally {
+    S.chatBusy = false;
+    $("#chat-send").disabled = false;
+  }
+}
+
+async function sendChatMessage() {
+  const input = $("#chat-input");
+  const text = input.value.trim();
+  if (!text || S.chatBusy) return;
+  input.value = "";
+  S.chatMessages.push({ role: "user", content: text });
+  renderChatMessage("user", text);
+  await submitChatTurn();
+}
+
+$("#tab-chat").addEventListener("click", () => switchTab("chat"));
+$("#chat-send").addEventListener("click", sendChatMessage);
+$("#chat-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
+});
+checkChatStatus();
+
+boot();
+</script>
+</body>
+</html>

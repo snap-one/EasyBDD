@@ -40,8 +40,8 @@ _KEYWORD_MAP: Dict[str, Any] = {
     # Browser / SeleniumLibrary / Browser library
     "open browser":           lambda args: {"action": "browser.open", "params": {"url": args[0] if args else ""}},
     "close browser":          lambda args: {"action": "browser.close", "params": {}},
-    "go to":                  lambda args: {"action": "browser.navigate", "params": {"url": args[0] if args else ""}},
-    "navigate to":            lambda args: {"action": "browser.navigate", "params": {"url": args[0] if args else ""}},
+    "go to":                  lambda args: {"action": "browser.open", "params": {"url": args[0] if args else ""}},
+    "navigate to":            lambda args: {"action": "browser.open", "params": {"url": args[0] if args else ""}},
     "click element":          lambda args: {"action": "browser.click", "params": {"selector": args[0] if args else ""}},
     "click button":           lambda args: {"action": "browser.click", "params": {"selector": args[0] if args else ""}},
     "click link":             lambda args: {"action": "browser.click", "params": {"text": args[0] if args else ""}},
@@ -52,10 +52,10 @@ _KEYWORD_MAP: Dict[str, Any] = {
     "press key":              lambda args: {"action": "browser.press_key", "params": {"key": args[0] if args else ""}},
     "capture page screenshot": lambda args: {"action": "browser.screenshot", "params": {"name": args[0] if args else "screenshot"}},
     "take screenshot":        lambda args: {"action": "browser.screenshot", "params": {"name": args[0] if args else "screenshot"}},
-    "wait until element is visible": lambda args: {"action": "browser.wait_for_element", "params": {"selector": args[0] if args else "", "state": "visible"}},
+    "wait until element is visible": lambda args: {"action": "browser.wait_for", "params": {"selector": args[0] if args else "", "state": "visible"}},
     "wait until page contains": lambda args: {"action": "browser.wait_for_text", "params": {"text": args[0] if args else ""}},
     "element should be visible": lambda args: {"action": "test.assert_element_visible", "params": {"selector": args[0] if args else ""}},
-    "page should contain":    lambda args: {"action": "test.assert_text_contains", "params": {"text": args[0] if args else ""}},
+    "page should contain":    lambda args: {"action": "test.assert_text_contains", "params": {"selector": "body", "text": args[0] if args else ""}},
     "get text":               lambda args: {"action": "browser.get_text", "params": {"selector": args[0] if args else "", "store_as": args[1] if len(args) > 1 else "text_result"}},
     # HTTP / RequestsLibrary
     "create session":         lambda args: {"action": "test.log", "params": {"message": f"[session] alias={args[0] if args else ''}"}},

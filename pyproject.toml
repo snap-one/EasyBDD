@@ -7,10 +7,10 @@ name = "easy-bdd-framework"
 version = "1.0.0"
 description = "User-friendly BDD testing framework with multi-protocol support"
 authors = [
-    {name = "Your Team", email = "team@example.com"}
+    {name = "ADI Global / Snap One Engineering", email = "mark.fomin@adiglobal.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -67,13 +67,13 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourorg/easy-bdd-framework"
-"Bug Reports" = "https://github.com/yourorg/easy-bdd-framework/issues"
-"Source" = "https://github.com/yourorg/easy-bdd-framework"
+Homepage = "https://github.com/mfomin-snapone/easy_bdd"
+"Bug Reports" = "https://github.com/mfomin-snapone/easy_bdd/issues"
+"Source" = "https://github.com/mfomin-snapone/easy_bdd"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["easy_bdd*"]
+include = ["easybdd*"]
 
 [tool.black]
 line-length = 88

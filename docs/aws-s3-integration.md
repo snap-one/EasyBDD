@@ -4,14 +4,15 @@
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 1. [Overview](#overview)
 2. [Quick Start](#quick-start)
 3. [AWS Credentials](#aws-credentials)
 4. [Available Actions](#available-actions)
-5. [Examples](#examples)
-6. [Best Practices](#best-practices)
+5. [Auto-Discovery of Folder Prefix](#auto-discovery-of-folder-prefix)
+6. [Examples](#examples)
+7. [Best Practices](#best-practices)
 
 ---
 
@@ -25,6 +26,7 @@ The AWS S3 integration allows you to:
 - **Upload files** to S3 buckets
 - **Use CloudFront URLs** for faster downloads
 - **Filter by patterns** (filename, version, extension)
+- **Auto-discover folder prefixes** without hardcoding S3 paths
 
 All operations support AWS CLI credentials or explicit key/secret parameters.
 
@@ -64,6 +66,17 @@ steps:
     message: "Should extract firmware version"
 ```
 
+### Auto-Discover Prefix (No Hardcoded Path)
+
+```yaml
+steps:
+  - action: aws.list_files
+    bucket_name: jpdsauto-wattbox
+    filename_pattern: wattboxvps
+    discover_prefix: true
+    store_as: firmware_urls
+```
+
 ---
 
 ## AWS Credentials
@@ -82,15 +95,15 @@ steps:
 aws configure
 
 # Your tests will automatically use these credentials
-python -m easy_bdd run tests/cases/firmware_test.yaml
+python -m easybdd run tests/cases/firmware_test.yaml
 ```
 
 ### Explicit Credentials in YAML
 
 ```yaml
 variables:
-  aws_access_key: "${env:AWS_ACCESS_KEY_ID}"
-  aws_secret_key: "${env:AWS_SECRET_ACCESS_KEY}"
+  aws_access_key: "${env.AWS_ACCESS_KEY_ID}"
+  aws_secret_key: "${env.AWS_SECRET_ACCESS_KEY}"
   aws_region: "us-east-1"
 
 steps:
@@ -108,7 +121,7 @@ export AWS_ACCESS_KEY_ID="your-access-key"
 export AWS_SECRET_ACCESS_KEY="your-secret-key"
 export AWS_DEFAULT_REGION="us-east-1"
 
-python -m easy_bdd run tests/cases/firmware_test.yaml
+python -m easybdd run tests/cases/firmware_test.yaml
 ```
 
 ---
@@ -124,7 +137,7 @@ List and optionally download firmware files from S3.
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `bucket_name` | Yes | string | S3 bucket name |
-| `folder_prefix` | No | string | Folder prefix to filter (e.g., "wattbox/") |
+| `folder_prefix` | No | string | Folder prefix to filter (e.g., "wattbox/"). Must be a string, not a list — see warning below. |
 | `filename_pattern` | No | string | Pattern to match in filename |
 | `version_pattern` | No | string | Regex pattern to match version |
 | `file_extension` | No | string | File extension filter (e.g., ".bin") |
@@ -134,6 +147,9 @@ List and optionally download firmware files from S3.
 | `download_dir` | No | string | Download directory (default: "Firmware") |
 | `protocol` | No | string | URL protocol (default: "https") |
 | `store_as` | No | string | Variable name to store URL list |
+| `local_paths_as` | No | string | Variable name to store the list of downloaded files' local paths — needed when a later step (e.g. a web UI file upload) requires a local filesystem path rather than the S3/CloudFront URL |
+| `discover_prefix` | No | boolean | Auto-discover folder prefix when `folder_prefix` is not set (default: false) |
+| `repo_root` | No | string | Root directory for local repo walk during prefix discovery (default: current working dir) |
 | `access_key_id` | No | string | AWS Access Key ID |
 | `secret_access_key` | No | string | AWS Secret Access Key |
 | `region` | No | string | AWS Region |
@@ -161,7 +177,7 @@ Get the latest (or second-to-last) firmware file with automatic version extracti
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `bucket_name` | Yes | string | S3 bucket name |
-| `folder_prefix` | No | string | Folder prefix to filter |
+| `folder_prefix` | No | string | Folder prefix to filter. Must be a string, not a list — see warning below. |
 | `filename_pattern` | No | string | Pattern to match in filename |
 | `version_pattern` | No | string | Regex to extract version |
 | `file_extension` | No | string | File extension (default: ".bin") |
@@ -170,6 +186,8 @@ Get the latest (or second-to-last) firmware file with automatic version extracti
 | `store_filename_as` | No | string | Variable for filename |
 | `store_version_as` | No | string | Variable for version |
 | `store_url_as` | No | string | Variable for URL |
+| `discover_prefix` | No | boolean | Auto-discover folder prefix when `folder_prefix` is not set (default: false) |
+| `repo_root` | No | string | Root directory for local repo walk during prefix discovery (default: current working dir) |
 | `access_key_id` | No | string | AWS Access Key ID |
 | `secret_access_key` | No | string | AWS Secret Access Key |
 | `region` | No | string | AWS Region |
@@ -240,6 +258,53 @@ Delete all objects in an S3 folder (prefix).
   bucket_name: "test-artifacts"
   folder_prefix: "old-builds/"
 ```
+
+---
+
+## Auto-Discovery of Folder Prefix
+
+When you do not know the exact S3 folder path ahead of time — or want tests that remain stable even when bucket layout changes — set `discover_prefix: true` and omit `folder_prefix`. The framework will locate the correct prefix automatically.
+
+### How It Works
+
+Discovery is two-phase and stops as soon as a match is found:
+
+**Phase 1 — Repo walk (fast)**
+
+The framework walks the local directory tree starting at `repo_root` (defaults to the current working directory). It looks for any folder whose name contains `filename_pattern` (case-insensitive). When a match is found, the relative path from `repo_root` is returned immediately as the prefix — no S3 call is made.
+
+**Phase 2 — S3 fallback**
+
+If no local folder matches, the framework scans the S3 bucket recursively using `list_objects_v2` with `Delimiter='/'`, inspecting each common prefix for a file that matches `filename_pattern`. The first matching prefix is used.
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `discover_prefix` | boolean | `false` | Enable auto-discovery. Has no effect when `folder_prefix` is also provided. |
+| `repo_root` | string | cwd | Root directory for the repo walk in Phase 1. |
+
+### Example
+
+```yaml
+- action: aws.list_files
+  bucket_name: jpdsauto-wattbox
+  filename_pattern: wattboxvps
+  discover_prefix: true
+  store_as: firmware_urls
+```
+
+No `folder_prefix` is set. The framework first checks the local repo for a directory containing `wattboxvps`, then falls back to scanning the S3 bucket if nothing is found locally.
+
+### When to Use
+
+- You do not know the bucket folder layout in advance.
+- The folder path varies across environments or bucket configurations.
+- You want to avoid maintaining hardcoded prefixes across multiple test files.
+
+### Interaction with `folder_prefix`
+
+If `folder_prefix` is explicitly provided, `discover_prefix` is ignored regardless of its value. Discovery only activates when `folder_prefix` is absent.
 
 ---
 
@@ -415,6 +480,28 @@ steps:
     message: "Firmware file should be .bin format"
 ```
 
+### Example 7: Auto-Discover Prefix
+
+```yaml
+name: "Download Firmware with Auto-Discovered Prefix"
+description: "Let the framework find the correct S3 folder automatically"
+tags: ["firmware", "wattbox", "s3", "discover-prefix"]
+
+steps:
+  - action: aws.list_files
+    bucket_name: jpdsauto-wattbox
+    filename_pattern: wattboxvps
+    discover_prefix: true
+    store_as: firmware_urls
+  
+  - action: "Print"
+    message: "Found ${len(firmware_urls)} firmware files"
+  
+  - action: "Assert"
+    expression: "len(firmware_urls) > 0"
+    message: "Should find at least one firmware file"
+```
+
 ---
 
 ## Best Practices
@@ -491,31 +578,67 @@ steps:
   cloudfront_filename_only: true
 ```
 
+### 7. Prefer `discover_prefix` Over Hardcoded Lists
+
+When the folder path is uncertain, use `discover_prefix: true` rather than guessing or constructing a list of possible prefixes. The discovery mechanism handles both local and remote lookup cleanly and avoids the list-value bug described in Troubleshooting below.
+
 ---
 
 ## Version Sorting
 
-The AWS service uses **intelligent version-aware sorting**:
+The AWS service uses **intelligent version-aware sorting** with a semver fallback for files that do not contain 10-digit timestamps.
+
+### Sorting rules
+
+1. Files with a 10-digit timestamp in the name are sorted by timestamp descending (newest first).
+2. Files without a timestamp are sorted by semantic version descending — so `4.7.0` comes before `4.6.1`.
+3. Within version-sorted results, non-DM files sort before DM files of the same version.
 
 ```
-Files in S3:
-- firmware_1.2.3.bin
-- firmware_1.2.10.bin
-- firmware_1.2.20.bin
-- firmware_2.0.0.bin
+Files in S3 (no timestamps):
+- upgrade_moip_4.6.1.bin
+- upgrade_moip_4.6.1-DM.bin
+- upgrade_moip_4.7.0.bin
+- upgrade_moip_4.7.0-DM.bin
 
-Sorted correctly:
-- firmware_1.2.3.bin
-- firmware_1.2.10.bin
-- firmware_1.2.20.bin
-- firmware_2.0.0.bin
-
-Not alphabetically:
-- firmware_1.2.10.bin  ❌
-- firmware_1.2.20.bin  ❌
-- firmware_1.2.3.bin   ❌
-- firmware_2.0.0.bin   ✓
+Sorted result (version descending):
+[0] upgrade_moip_4.7.0.bin      ← latest non-DM
+[1] upgrade_moip_4.7.0-DM.bin   ← latest DM
+[2] upgrade_moip_4.6.1.bin
+[3] upgrade_moip_4.6.1-DM.bin
 ```
+
+This means you can reliably index the result list:
+
+```yaml
+- aws.list_files:
+    bucket_name: ${bucket_name}
+    folder_prefix: moip/
+    file_extension: .bin
+    store_as: firmware_files
+
+# firmware_files[0] = latest non-DM firmware (e.g., upgrade_moip_4.7.0.bin)
+# firmware_files[1] = latest -DM firmware    (e.g., upgrade_moip_4.7.0-DM.bin)
+- eval.run:
+    expression: "firmware_files[0]"
+    store_as: upgrade_file
+- eval.run:
+    expression: "firmware_files[1]"
+    store_as: downgrade_file
+```
+
+Alternatively, use `next(...)` with a condition to be explicit:
+
+```yaml
+- eval.run:
+    expression: "next((f for f in firmware_files if '-DM' not in f), None)"
+    store_as: upgrade_file
+- eval.run:
+    expression: "next((f for f in firmware_files if '-DM' in f), None)"
+    store_as: downgrade_file
+```
+
+### Classic version pattern examples
 
 The sorting automatically detects version patterns like:
 - `1.2.3`
@@ -572,6 +695,44 @@ Warning: Could not extract version from: filename.bin
   version_pattern: "\\d+\\.\\d+\\.\\d+\\.\\d+"  # Escape backslashes in YAML
 ```
 
+### WARNING: Do Not Set `folder_prefix` to a List
+
+**Error:**
+
+```
+Invalid type for parameter Prefix, value: ['upgrade', 'dummy'], type: <class 'list'>, valid types: <class 'str'>
+```
+
+**Cause:** The AWS S3 API requires the `Prefix` parameter to be a plain string. If `folder_prefix` is set to a YAML list (e.g., `['upgrade', 'dummy']`) — whether typed directly or resolved from a variable that holds a list — the boto3 client will raise this error immediately.
+
+**Wrong:**
+
+```yaml
+- action: "AWS list firmware files"
+  bucket_name: "jpdsauto-wattbox"
+  folder_prefix:
+    - "upgrade"
+    - "dummy"
+```
+
+**Correct — use `discover_prefix` instead:**
+
+```yaml
+- action: aws.list_files
+  bucket_name: jpdsauto-wattbox
+  filename_pattern: wattboxvps
+  discover_prefix: true
+  store_as: firmware_urls
+```
+
+Or, if you know the exact string prefix:
+
+```yaml
+- action: "AWS list firmware files"
+  bucket_name: "jpdsauto-wattbox"
+  folder_prefix: "upgrade/"
+```
+
 ---
 
 ## Next Steps
@@ -579,3 +740,4 @@ Warning: Could not extract version from: filename.bin
 - See [examples/](../tests/cases/) for complete test examples
 - Read [API Authentication](api-authentication.md) for API testing
 - Check [Assertions](assertions.md) for validation patterns
+- Want the same operations against a local, free, no-credentials bucket in addition to real S3? See [Floci Integration](floci-integration.md)

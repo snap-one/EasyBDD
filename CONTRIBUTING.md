@@ -48,8 +48,8 @@ make quick-test
 
 1. **Write Your Code**
    ```bash
-   # Edit files in easy_bdd/ or tests/
-   vim easy_bdd/services/my_service.py
+   # Edit files in easybdd/ or tests/
+   vim easybdd/services/my_service.py
    ```
 
 2. **Format Your Code**
@@ -115,7 +115,7 @@ perf(regex): implement pattern caching
 
 ```
 Automation-Framework/
-├── easy_bdd/              # Framework source code
+├── easybdd/              # Framework source code
 │   ├── core/             # Core modules (runner, parser, etc.)
 │   ├── services/         # Protocol services (browser, API, AWS, etc.)
 │   └── tools/            # Utility tools
@@ -135,7 +135,7 @@ Automation-Framework/
 **For Framework Code (Python):**
 ```python
 # tests/unit/test_safe_eval.py
-from easy_bdd.core.safe_eval import safe_eval
+from easybdd.core.safe_eval import safe_eval
 
 def test_safe_eval_basic():
     """Test basic arithmetic evaluation."""
@@ -417,7 +417,7 @@ Other approaches you thought about
 make benchmark
 
 # Compare before and after
-time python -m easy_bdd run tests/cases/your_test.yaml
+time python -m easybdd run tests/cases/your_test.yaml
 ```
 
 ## 🎯 What to Contribute

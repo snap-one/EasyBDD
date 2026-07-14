@@ -11,7 +11,7 @@ Input can be:
 
 Key syntax being migrated
 ─────────────────────────
-  browser | {"command": "open", "param": "url"} |   → browser.navigate
+  browser | {"command": "open", "param": "url"} |   → browser.open
   sleep | 15 |                                       → browser.wait
   telnet | {"host":"h","command":"cmd"} |            → telnet.send
   ssh | {"host":"h","command":"cmd"} |               → command.ssh
@@ -28,20 +28,29 @@ Key syntax being migrated
   | path | in json_response                         → test.assert (JSON path)
   | path == val | in json_response                  → test.assert (JSON equality)
   response_code | 200 |                             → test.assert_response
+  function | {"name":"browser"} | [{"command":...}] | → one browser.* step per array entry
+                                                        (Selenium IDE-style export). "pause" →
+                                                        browser.wait; id=/link=/name=/css=
+                                                        locators are translated to real
+                                                        selectors (xpath= passes through as-is)
   Shared: name                                      → shared_step: name
   $variable                                         → ${variable}
   gv.log[-1]['response_txt']  (YAML param context)  → ${last_response}
   gv.log[-1]['response']      (YAML param context)  → ${last_response}
   gv.log[-1]['response_dict'] (YAML param context)  → ${last_response_dict}
   gv.log[-1]['response_code'] (YAML param context)  → ${last_response_code}
-  gv.message                  (YAML param context)  → ${message}
-  gv.tests['variables']['k']  (YAML param context)  → ${k}
+  gv.<attr>                   (YAML param context)  → ${attr}
+  gv.tests['variables']['k']  (YAML param context)  → ${k}  (k may contain hyphens)
   gv.log[-1]['response_txt']  (Python code context) → str(last_response)
   gv.log[-1]['response']      (Python code context) → str(last_response)
   gv.log[-1]['response_dict'] (Python code context) → last_response_dict
-  gv.tests['variables']['k']  (Python code context) → k  (plain variable name)
-  gv.message                  (Python code context) → message
+  gv.tests['variables']['k']  (Python code context) → k  (identifier) or variables['k'] (hyphenated)
+  gv.<attr>                   (Python code context) → attr  (plain name)
+  str2dict(...)               (Python code context) → json.loads(...)
+  get_text(...)               (Python code context) → str(...)
+  prev_response               (Python/YAML context) → last_response
   gv.tests['variables']['k']=v (Python assignment)  → eval.exec: "k = v" + store_as: k
+  gv.tests['variables']['a-b']=v (Python assignment) → eval.exec: "variables['a-b'] = v" + store_as: a-b
   gv.message = v              (Python assignment)   → eval.exec: "message = v" + store_as: message
   gv.attr = v                 (Python assignment)   → eval.exec: "attr = v" + store_as: attr
   pure boolean Python expression                    → test.assert: expression
@@ -49,9 +58,24 @@ Key syntax being migrated
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
+
+
+def _ensure_base_url(url: str) -> str:
+    """Prepend ${url} to relative paths that have no base URL.
+
+    Relative paths start with '/' and contain no existing base variable or
+    scheme.  Absolute URLs (http://, wss://, ...) and paths already using a
+    ${...} variable prefix are left unchanged.
+    """
+    if not url:
+        return url
+    if url.startswith("/") and not url.startswith("//"):
+        return "${url}" + url
+    return url
 
 
 def _int_or_var(value, default=0):
@@ -83,8 +107,8 @@ def _sub_vars(text: str) -> str:
     # gv.log indexed access — response text
     text = re.sub(r"gv\.log\[-1\]\['response_txt'\]",   "${last_response}",      text)
     text = re.sub(r"gv\.log\[-1\]\['response'\]",        "${last_response}",      text)
-    text = re.sub(r"gv\.log\[-2\]\['response_txt'\]",   "${prev_response}",      text)
-    text = re.sub(r"gv\.log\[-2\]\['response'\]",        "${prev_response}",      text)
+    text = re.sub(r"gv\.log\[-2\]\['response_txt'\]",   "${last_response}",      text)
+    text = re.sub(r"gv\.log\[-2\]\['response'\]",        "${last_response}",      text)
     text = re.sub(r"gv\.log\[(-?\d+)\]\['response(?:_txt)?'\]", r"${response_\1}", text)
 
     # gv.log indexed access — response dict
@@ -97,51 +121,66 @@ def _sub_vars(text: str) -> str:
     text = re.sub(r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "${last_response_headers}", text)
 
     # gv.tests['variables']['key'] / gv.tests['variables']['$key'] access
-    text = re.sub(r"gv\.tests\['variables'\]\['\$?(\w+)'\]", r"${\1}", text)
-    text = re.sub(r'gv\.tests\["variables"\]\["\$?(\w+)"\]', r"${\1}", text)
+    # Supports both simple identifiers and hyphenated names like B-900-MOIP-4K-RX_dict
+    text = re.sub(r"gv\.tests\['variables'\]\['\$?([\w][\w\-]*)'\]", r"${\1}", text)
+    text = re.sub(r'gv\.tests\["variables"\]\["\$?([\w][\w\-]*)"\]', r"${\1}", text)
 
-    # gv.message — migrated to a plain ${message} variable
-    text = re.sub(r"\bgv\.message\b", "${message}", text)
+    # gv.<attr> — generalized to ${attr} for any attribute (not log/tests shim objects)
+    text = re.sub(r"\bgv\.(?!log\b|tests\b)(\w+)\b", r"${\1}", text)
 
     # <$varname$> or <${varname}$> or <${varname}> — Gherkin Scenario Outline params
     text = re.sub(r"<\$\{([A-Za-z_][A-Za-z0-9_]*)\}\$?>", r"${\1}", text)
     text = re.sub(r"<\$([A-Za-z_][A-Za-z0-9_]*)\$>",       r"${\1}", text)
 
     # $variable → ${variable}  (dollar-sign variables, not already in ${...})
+    # Allow hyphens inside names (e.g. $unit_id_B-900-MOIP-4K-RX_...) but not
+    # trailing hyphens, so arithmetic like $count-1 is not consumed.
     def dollar_sub(m):
         return "${" + m.group(1) + "}"
-    text = re.sub(r"\$(?!\{)([A-Za-z_][A-Za-z0-9_]*)", dollar_sub, text)
+    text = re.sub(r"\$(?!\{)([A-Za-z_][\w]*(?:-[\w]+)*)", dollar_sub, text)
 
     return text
 
 
 # ── patterns applied to Python code strings (eval.exec, test.assert, etc.) ──
 # Maps (pattern, replacement) where replacement can be a string or callable.
+# Bare JSON-RPC method name (dxGetAbout, wbSetUnderOverSettings, …) as opposed
+# to a URL path segment — used to route webservice|send position 3 correctly.
+_RPC_METHOD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 _CODE_PATTERNS: List[Tuple[str, Any]] = [
-    # gv.log response text  (old framework used 'response'; Easy BDD uses 'response_txt'
-    # but also exposes last_response as a bare name)
-    (r"gv\.log\[-1\]\['response_txt'\]",    "str(last_response)"),
-    (r"gv\.log\[-1\]\['response'\]",         "str(last_response)"),
-    (r"gv\.log\[-2\]\['response_txt'\]",    "str(prev_response)"),
-    (r"gv\.log\[-2\]\['response'\]",         "str(prev_response)"),
+    # gv.log response text — Easy BDD stores the full response dict under store_as;
+    # the body JSON string lives in last_response["body"].
+    (r"gv\.log\[-1\]\['response_txt'\]",    'last_response["body"]'),
+    (r"gv\.log\[-1\]\['response'\]",         'last_response["body"]'),
+    (r"gv\.log\[-2\]\['response_txt'\]",    'last_response["body"]'),
+    (r"gv\.log\[-2\]\['response'\]",         'last_response["body"]'),
     # gv.log response dict
     (r"gv\.log\[-1\]\['response_dict'\]",   "last_response_dict"),
-    (r"gv\.log\[-2\]\['response_dict'\]",   "prev_response_dict"),
+    (r"gv\.log\[-2\]\['response_dict'\]",   "last_response_dict"),
     # gv.log response code / headers
-    (r"gv\.log\[-1\]\['(?:response_code|status_code)'\]",  "last_response_code"),
-    (r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "last_response_headers"),
+    (r"gv\.log\[-1\]\['(?:response_code|status_code)'\]",  "last_response['status']"),
+    (r"gv\.log\[-1\]\['(?:response_headers?|headers?)'\]", "last_response['headers']"),
     # Numeric-indexed log entries
     (r"gv\.log\[(-?\d+)\]\['response(?:_txt)?'\]",
-        lambda m: "str(last_response)" if m.group(1) in ("-1",)
-                  else f"str(log_response_{m.group(1).lstrip('-')})"),
+        lambda m: 'last_response["body"]' if m.group(1) in ("-1",)
+                  else f"log_response_{m.group(1).lstrip('-')}['body']"),
     (r"gv\.log\[(-?\d+)\]\['response_dict'\]",
         lambda m: "last_response_dict" if m.group(1) in ("-1",)
                   else f"log_response_dict_{m.group(1).lstrip('-')}"),
-    # gv.tests['variables']['key'] / ['$key'] reads → plain variable name (strips $ prefix)
-    (r"gv\.tests\['variables'\]\['\$?(\w+)'\]", r"\1"),
-    (r'gv\.tests\["variables"\]\["\$?(\w+)"\]', r"\1"),
+    # gv.tests['variables']['key'] / ['$key'] reads
+    # Simple identifiers (all word chars) → bare name; hyphenated names → variables['name']
+    (r"gv\.tests\['variables'\]\['\$?([\w][\w\-]*)'\]",
+        lambda m: m.group(1) if re.match(r'^\w+$', m.group(1)) else f"variables['{m.group(1)}']"),
+    (r'gv\.tests\["variables"\]\["\$?([\w][\w\-]*)"\]',
+        lambda m: m.group(1) if re.match(r'^\w+$', m.group(1)) else f"variables['{m.group(1)}']"),
     # gv.message / gv.<attr> reads (not log/tests — those are handled above) → plain name
     (r"gv\.(?!log\b|tests\b)(\w+)\b", r"\1"),
+    # mybdd helper functions → Easy BDD / stdlib equivalents
+    (r"\bgv\.str2dict\b", "json.loads"),
+    (r"\bstr2dict\b",     "json.loads"),
+    (r"\bgv\.get_text\b", "str"),
+    (r"\bget_text\b",     "str"),
 ]
 
 
@@ -187,14 +226,17 @@ def _smart_eval_step(code: str) -> Dict:
     raw = code.strip()
 
     # Rule 1 — gv.tests['variables']['key'] = expr  (single or double quotes)
+    # Supports both simple identifiers and hyphenated names like B-900-MOIP-4K-RX_dict.
     m = re.match(
-        r"^gv\.tests\[(?:'variables'|\"variables\")\]\[(?:'\$?(\w+)'|\"\$?(\w+)\")\]\s*=\s*(.+)$",
+        r"^gv\.tests\[(?:'variables'|\"variables\")\]\[(?:'\$?([\w][\w\-]*)'|\"\$?([\w][\w\-]*)\")\]\s*=\s*(.+)$",
         raw, re.DOTALL,
     )
     if m:
         var_name = m.group(1) or m.group(2)
         rhs = _translate_code(m.group(3).strip())
-        return {"action": "eval.exec", "code": f"{var_name} = {rhs}", "store_as": var_name}
+        # Use bare name for valid Python identifiers; dict access for hyphenated names
+        lhs = var_name if re.match(r'^\w+$', var_name) else f"variables['{var_name}']"
+        return {"action": "eval.exec", "code": f"{lhs} = {rhs}", "store_as": var_name}
 
     # Rule 2 — gv.<attr> = expr  (e.g. gv.message = ..., gv.result = ...)
     # Excludes gv.log and gv.tests which are shim objects, not settable scalars.
@@ -306,6 +348,58 @@ def _clean_var_value(v: str) -> str:
 # Browser command mapping
 # ────────────────────────────────────────────────────────────────────────────
 
+_SELENIUM_LOCATOR_RE = re.compile(
+    r"^(xpath|id|css|name|classname|class|linktext|link|partiallinktext)=(.*)$", re.I
+)
+
+
+def _selenium_locator_kwargs(raw: str) -> Dict[str, str]:
+    """Translate a Selenium IDE locator string into browser.* action kwargs.
+
+    xpath= passes through unchanged — the runtime browser service already
+    strips that prefix. id=/name=/css=/className= aren't selector engines
+    Playwright understands, so they're rewritten into real CSS. link=/
+    linkText=/partialLinkText= become a text-based match (the framework's
+    text= click already does substring matching, covering both exact and
+    partial link text). A bare string with no recognized prefix passes
+    through unchanged as a selector (already CSS/XPath-shaped, or a plain
+    ${var} reference).
+    """
+    if not raw:
+        return {}
+    m = _SELENIUM_LOCATOR_RE.match(raw.strip())
+    if not m:
+        return {"selector": raw}
+    strategy, value = m.group(1).lower(), m.group(2)
+    if strategy == "xpath":
+        return {"selector": f"xpath={value}"}
+    if strategy == "id":
+        return {"selector": f"#{value}"}
+    if strategy == "css":
+        return {"selector": value}
+    if strategy in ("classname", "class"):
+        return {"selector": f".{value}"}
+    if strategy == "name":
+        return {"selector": f"[name='{value}']"}
+    if strategy in ("link", "linktext", "partiallinktext"):
+        return {"text": value}
+    return {"selector": raw}
+
+
+def _selenium_selector_string(raw: str) -> str:
+    """Like _selenium_locator_kwargs, but always returns a plain selector
+    string — for params (e.g. drag-and-drop source/target) that have no
+    separate text= alternative to fall back to."""
+    if not raw:
+        return raw
+    kwargs = _selenium_locator_kwargs(raw)
+    if "selector" in kwargs:
+        return kwargs["selector"]
+    if "text" in kwargs:
+        return f"xpath=//*[normalize-space(text())='{kwargs['text']}']"
+    return raw
+
+
 def _map_browser(cmd_dict: Dict) -> Dict:
     cmd = cmd_dict.get("command", "").lower()
     # Old mybdd format uses both "param" (generic first arg) and explicit keys like "url".
@@ -323,22 +417,30 @@ def _map_browser(cmd_dict: Dict) -> Dict:
     if cmd in ("open",):
         step = {"action": "browser.open", "url": param or target}
     elif cmd in ("goto", "navigate"):
-        step = {"action": "browser.navigate", "url": param or target}
+        step = {"action": "browser.open", "url": param or target}
     elif cmd in ("close",):
         step = {"action": "browser.close"}
     elif cmd in ("refresh",):
         step = {"action": "browser.refresh"}
+    elif cmd in ("pause",):
+        # Selenium's timed pause — target/param/value carries milliseconds.
+        ms_raw = target or param or value or "0"
+        try:
+            ms = float(ms_raw)
+        except (TypeError, ValueError):
+            ms = 0.0
+        step = {"action": "browser.wait", "timeout": ms / 1000}
     elif cmd in ("type", "fill", "input"):
         s = {"action": "browser.fill", "value": text or value}
         sel = target or param
         if sel:
-            s["selector"] = sel
+            s.update(_selenium_locator_kwargs(sel))
         step = s
     elif cmd in ("click",):
         s = {"action": "browser.click"}
         sel = target or param
         if sel:
-            s["selector"] = sel
+            s.update(_selenium_locator_kwargs(sel))
         elif text:
             s["text"] = text
         step = s
@@ -346,20 +448,19 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         step = {"action": "browser.press_key", "key": key}
         sel = target or param
         if sel:
-            step["selector"] = sel
+            step.update(_selenium_locator_kwargs(sel))
     elif cmd in ("gettext", "get_text", "innertext"):
         s = {"action": "browser.get_text", "store_as": name or "last_text"}
         sel = target or param
         if sel:
-            s["selector"] = sel
+            s.update(_selenium_locator_kwargs(sel))
         step = s
     elif cmd in ("screenshot", "capture"):
         step = {"action": "browser.screenshot", "name": name or param or "screenshot"}
     elif cmd in ("wait", "waitfor", "wait_for_element"):
-        s = {"action": "browser.wait_for_element"}
         sel = target or param
-        if sel:
-            s["selector"] = sel
+        # A bare wait with no target is a timed pause, not an element wait
+        s = {"action": "browser.wait_for", **_selenium_locator_kwargs(sel)} if sel else {"action": "browser.wait"}
         if timeout:
             s["timeout"] = timeout
         step = s
@@ -371,23 +472,30 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         s = {"action": "browser.select", "value": value or text}
         sel = target or param
         if sel:
-            s["selector"] = sel
+            s.update(_selenium_locator_kwargs(sel))
         step = s
     elif cmd in ("hover",):
-        step = {"action": "browser.hover", "selector": target or param}
+        step = {"action": "browser.hover", **_selenium_locator_kwargs(target or param)}
     elif cmd in ("check", "uncheck"):
-        step = {"action": f"browser.{cmd}", "selector": target or param}
+        step = {"action": f"browser.{cmd}", **_selenium_locator_kwargs(target or param)}
     elif cmd in ("scroll",):
-        step = {"action": "browser.scroll", "selector": target or param}
+        step = {"action": "browser.scroll", **_selenium_locator_kwargs(target or param)}
+    elif cmd in ("assertelementpresent", "assert_element_present", "verifyelementpresent", "waitforelementpresent"):
+        # Closest declarative equivalent — Selenium's presence check doesn't
+        # distinguish "in the DOM" from "visible", and confirming visibility
+        # is the more useful signal for a page-loaded check anyway.
+        step = {"action": "test.assert_element_visible", **_selenium_locator_kwargs(target or param)}
     elif cmd in ("validate_checkbox_enabled", "assert_checked"):
         s = {"action": "browser.assert_checked"}
-        if param or target:
-            s["selector"] = param or target
+        sel = param or target
+        if sel:
+            s.update(_selenium_locator_kwargs(sel))
         step = s
     elif cmd in ("validate_checkbox_disabled", "assert_not_checked", "assert_unchecked"):
-        s = {"action": "browser.assert_not_checked"}
-        if param or target:
-            s["selector"] = param or target
+        s = {"action": "browser.assert_unchecked"}
+        sel = param or target
+        if sel:
+            s.update(_selenium_locator_kwargs(sel))
         step = s
     elif cmd in ("click_by_role",):
         role = cmd_dict.get("role", "")
@@ -400,23 +508,36 @@ def _map_browser(cmd_dict: Dict) -> Dict:
             s["exact"] = exact
         step = s
     elif cmd in ("containstext", "contains_text", "assert_text", "asserttext"):
-        s = {"action": "browser.assert_text", "text": cmd_dict.get("text", text)}
-        if param or target:
-            s["selector"] = param or target
-        step = s
+        # With a selector, test.assert_text_contains scopes the substring
+        # check to that element; without one, browser.verify_text checks
+        # the whole page (both are contains-semantics like the legacy cmd).
+        # Selenium IDE's assertText/assertText-style commands carry the expected
+        # substring in "value", not "text" — text is reserved for a link-locator
+        # match (see _selenium_locator_kwargs's link=/linkText= handling above).
+        expected = cmd_dict.get("text") or value or text
+        sel = param or target
+        if sel:
+            step = {"action": "test.assert_text_contains",
+                    **_selenium_locator_kwargs(sel),
+                    "text": expected}
+        else:
+            step = {"action": "browser.verify_text", "text": expected}
     elif cmd in ("gettitle", "get_title", "asserttitle", "assert_title"):
         store = cmd_dict.get("store_as", "page_title")
         step = {"action": "browser.get_title", "store_as": store}
     elif cmd in ("assert_value", "assertvalue"):
-        s = {"action": "browser.assert_value", "value": value or text}
-        if param or target:
-            s["selector"] = param or target
+        s = {"action": "test.assert_value", "value": value or text}
+        sel = param or target
+        if sel:
+            s.update(_selenium_locator_kwargs(sel))
         step = s
     elif cmd in ("waitfornavigation", "wait_for_navigation", "wait_for_load"):
-        step = {"action": "browser.wait_for_navigation"}
+        # browser.wait_for_url with no url waits for the page load state
+        step = {"action": "browser.wait_for_url"}
     elif cmd in ("dragdrop", "drag_drop", "drag_and_drop"):
-        step = {"action": "browser.drag_drop", "source": target or param,
-                "destination": cmd_dict.get("destination", "")}
+        step = {"action": "browser.drag_and_drop",
+                "source_selector": _selenium_selector_string(target or param),
+                "target_selector": _selenium_selector_string(_sub_vars(str(cmd_dict.get("destination", ""))))}
     elif cmd in ("setlocalStorage", "set_localstorage", "localstorage"):
         step = {"action": "eval.exec",
                 "code": f"localStorage.setItem({cmd_dict.get('key','key')!r}, {cmd_dict.get('value',value)!r})"}
@@ -425,6 +546,36 @@ def _map_browser(cmd_dict: Dict) -> Dict:
         step = {"action": "test.log", "message": f"TODO browser.{cmd}: {json.dumps(cmd_dict)}"}
 
     return step
+
+
+def _fixup_orphan_fills(steps: List[Dict]) -> List[Dict]:
+    """Legacy Selenium exports often click a field to focus it, then type into
+    it as a *separate* step with no locator of its own — the old runtime's
+    active-element tracking made the click's target implicit for the type
+    right after it. browser.fill has no such concept, so fold a click+fill
+    pair like that into one fill using the click's locator, instead of
+    emitting an unresolvable, locator-less fill step.
+
+    Operates on flat {"action": ..., ...} dicts, before _to_dot_notation."""
+    out: List[Dict] = []
+    i = 0
+    while i < len(steps):
+        cur = steps[i]
+        nxt = steps[i + 1] if i + 1 < len(steps) else None
+        if (
+            isinstance(cur, dict) and cur.get("action") == "browser.click"
+            and isinstance(nxt, dict) and nxt.get("action") == "browser.fill"
+            and cur.get("selector")
+            and not any(k in nxt for k in ("selector", "field", "role", "label"))
+        ):
+            merged = dict(nxt)
+            merged["selector"] = cur["selector"]
+            out.append(merged)
+            i += 2
+            continue
+        out.append(cur)
+        i += 1
+    return out
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -496,6 +647,48 @@ def _firmware_manager_steps(param_dict: Optional[Dict] = None) -> List[Dict]:
     ]
 
 
+# Recognizes the specific retry-until-connected idiom used repeatedly in
+# the legacy suite (see _match_dxgetabout_retry_loop below).
+_ROOT_FUNCTION_DXGETABOUT_RETRY_RE = re.compile(
+    r"root_function\s*\(\s*param\s*=\s*\{[^}]*['\"]command['\"]\s*:\s*['\"]dxGetAbout['\"]"
+)
+
+
+def _match_dxgetabout_retry_loop(code: str) -> Optional[Dict]:
+    """Recognizes this exact retry-until-connected idiom, used identically
+    four times across the legacy suite (e.g. Feature: Network Interruption,
+    Feature: Boot Without Power + Network):
+
+        _i=0; _ok=False; _resp=''
+        while _i<6 and not _ok:
+            _resp = root_function(param={'name':'webservice', ..., 'command':'dxGetAbout'}, data={...}, nested=True)
+            _ok = ('deviceId' in str(_resp) and 'firmware' in str(_resp) and 'error' not in str(_resp))
+            _i += 1
+            (_ok or time.sleep(15))
+        assert _ok, '...'
+
+    root_function is an internal helper from the old framework that has no
+    equivalent in Easy BDD's eval context at all — migrated as raw
+    eval.exec, this fails outright with a NameError at test-run time, not
+    just an inelegant TODO. Rather than structurally reconstructing this
+    exact while-loop from its Python (a lot of brittle AST matching for
+    something whose scratch variable names are author-chosen and could
+    differ trivially), this checks for the one load-bearing marker that
+    can't vary — a root_function(...) call whose command is 'dxGetAbout' —
+    and replaces the whole block with the pre-built Shared: step that does
+    the same retry (Shared: wait_for_dxGetAbout_ready). Deliberately narrow:
+    only fires for this exact command, not a general "any dx* retry loop"
+    pattern — there's no evidence yet that idiom is reused for other
+    commands, and guessing wrong here would silently point a case at the
+    wrong device call.
+    """
+    if "root_function" not in code:
+        return None
+    if not _ROOT_FUNCTION_DXGETABOUT_RETRY_RE.search(code):
+        return None
+    return {"shared_step": "wait_for_dxGetAbout_ready"}
+
+
 def _map_function(param_dict: Dict, data_str: str) -> Any:
     name = param_dict.get("name", "").lower()
     raw_data_str = data_str.strip()   # keep original for JSON re-parsing (before _sub_vars mangles $ vars)
@@ -505,9 +698,26 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         sec = param_dict.get("sec", param_dict.get("seconds", 1))
         return {"action": "test.sleep", "seconds": float(sec)}
 
+    if name == "browser":
+        # Selenium IDE-style export: data_str is a JSON array of
+        # {"command":..., "target":..., "value":...} steps, one Selenium
+        # command per entry. Parse from raw_data_str (pre-_sub_vars, same
+        # convention as the "eval" paired-conditional case above) since the
+        # array is JSON syntax, not a value to substitute — _map_browser
+        # already runs _sub_vars on each individual field it reads.
+        commands = _parse_json(raw_data_str)
+        if not isinstance(commands, list):
+            return {"action": "test.log",
+                    "message": f"TODO function browser (expected a JSON array): {data_str[:120]}"}
+        return [_map_browser(c) for c in commands if isinstance(c, dict)]
+
     if name in ("exec", "execute"):
+        raw_code = str(param_dict.get("string", ""))
+        retry_step = _match_dxgetabout_retry_loop(raw_code)
+        if retry_step is not None:
+            return retry_step
         # Use _translate_code (not _sub_vars) — Python code context, not a YAML string value.
-        return _smart_eval_step(str(param_dict.get("string", "")))
+        return _smart_eval_step(raw_code)
 
     if name == "eval":
         # Detect paired conditional: {"name":"eval","string":"condition"} | {"name":"exec","string":"code"}
@@ -560,10 +770,30 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         url     = _sub_vars(str(param_dict.get("url", "")))
         path    = _sub_vars(str(param_dict.get("path", param_dict.get("command", ""))))
         full_url = (url.rstrip("/") + "/" + path.lstrip("/")) if path else url
-        is_ws = method == "SEND" or full_url.startswith("wss://") or full_url.startswith("ws://")
+        full_url = _ensure_base_url(full_url)
+        # "url" here is almost always a ${var} (e.g. "$url" resolving to
+        # wss://... at runtime), so checking its literal prefix at migration
+        # time never fires — and "method":"send" is set inconsistently in
+        # this codebase (present on some otherwise-identical OvrC calls,
+        # omitted on others). The one reliable signal this codebase actually
+        # uses consistently is the "command" key itself (vs "path") — every
+        # OvrC dx* call in the real suite uses "command", never "path".
+        is_ws = (
+            method == "SEND"
+            or full_url.startswith("wss://") or full_url.startswith("ws://")
+            or "command" in param_dict
+        )
         if is_ws:
             body_val = _expand_json_payload(data_str) if data_str and data_str not in ("{}", "") else None
-            return {"action": "websocket.send", "url": full_url, "data": body_val, "store_as": "last_response"}
+            ws_step: Dict[str, Any] = {"action": "websocket.send", "url": _ensure_base_url(url), "store_as": "last_response"}
+            if path and _RPC_METHOD_RE.match(path):
+                # path is a JSON-RPC method name, not a URL segment
+                ws_step["method"] = path
+            else:
+                ws_step["url"] = full_url
+            if body_val is not None:
+                ws_step["data"] = body_val
+            return ws_step
         step: Dict[str, Any] = {"action": "api.request", "method": method, "url": full_url, "store_as": "last_response"}
         payload = _expand_json_payload(data_str)
         if payload is not None:
@@ -577,7 +807,8 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         method  = param_dict.get("method", "get").upper()
         url     = _sub_vars(str(param_dict.get("url", "")))
         path    = _sub_vars(str(param_dict.get("path", "")))
-        step = {"action": "api.request", "method": method, "url": f"{url}{path}", "store_as": "last_response"}
+        full_url = _ensure_base_url(f"{url}{path}")
+        step = {"action": "api.request", "method": method, "url": full_url, "store_as": "last_response"}
         payload = _expand_json_payload(data_str)
         if payload is not None:
             step["body"] = payload
@@ -602,13 +833,16 @@ def _map_function(param_dict: Dict, data_str: str) -> Any:
         }
 
     if name == "ssh":
-        return {
-            "action":   "command.ssh",
+        step = {
+            "action":   "ssh.command",
             "host":     _sub_vars(str(param_dict.get("host", ""))),
             "username": _sub_vars(str(param_dict.get("user", param_dict.get("username", "")))),
             "password": _sub_vars(str(param_dict.get("password", ""))),
             "command":  _sub_vars(str(param_dict.get("command", ""))),
         }
+        if param_dict.get("prompt"):
+            step["prompt"] = param_dict["prompt"]
+        return step
 
     if name == "serial":
         return {
@@ -824,18 +1058,24 @@ def _parse_step_line(line: str) -> Optional[Dict]:
         method = m.group(2).strip().upper()
         path   = _sub_vars(m.group(3).strip())
         data   = m.group(4).strip()
-        # Always append path to URL with a proper separator (the path may omit the leading slash)
-        if path:
-            full_url = url.rstrip("/") + "/" + path.lstrip("/")
-        else:
-            full_url = url
         is_ws = method == "SEND" or url.startswith("wss://") or url.startswith("ws://")
         if is_ws:
+            # In "send" mode position 3 is the JSON-RPC method (dxGetAbout,
+            # wbSetUnderOverSettings, …), not a URL path — websocket_service
+            # wraps it in a JSON-RPC envelope with position 4 as params.
             body_val = _expand_json_payload(data) if data and data not in ("{}", "") else None
-            ws_step: Dict[str, Any] = {"action": "websocket.send", "url": full_url, "store_as": "last_response"}
+            ws_step: Dict[str, Any] = {"action": "websocket.send", "url": _ensure_base_url(url), "store_as": "last_response"}
+            if path and _RPC_METHOD_RE.match(path):
+                ws_step["method"] = path
+            elif path:
+                # A real path (contains / or vars) — keep it on the URL
+                ws_step["url"] = _ensure_base_url(url.rstrip("/") + "/" + path.lstrip("/"))
             if body_val is not None:
                 ws_step["data"] = body_val
             return ws_step
+        # Plain HTTP: append path to URL with a proper separator
+        full_url = (url.rstrip("/") + "/" + path.lstrip("/")) if path else url
+        full_url = _ensure_base_url(full_url)
         step: Dict[str, Any] = {"action": "api.request", "method": method, "url": full_url, "store_as": "last_response"}
         payload = _expand_json_payload(data)
         if payload is not None:
@@ -849,7 +1089,7 @@ def _parse_step_line(line: str) -> Optional[Dict]:
         path   = _sub_vars(m.group(2).strip())
         method = m.group(3).strip().upper()
         data   = m.group(5).strip()
-        step = {"action": "api.request", "method": method, "url": f"{url}{path}", "store_as": "last_response"}
+        step = {"action": "api.request", "method": method, "url": _ensure_base_url(f"{url}{path}"), "store_as": "last_response"}
         payload = _expand_json_payload(data)
         if payload is not None:
             step["body"] = payload
@@ -967,7 +1207,7 @@ def parse_step_block(text: str) -> tuple:
     steps — list of Easy BDD step dicts
     data  — list of variable dicts from an Examples table, or empty list
     """
-    steps: List[Dict] = []
+    raw_steps: List[Dict] = []
     data: List[Dict] = []
     in_examples = False
     ex_headers: List[str] = []
@@ -1012,12 +1252,13 @@ def parse_step_block(text: str) -> tuple:
         step = _parse_step_line(stripped)
         if step:
             if isinstance(step, list):
-                steps.extend(_to_dot_notation(s) for s in step)
+                raw_steps.extend(step)
             else:
-                steps.append(_to_dot_notation(step))
+                raw_steps.append(step)
 
     # Handle Examples: at end of block
     _flush_examples()
+    steps = [_to_dot_notation(s) for s in _fixup_orphan_fills(raw_steps)]
     return steps, data
 
 
@@ -1032,9 +1273,15 @@ def parse_feature_file(content: str) -> List[Dict[str, Any]]:
     """
     tests = []
     current_test: Optional[Dict] = None
+    raw_steps: List[Dict] = []
     in_when = False
     in_examples = False
     loop_count = 0
+
+    def _finalize_current_test():
+        if current_test:
+            current_test["steps"] = [_to_dot_notation(s) for s in _fixup_orphan_fills(raw_steps)]
+            tests.append(current_test)
 
     for raw_line in content.splitlines():
         line = raw_line.strip()
@@ -1044,12 +1291,12 @@ def parse_feature_file(content: str) -> List[Dict[str, Any]]:
 
         if line.startswith("Scenario") and ":" in line:
             # Save previous test
-            if current_test:
-                tests.append(current_test)
+            _finalize_current_test()
             # New test
             title = re.sub(r"^Scenario\s*Outline\s*:\s*", "", line).strip()
             title = re.sub(r"^Scenario\s*:\s*", "", title).strip()
             current_test = {"name": title, "description": "", "tags": [], "steps": [], "loop_count": 0}
+            raw_steps = []
             in_when = False
             in_examples = False
             continue
@@ -1097,12 +1344,11 @@ def parse_feature_file(content: str) -> List[Dict[str, Any]]:
             step = _parse_step_line(stripped)
             if step:
                 if isinstance(step, list):
-                    current_test["steps"].extend(_to_dot_notation(s) for s in step)
+                    raw_steps.extend(step)
                 else:
-                    current_test["steps"].append(_to_dot_notation(step))
+                    raw_steps.append(step)
 
-    if current_test:
-        tests.append(current_test)
+    _finalize_current_test()
 
     return tests
 
@@ -1147,6 +1393,7 @@ def parse_shared_step(name: str, body: str) -> Optional[Dict[str, Any]]:
     if not body:
         return None
     steps, _ = parse_step_block(body)
+    steps = _simplify_eval_steps(steps)
     slug  = re.sub(r"^Shared:\s*", "", name).strip()
     slug  = re.sub(r"[^A-Za-z0-9_]+", "_", slug).strip("_")
     return {"name": slug, "description": name, "steps": steps}
@@ -1191,14 +1438,17 @@ def migrate(content: str) -> Dict[str, Any]:
         doc = _parse_json(content) or {}
         variables_out = parse_given_variables(doc.get("given", "{}"))
         for sh_name, sh_body in (doc.get("shared", {}) or {}).items():
-            entry = parse_shared_step(sh_name, sh_body)
+            entry = parse_shared_step(sh_name, sh_body)  # already eval-simplified internally
             if entry:
+                _flag_unsimplified_eval(entry["steps"], f"Shared: {entry['name']}", warnings)
                 shared_out[entry["name"]] = {
                     "description": entry["description"],
                     "steps": entry["steps"],
                 }
         for feat_name, feat_body in (doc.get("feature", {}) or {}).items():
             steps, data = parse_step_block(feat_body)
+            steps = _simplify_eval_steps(steps)
+            _flag_unsimplified_eval(steps, feat_name, warnings)
             test_dict = {"name": feat_name, "variables": variables_out.copy(), "steps": steps}
             if data:
                 test_dict["data"] = data
@@ -1219,7 +1469,7 @@ def migrate(content: str) -> Dict[str, Any]:
                 test_dict["tags"] = t["tags"]
             if variables_out:
                 test_dict["variables"] = variables_out
-            test_dict["steps"] = t["steps"]
+            test_dict["steps"] = _simplify_eval_steps(t["steps"])
 
             if t.get("loop_count", 0) > 1:
                 test_dict["data"] = [
@@ -1227,6 +1477,7 @@ def migrate(content: str) -> Dict[str, Any]:
                 ]
                 warnings.append(f"Test '{name}' had {t['loop_count']} loop iterations — added data: list.")
 
+            _flag_unsimplified_eval(test_dict["steps"], name, warnings)
             _flag_todos(test_dict["steps"], name, warnings)
             tests_out.append({"name": slug, "display_name": name,
                                "yaml": yaml.dump(test_dict, sort_keys=False, allow_unicode=True)})
@@ -1234,9 +1485,11 @@ def migrate(content: str) -> Dict[str, Any]:
     else:
         # Raw step block (e.g., content of custom_preconds)
         steps, data = parse_step_block(content)
+        steps = _simplify_eval_steps(steps)
         test_dict = {"name": "Migrated Test", "steps": steps}
         if data:
             test_dict["data"] = data
+        _flag_unsimplified_eval(steps, "Migrated Test", warnings)
         _flag_todos(steps, "Migrated Test", warnings)
         tests_out.append({"name": "migrated_test", "display_name": "Migrated Test",
                            "yaml": yaml.dump(test_dict, sort_keys=False, allow_unicode=True)})
@@ -1255,6 +1508,590 @@ def migrate(content: str) -> Dict[str, Any]:
             "variables":    len(variables_out),
         },
     }
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# eval.exec / eval.run simplification — recognize common Python idioms and
+# rewrite them as declarative list.pick/text.replace/text.regex_extract/
+# text.format actions instead. Conservative by design: if any statement in
+# a code block doesn't match a known idiom, the WHOLE block is left as the
+# original eval.exec/eval.run rather than partially transformed — a partial
+# rewrite risks silently breaking variable flow the untransformed statement
+# depended on (e.g. a helper variable a later real eval.exec still reads).
+# ────────────────────────────────────────────────────────────────────────────
+
+def _expr_to_template(node: ast.AST) -> Optional[str]:
+    """Convert a simple AST expression into a ${var}-interpolated string
+    (or a literal) for use as a declarative action's string param. Returns
+    None if the expression is too complex to represent this way — e.g. a
+    function call, comprehension, or anything beyond a name/literal/+."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Constant):
+        return str(node.value)
+    if isinstance(node, ast.Name):
+        return f"${{{node.id}}}"
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _expr_to_template(node.left)
+        right = _expr_to_template(node.right)
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+
+def _index_value(node: ast.AST) -> Optional[int]:
+    """Extract a literal integer index, including negative literals
+    (-1, -2, ...), which the Python parser represents as UnaryOp(USub)."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, int):
+        return node.value
+    if (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub)
+            and isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, int)):
+        return -node.operand.value
+    return None
+
+
+def _match_list_pick(value: ast.AST, store_as: str) -> Optional[Dict]:
+    """x = y[n]  ->  list.pick"""
+    if isinstance(value, ast.Subscript) and isinstance(value.value, ast.Name):
+        idx = _index_value(value.slice)
+        if idx is not None:
+            return {"action": "list.pick", "from_var": value.value.id, "index": idx, "store_as": store_as}
+    return None
+
+
+def _match_text_replace(value: ast.AST, store_as: str) -> Optional[Dict]:
+    """x = y.replace(a, b)  ->  text.replace"""
+    if (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+            and value.func.attr == "replace" and len(value.args) == 2 and not value.keywords):
+        receiver = _expr_to_template(value.func.value)
+        find = _expr_to_template(value.args[0])
+        repl = _expr_to_template(value.args[1])
+        if receiver is not None and find is not None and repl is not None:
+            return {"action": "text.replace", "value": receiver, "find": find,
+                    "replace_with": repl, "store_as": store_as}
+    return None
+
+
+def _match_regex_extract(value: ast.AST, store_as: str) -> Optional[Dict]:
+    """x = re.search(pattern, y).group(n)  ->  text.regex_extract
+
+    No None-check on the match here — this only fires for code that already
+    assumed the match always succeeds (the pattern this codebase actually
+    uses); the safer "or a default" version is _match_regex_ternary_fusion.
+    """
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute) and value.func.attr == "group"):
+        return None
+    inner = value.func.value
+    if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute) and inner.func.attr == "search"
+            and isinstance(inner.func.value, ast.Name) and inner.func.value.id == "re"
+            and len(inner.args) == 2 and not inner.keywords):
+        return None
+    pattern = _expr_to_template(inner.args[0])
+    source = _expr_to_template(inner.args[1])
+    if pattern is None or source is None:
+        return None
+    group = 0
+    if value.args:
+        g = _index_value(value.args[0])
+        if g is None:
+            return None
+        group = g
+    step = {"action": "text.regex_extract", "value": source, "pattern": pattern, "store_as": store_as}
+    if group:
+        step["group"] = group
+    return step
+
+
+def _match_text_format(value: ast.AST, store_as: str) -> Optional[Dict]:
+    """x = '{}.{}'.format(a, b)  ->  text.format
+
+    Only handles bare {} placeholders (not {0}/{name}) with an exact
+    placeholder/arg count match — anything fancier bails out."""
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute) and value.func.attr == "format"
+            and isinstance(value.func.value, ast.Constant) and isinstance(value.func.value.value, str)
+            and not value.keywords):
+        return None
+    template_str = value.func.value.value
+    placeholders = re.findall(r"\{\}", template_str)
+    if len(placeholders) != len(value.args) or not placeholders:
+        return None
+    arg_reprs = [_expr_to_template(a) for a in value.args]
+    if any(r is None for r in arg_reprs):
+        return None
+    rebuilt = template_str
+    for rep in arg_reprs:
+        rebuilt = rebuilt.replace("{}", rep, 1)
+    return {"action": "text.format", "template": rebuilt, "store_as": store_as}
+
+
+def _expr_to_source_and_field(node: ast.AST) -> Optional[Tuple[str, str]]:
+    """Unwrap a chain of string-keyed subscripts rooted at a plain Name
+    (optionally wrapped in an outer str(...) call) into (from_var, dotted
+    field path) for test.extract — e.g. last_response['body'] ->
+    ('last_response', 'body'), d['a']['b'] -> ('d', 'a.b'). Returns None if
+    the chain isn't rooted in a plain Name, or any key isn't a string
+    literal (an integer-indexed chain is list.pick's territory, not this)."""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "str" and len(node.args) == 1:
+        node = node.args[0]
+    parts: List[str] = []
+    while isinstance(node, ast.Subscript):
+        key = node.slice
+        if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+            return None
+        parts.append(key.value)
+        node = node.value
+    if not parts or not isinstance(node, ast.Name):
+        return None
+    parts.reverse()
+    return node.id, ".".join(parts)
+
+
+def _match_dict_path_extract(value: ast.AST, store_as: str) -> Optional[Dict]:
+    """x = d['a']['b']  ->  test.extract
+
+    Reuses the existing dot-notation field lookup test.extract already does
+    on dict values, rather than inventing a new action for something the
+    framework already supports."""
+    if not isinstance(value, ast.Subscript):
+        return None
+    result = _expr_to_source_and_field(value)
+    if result is None:
+        return None
+    from_var, field = result
+    return {"action": "test.extract", "field": field, "from": from_var, "store_as": store_as}
+
+
+def _match_json_parse(value: ast.AST, store_as: str) -> Optional[List[Dict]]:
+    """x = json.loads(y)  ->  json.parse.
+
+    If y is a plain name/literal/${var}-representable expression, this is
+    one step. If y is itself a dict-key chain that needs test.extract first
+    (the common `json.loads(last_response["body"])` shape), this returns
+    two steps — extract the field into a synthetic variable, then parse
+    that — since a ${var} template can't express "one field of a dict"."""
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute) and value.func.attr == "loads"
+            and isinstance(value.func.value, ast.Name) and value.func.value.id == "json"
+            and len(value.args) == 1 and not value.keywords):
+        return None
+    arg = value.args[0]
+    if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name) and arg.func.id == "str" and len(arg.args) == 1:
+        arg = arg.args[0]
+
+    template = _expr_to_template(arg)
+    if template is not None:
+        return [{"action": "json.parse", "value": template, "store_as": store_as}]
+
+    extracted = _expr_to_source_and_field(arg)
+    if extracted is not None:
+        from_var, field = extracted
+        tmp = f"_{store_as}_raw"
+        return [
+            {"action": "test.extract", "field": field, "from": from_var, "store_as": tmp},
+            {"action": "json.parse", "value": f"${{{tmp}}}", "store_as": store_as},
+        ]
+    return None
+
+
+_SIMPLIFY_MATCHERS = (
+    _match_list_pick, _match_text_replace, _match_regex_extract, _match_text_format,
+    _match_json_parse, _match_dict_path_extract,
+)
+
+
+# Mirrors easybdd.core.safe_eval.SafeEvaluator's call whitelist — kept as a
+# local copy rather than an import so bdd_migrator.py stays self-contained
+# regardless of caller sys.path (it has no other easybdd dependency today).
+# If that whitelist changes, this must be updated too, or a condition step
+# emitted here could fail at test-run time with "Method/Function call not
+# allowed" even though it looked fine at migration time.
+_SAFE_EVAL_BUILTINS = frozenset({
+    "len", "str", "int", "float", "bool", "list", "dict", "tuple", "abs", "min", "max",
+    "sum", "round", "range", "enumerate", "zip", "sorted", "reversed", "any", "all",
+    "isinstance", "type",
+})
+_SAFE_EVAL_METHODS = frozenset({
+    "get", "keys", "values", "items", "count", "index", "split", "join", "strip",
+    "lower", "upper", "replace", "startswith", "endswith", "isdigit", "isalpha", "isalnum",
+})
+
+
+def _is_safe_eval_condition(node: ast.AST) -> bool:
+    """Whether `node` would actually be accepted by the runner's condition
+    evaluator — checked before committing to a real If/Else step, since
+    unparsing an arbitrary test expression (e.g. one calling json.loads,
+    which safe_eval explicitly rejects) would otherwise produce a condition
+    that looks fine at migration time but fails at test-run time."""
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            if isinstance(child.func, ast.Name):
+                if child.func.id not in _SAFE_EVAL_BUILTINS:
+                    return False
+            elif isinstance(child.func, ast.Attribute):
+                if child.func.attr not in _SAFE_EVAL_METHODS:
+                    return False
+            else:
+                return False
+        elif isinstance(child, (ast.Import, ast.ImportFrom, ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
+            return False
+    return True
+
+
+def _match_conditional_action_stmt(stmt: ast.stmt) -> Optional[Dict]:
+    """Bare (non-assignment) statement of the shape:
+
+        time.sleep(a) if <condition> else time.sleep(b)
+
+    -> a real If/Else control-flow step with test.sleep in each branch,
+    instead of an assignment-shaped rewrite (this is a statement run purely
+    for its side effect, not a value being stored). The condition's own
+    source text is used as-is — the runner's condition evaluator
+    (easybdd.core.safe_eval) already exposes every current variable by its
+    plain Python name and explicitly allows isinstance/in/and/or, so no
+    ${var} templating is needed or even possible here (safe_eval parses a
+    real Python expression, not a pre-substituted string). Only fires when
+    ast.unparse is available (Python 3.9+) and the condition doesn't
+    reference anything the caller couldn't already see as a variable.
+    """
+    if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.IfExp)):
+        return None
+    test, body, orelse = stmt.value.test, stmt.value.body, stmt.value.orelse
+
+    def _as_sleep_step(call: ast.AST) -> Optional[Dict]:
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "sleep" and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == "time" and len(call.args) == 1 and not call.keywords):
+            return None
+        seconds = _expr_to_template(call.args[0])
+        if seconds is None:
+            return None
+        return {"test.sleep": {"seconds": seconds}}
+
+    then_step = _as_sleep_step(body)
+    else_step = _as_sleep_step(orelse)
+    if then_step is None or else_step is None:
+        return None
+
+    if not _is_safe_eval_condition(test):
+        return None  # would fail at test-run time — leave the whole block as eval.exec instead
+
+    unparse = getattr(ast, "unparse", None)
+    if unparse is None:
+        return None
+    try:
+        condition_src = unparse(test)
+    except Exception:
+        return None
+
+    return {"condition": condition_src, "then": [then_step], "else": [else_step]}
+
+
+def _simplify_single_value(value: ast.AST, store_as: str) -> Optional[List[Dict]]:
+    for matcher in _SIMPLIFY_MATCHERS:
+        result = matcher(value, store_as)
+        if result is not None:
+            return result if isinstance(result, list) else [result]
+    return None
+
+
+def _name_unsafe_after(stmts_after: List[ast.stmt], name: str) -> bool:
+    """True if `name` is read anywhere in stmts_after before being cleanly
+    reassigned — i.e. it's not safe to collapse away a fused match/ternary
+    that only `name` currently holds.
+
+    This codebase reuses generic scratch names (m/date/body) across
+    back-to-back upgrade/downgrade blocks in the same eval.exec — e.g.
+    `m = re.search(...)` for downgrade immediately follows the upgrade
+    block's fused-away `m`. A plain "is `name` referenced anywhere later"
+    check would treat that fresh, unrelated reassignment as a conflicting
+    use and refuse to fuse the (perfectly safe) first block. Instead, once
+    a later statement rebinds `name` via a plain `name = ...` with no
+    self-reference, name's earlier value has no more readers and everything
+    after that point is irrelevant to this fusion's safety.
+    """
+    for s in stmts_after:
+        read = any(
+            isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load)
+            for n in ast.walk(s)
+        )
+        if read:
+            return True
+        rebinds = (
+            isinstance(s, ast.Assign) and len(s.targets) == 1
+            and isinstance(s.targets[0], ast.Name) and s.targets[0].id == name
+        )
+        if rebinds:
+            return False
+    return False
+
+
+def _match_regex_ternary_fusion(
+    stmt_a: ast.stmt, stmt_b: ast.stmt, stmts_after: List[ast.stmt]
+) -> Optional[Dict]:
+    """m = re.search(pattern, y); x = m.group(n) if m else default
+    ->  a single text.regex_extract with a default, consuming both
+    statements. Only fires when `m` isn't read again later before being
+    reassigned — see _name_unsafe_after for why reassignment (not just any
+    later reference) is the real safety boundary."""
+    if not (isinstance(stmt_a, ast.Assign) and len(stmt_a.targets) == 1 and isinstance(stmt_a.targets[0], ast.Name)):
+        return None
+    m_name = stmt_a.targets[0].id
+    search_call = stmt_a.value
+    if not (isinstance(search_call, ast.Call) and isinstance(search_call.func, ast.Attribute)
+            and search_call.func.attr == "search" and isinstance(search_call.func.value, ast.Name)
+            and search_call.func.value.id == "re" and len(search_call.args) == 2 and not search_call.keywords):
+        return None
+
+    if not (isinstance(stmt_b, ast.Assign) and len(stmt_b.targets) == 1 and isinstance(stmt_b.targets[0], ast.Name)):
+        return None
+    x_name = stmt_b.targets[0].id
+    if not isinstance(stmt_b.value, ast.IfExp):
+        return None
+    test, body, orelse = stmt_b.value.test, stmt_b.value.body, stmt_b.value.orelse
+    if not (isinstance(test, ast.Name) and test.id == m_name):
+        return None
+    if not (isinstance(body, ast.Call) and isinstance(body.func, ast.Attribute) and body.func.attr == "group"
+            and isinstance(body.func.value, ast.Name) and body.func.value.id == m_name):
+        return None
+    if not isinstance(orelse, ast.Constant):
+        return None  # only literal defaults supported
+
+    if _name_unsafe_after(stmts_after, m_name):
+        return None  # m is read again before being reassigned — collapsing it away would change behavior
+
+    pattern = _expr_to_template(search_call.args[0])
+    source = _expr_to_template(search_call.args[1])
+    if pattern is None or source is None:
+        return None
+    group = 0
+    if body.args:
+        g = _index_value(body.args[0])
+        if g is None:
+            return None
+        group = g
+
+    step = {"action": "text.regex_extract", "value": source, "pattern": pattern,
+            "store_as": x_name, "default": orelse.value}
+    if group:
+        step["group"] = group
+    return step
+
+
+def _match_regex_strip_fusion(
+    stmt_a: ast.stmt, stmt_b: ast.stmt, stmt_c: ast.stmt, stmts_after: List[ast.stmt]
+) -> Optional[List[Dict]]:
+    """The date-suffix version idiom seen repeatedly in this codebase's
+    firmware-parsing cases:
+
+        m = re.search(pattern, y)
+        date = m.group(n) if m else default
+        body = y.replace('_' + date, '') if date else y
+
+    A regex substitution is already a no-op when nothing matches, so the
+    third statement's conditional is unnecessary — this collapses all three
+    into a text.regex_extract (for `date`) plus a single regex text.replace
+    (for `body`, stripping "_<date>" unconditionally) instead of trying to
+    preserve the ternary literally. Only fires when `m`/`date` aren't
+    referenced anywhere outside these three statements.
+    """
+    if not (isinstance(stmt_a, ast.Assign) and len(stmt_a.targets) == 1 and isinstance(stmt_a.targets[0], ast.Name)):
+        return None
+    m_name = stmt_a.targets[0].id
+    search_call = stmt_a.value
+    if not (isinstance(search_call, ast.Call) and isinstance(search_call.func, ast.Attribute)
+            and search_call.func.attr == "search" and isinstance(search_call.func.value, ast.Name)
+            and search_call.func.value.id == "re" and len(search_call.args) == 2 and not search_call.keywords):
+        return None
+    pattern_node, source_node = search_call.args
+    if not isinstance(source_node, ast.Name):
+        return None  # need a plain variable name to reuse it in the strip step too
+    source_name = source_node.id
+
+    if not (isinstance(stmt_b, ast.Assign) and len(stmt_b.targets) == 1 and isinstance(stmt_b.targets[0], ast.Name)):
+        return None
+    date_name = stmt_b.targets[0].id
+    if not isinstance(stmt_b.value, ast.IfExp):
+        return None
+    test_b, body_b, orelse_b = stmt_b.value.test, stmt_b.value.body, stmt_b.value.orelse
+    if not (isinstance(test_b, ast.Name) and test_b.id == m_name):
+        return None
+    if not (isinstance(body_b, ast.Call) and isinstance(body_b.func, ast.Attribute) and body_b.func.attr == "group"
+            and isinstance(body_b.func.value, ast.Name) and body_b.func.value.id == m_name):
+        return None
+    if not isinstance(orelse_b, ast.Constant):
+        return None
+    group = 0
+    if body_b.args:
+        g = _index_value(body_b.args[0])
+        if g is None:
+            return None
+        group = g
+
+    if not (isinstance(stmt_c, ast.Assign) and len(stmt_c.targets) == 1 and isinstance(stmt_c.targets[0], ast.Name)):
+        return None
+    body_name = stmt_c.targets[0].id
+    if not isinstance(stmt_c.value, ast.IfExp):
+        return None
+    test_c, body_c, orelse_c = stmt_c.value.test, stmt_c.value.body, stmt_c.value.orelse
+    if not (isinstance(test_c, ast.Name) and test_c.id == date_name):
+        return None
+    if not (isinstance(body_c, ast.Call) and isinstance(body_c.func, ast.Attribute) and body_c.func.attr == "replace"
+            and isinstance(body_c.func.value, ast.Name) and body_c.func.value.id == source_name
+            and len(body_c.args) == 2 and not body_c.keywords):
+        return None
+    strip_target = body_c.args[0]
+    if not (isinstance(strip_target, ast.BinOp) and isinstance(strip_target.op, ast.Add)
+            and isinstance(strip_target.left, ast.Constant) and strip_target.left.value == "_"
+            and isinstance(strip_target.right, ast.Name) and strip_target.right.id == date_name):
+        return None
+    replace_with_node = body_c.args[1]
+    if not (isinstance(replace_with_node, ast.Constant) and replace_with_node.value == ""):
+        return None
+    if not (isinstance(orelse_c, ast.Name) and orelse_c.id == source_name):
+        return None
+
+    # Only `m` (the raw match object) needs the safety check — it has no
+    # declarative equivalent, so if something later still needed the actual
+    # match object we couldn't represent that. `date`/`body` are this
+    # fusion's real outputs and survive as run variables via store_as, so a
+    # later read of them is exactly what's supposed to happen, not a hazard.
+    if _name_unsafe_after(stmts_after, m_name):
+        return None
+
+    pattern = _expr_to_template(pattern_node)
+    source = _expr_to_template(source_node)
+    if pattern is None or source is None:
+        return None
+
+    extract_step = {"action": "text.regex_extract", "value": source, "pattern": pattern,
+                     "store_as": date_name, "default": orelse_b.value}
+    if group:
+        extract_step["group"] = group
+    strip_step = {"action": "text.replace", "value": source, "find": "_" + pattern,
+                  "regex": True, "replace_with": "", "store_as": body_name}
+    return [extract_step, strip_step]
+
+
+def _simplify_exec_code(code: str) -> Optional[List[Dict]]:
+    """Try to convert a full eval.exec code block (semicolon-joined
+    statements — this codebase's convention for multi-statement eval.exec,
+    since embedded newlines get YAML-folded to spaces) into a list of
+    declarative steps.
+
+    Returns None (leave the original eval.exec untouched) if ANY statement
+    fails to match a known idiom — see the module docstring above this
+    section for why partial transformation isn't attempted.
+    """
+    try:
+        tree = ast.parse(code, mode="exec")
+    except SyntaxError:
+        return None
+    stmts = tree.body
+    if not stmts:
+        return None
+
+    results: List[Dict] = []
+    i, n = 0, len(stmts)
+    while i < n:
+        if i + 2 < n:
+            fused3 = _match_regex_strip_fusion(stmts[i], stmts[i + 1], stmts[i + 2], stmts[i + 3:])
+            if fused3 is not None:
+                results.extend(fused3)
+                i += 3
+                continue
+        if i + 1 < n:
+            fused = _match_regex_ternary_fusion(stmts[i], stmts[i + 1], stmts[i + 2:])
+            if fused is not None:
+                results.append(fused)
+                i += 2
+                continue
+        stmt = stmts[i]
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            simplified = _simplify_single_value(stmt.value, stmt.targets[0].id)
+            if simplified is not None:
+                results.extend(simplified)
+                i += 1
+                continue
+        cond_step = _match_conditional_action_stmt(stmt)
+        if cond_step is not None:
+            results.append(cond_step)
+            i += 1
+            continue
+        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            # Safe to drop unconditionally: this only reaches the caller as
+            # part of a fully-simplified block (we bail on the whole thing
+            # below otherwise), so nothing declarative we emitted needs the
+            # module — it was only ever needed by raw code we're replacing.
+            i += 1
+            continue
+        return None  # this statement doesn't match anything -- bail on the whole block
+    return results
+
+
+def _try_simplify_eval_step(step: Dict) -> Optional[List[Dict]]:
+    """If `step` is a dot-notation eval.exec/eval.run step that matches a
+    known idiom, return the declarative dot-notation step(s) to replace it
+    with. Returns None if it doesn't match anything (leave as-is)."""
+    if "eval.exec" in step:
+        code = str((step.get("eval.exec") or {}).get("code", ""))
+        new_steps = _simplify_exec_code(code)
+        if new_steps is None:
+            return None
+        return [_to_dot_notation(s) for s in new_steps]
+    if "eval.run" in step:
+        params = step.get("eval.run") or {}
+        expr = str(params.get("expression") or params.get("code") or "")
+        store_as = str(params.get("store_as", ""))
+        if not expr or not store_as:
+            return None
+        try:
+            tree = ast.parse(expr, mode="eval")
+        except SyntaxError:
+            return None
+        simplified = _simplify_single_value(tree.body, store_as)
+        if simplified is None:
+            return None
+        return [_to_dot_notation(s) for s in simplified]
+    return None
+
+
+def _simplify_eval_steps(steps: List[Dict]) -> List[Dict]:
+    """Walk a step list, recursing into control-flow bodies, replacing any
+    eval.exec/eval.run step that matches a recognized idiom with the
+    equivalent declarative step(s). Everything else passes through
+    unchanged."""
+    out: List[Dict] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            out.append(step)
+            continue
+        for key in ("steps", "loop_steps", "then_steps", "else_steps", "except_steps", "finally_steps"):
+            if isinstance(step.get(key), list):
+                step[key] = _simplify_eval_steps(step[key])
+        replacement = _try_simplify_eval_step(step)
+        out.extend(replacement if replacement is not None else [step])
+    return out
+
+
+def _count_unsimplified_eval(steps: List[Dict]) -> int:
+    n = 0
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if "eval.exec" in step or "eval.run" in step:
+            n += 1
+        for key in ("steps", "loop_steps", "then_steps", "else_steps", "except_steps", "finally_steps"):
+            if isinstance(step.get(key), list):
+                n += _count_unsimplified_eval(step[key])
+    return n
+
+
+def _flag_unsimplified_eval(steps: List[Dict], test_name: str, warnings: List[str]) -> None:
+    n = _count_unsimplified_eval(steps)
+    if n:
+        warnings.append(
+            f"Test '{test_name}': {n} eval.exec/eval.run step(s) didn't match a known "
+            f"simplification pattern and were left as-is — review manually."
+        )
 
 
 def _flag_todos(steps: List[Dict], test_name: str, warnings: List[str]) -> None:

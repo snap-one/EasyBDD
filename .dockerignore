@@ -80,5 +80,5 @@ Thumbs.db
 
 # Build artifacts
 *.egg-info/
-easy_bdd_framework.egg-info/
+easybdd_framework.egg-info/
 

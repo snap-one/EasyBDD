@@ -1,0 +1,64 @@
+# MCPB bundle exclusions — files/dirs listed here are NOT included in easy-bdd.mcpb
+
+# Python runtime artifacts
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg/
+dist/
+build/
+.eggs/
+
+# Non-server project content — not needed to run the MCP server
+Firmware/
+chrome_extension/
+docs/
+config/
+tests/
+archive/
+examples/
+frontend/
+scripts/
+
+# Test output / reports (keep tests/cases but not generated outputs)
+reports/
+*.webm
+*.mp4
+tests/features/
+
+# Version control & CI
+.git/
+.gitignore
+.pre-commit-config.yaml
+.github/
+Jenkinsfile
+Jenkinsfile.*
+
+# Secrets — NEVER bundle .env
+.env
+.env.*
+
+# Archive / demos
+archive/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Dev config not needed at runtime
+.flake8
+.coverage
+*.coverage
+.mypy_cache/
+
+# The bundle itself
+*.mcpb
+build_mcpb.py

@@ -20,8 +20,8 @@ pipeline {
         )
         string(
             name: 'RUN_PREFIX',
-            defaultValue: 'EASY_BDD:',
-            description: 'TestRail run name prefix to match (e.g. EASY_BDD:, Debug:, Mark:)'
+            defaultValue: 'EASYBDD:',
+            description: 'TestRail run name prefix to match (e.g. EASYBDD:, Debug:, Mark:)'
         )
         string(
             name: 'BRANCH',
@@ -53,7 +53,7 @@ pipeline {
                         rm -f reports/run_${projectId}.properties
                         set -a && . .env && set +a
                         . env/bin/activate
-                        python -m easy_bdd testrail-run ${projectId} --prefix '${runPrefix}' || true
+                        python -m easybdd testrail-run ${projectId} --prefix '${runPrefix}' || true
                     """
                 }
             }
@@ -82,6 +82,14 @@ pipeline {
                 currentBuild.displayName = "#${BUILD_NUMBER} — No runs found [${branch}]"
                 currentBuild.description = "Project: ${projectName} | Prefix: ${runPrefix} | Branch: ${branch}"
             }
+            publishHTML(target: [
+                allowMissing: true,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: "${WORKSPACE}/reports",
+                reportFiles: '**/*_report_*.html',
+                reportName: 'Easy BDD Report'
+            ])
         }
     }
 }

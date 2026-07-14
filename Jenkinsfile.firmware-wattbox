@@ -1,0 +1,200 @@
+// Jenkinsfile for jpdsauto/Wattbox-Firmware
+// Detects which firmware types changed (.bin files) and creates one
+// TestRail run per SKU (Given: case) in the matching subsections.
+
+pipeline {
+    agent { label 'built-in' }
+
+    // Jenkins and Floci both run on this same box, and this server has no
+    // public endpoint for GitHub to webhook into — so poll instead. A cheap
+    // git ls-remote every 5 min; a full checkout/build only runs when the
+    // remote SHA actually moved.
+    triggers {
+        pollSCM('H/5 * * * *')
+    }
+
+    environment {
+        PROJECT_ID    = '77'
+        SUITE_ID      = '106658'
+        EASY_BDD_DIR  = '/var/lib/jenkins/workspace/EASY_BDD'
+        PYTHON        = '/var/lib/jenkins/workspace/EASY_BDD/env/bin/python'
+        // Bucket name to mirror changed firmware into on the local Floci
+        // instance (http://localhost:4566 by default — see FLOCI_ENDPOINT_URL
+        // below). Set this to the same name as the real S3 bucket so existing
+        // folder_prefix / discover_prefix test YAML works unchanged when
+        // pointed at floci.* actions instead of aws.*/s3.* ones.
+        FLOCI_BUCKET       = 'wattbox'
+        FLOCI_ENDPOINT_URL = 'http://localhost:4566'
+    }
+
+    stages {
+
+        stage('Detect Changed Firmware') {
+            steps {
+                script {
+                    def changedFiles = []
+
+                    // Diff from the last *successful* build's commit, not just
+                    // the previous build's — GIT_PREVIOUS_COMMIT advances even
+                    // when a build fails/aborts before mirroring finishes, which
+                    // would silently drop that commit's firmware files from every
+                    // future diff. GIT_PREVIOUS_SUCCESSFUL_COMMIT never does.
+                    def baseCommit = env.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: env.GIT_PREVIOUS_COMMIT
+
+                    if (baseCommit && baseCommit != env.GIT_COMMIT) {
+                        def diff = sh(
+                            script: "git diff --name-only ${baseCommit} ${env.GIT_COMMIT}",
+                            returnStdout: true
+                        ).trim()
+                        changedFiles = diff ? diff.split('\n').toList() : []
+                    } else {
+                        // First build or manual trigger — check the most recent commit
+                        def diff = sh(
+                            script: "git show --name-only --pretty=format: HEAD",
+                            returnStdout: true
+                        ).trim()
+                        changedFiles = diff ? diff.split('\n').findAll { it.trim() } : []
+                    }
+
+                    echo "Changed files: ${changedFiles}"
+
+                    // Map filename keywords → firmware type config
+                    def firmwareTypes = [
+                        vps : [
+                            keyword   : 'vps',
+                            sections  : ['Functions', 'Firmware Resiliency', 'VPS Web UI',  'VPS API'],
+                            givenSection: 'VPS',
+                        ],
+                        wifi: [
+                            keyword   : 'wifi',
+                            sections  : ['Functions', 'Firmware Resiliency', 'WiFi Web UI', 'WiFi API'],
+                            givenSection: 'WiFi',
+                        ],
+                        ns  : [
+                            keyword   : 'ns',
+                            sections  : ['Functions', 'Firmware Resiliency', 'NS Web UI',   'NS API'],
+                            givenSection: 'NS',
+                        ],
+                    ]
+
+                    def detected = [] as Set
+                    def changedBinFiles = []
+                    changedFiles.each { f ->
+                        def fn = f.toLowerCase()
+                        if (fn.endsWith('.bin')) {
+                            changedBinFiles << f
+                            firmwareTypes.each { type, cfg ->
+                                if (fn.contains(cfg.keyword)) {
+                                    detected << type
+                                    echo "✅  Detected ${type.toUpperCase()} firmware: ${f}"
+                                }
+                            }
+                        }
+                    }
+
+                    // Every changed .bin file, regardless of whether it matched a
+                    // known firmware type — used by the Floci mirror stage below,
+                    // which is independent of TestRail run creation.
+                    env.CHANGED_BIN_FILES = changedBinFiles.join('\n')
+
+                    if (detected.isEmpty()) {
+                        echo "No .bin firmware files changed — nothing to do."
+                        currentBuild.result = 'SUCCESS'
+                        env.DETECTED_TYPES = ''
+                        return
+                    }
+
+                    env.DETECTED_TYPES = detected.join(',')
+                    echo "Firmware types to create runs for: ${env.DETECTED_TYPES}"
+                }
+            }
+        }
+
+        stage('Mirror Firmware to Floci') {
+            // Independent of S3 and of TestRail run creation — Floci gets a
+            // copy of every changed firmware file in addition to whatever
+            // already happens with the real S3 bucket. Runs even if none of
+            // the files matched a known firmware type above.
+            when { expression { env.CHANGED_BIN_FILES?.trim() } }
+            steps {
+                script {
+                    // git diff --name-only also lists deleted files — skip
+                    // anything no longer present in the working tree (e.g. a
+                    // removed/renamed firmware file) rather than failing the
+                    // build trying to upload a file that doesn't exist.
+                    //
+                    // .toList() before .findAll matters here: split() returns a
+                    // raw array, and calling the fileExists step inside a
+                    // closure iterating a raw array trips Jenkins' CPS
+                    // checkpointing with a NotSerializableException on
+                    // ArrayIterator. Lists iterate with a serializable
+                    // iterator, so convert first.
+                    def files = env.CHANGED_BIN_FILES.split('\n').toList().findAll { it?.trim() && fileExists(it.trim()) }
+                    if (files.isEmpty()) {
+                        echo "No changed firmware files still present on disk — nothing to mirror."
+                        return
+                    }
+                    echo "Mirroring ${files.size()} firmware file(s) to Floci (${env.FLOCI_ENDPOINT_URL}, bucket: ${env.FLOCI_BUCKET})"
+
+                    def filesArg = files.collect { "\"${it}\"" }.join(' ')
+
+                    sh """
+                        set -a && . ${EASY_BDD_DIR}/.env && set +a
+                        . ${EASY_BDD_DIR}/env/bin/activate
+                        python -m easybdd floci-upload \\
+                            ${FLOCI_BUCKET} ${filesArg} \\
+                            --endpoint-url ${FLOCI_ENDPOINT_URL}
+                    """
+                }
+            }
+        }
+
+        stage('Create TestRail Runs') {
+            when { expression { env.DETECTED_TYPES?.trim() } }
+            steps {
+                script {
+                    def types = env.DETECTED_TYPES.split(',')
+
+                    def firmwareTypes = [
+                        vps : [
+                            sections    : ['Functions', 'Firmware Resiliency', 'VPS Web UI',  'VPS API'],
+                            givenSection: 'VPS',
+                        ],
+                        wifi: [
+                            sections    : ['Functions', 'Firmware Resiliency', 'WiFi Web UI', 'WiFi API'],
+                            givenSection: 'WiFi',
+                        ],
+                        ns  : [
+                            sections    : ['Functions', 'Firmware Resiliency', 'NS Web UI',   'NS API'],
+                            givenSection: 'NS',
+                        ],
+                    ]
+
+                    types.each { type ->
+                        def cfg = firmwareTypes[type]
+                        if (!cfg) { echo "⚠ Unknown firmware type '${type}' — skipping"; return }
+
+                        def sectionsArg = cfg.sections.collect { "\"${it}\"" }.join(' ')
+                        echo "Creating runs for ${type.toUpperCase()} (Given: section: '${cfg.givenSection}')"
+
+                        sh """
+                            set -a && . ${EASY_BDD_DIR}/.env && set +a
+                            . ${EASY_BDD_DIR}/env/bin/activate
+                            python -m easybdd testrail-create-run \\
+                                ${PROJECT_ID} ${SUITE_ID} \\
+                                --given-section "${cfg.givenSection}" \\
+                                --sections ${sectionsArg} \\
+                                --description "Firmware drop detected in commit ${env.GIT_COMMIT?.take(8) ?: 'unknown'} (branch: ${env.GIT_BRANCH ?: 'main'})"
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Firmware drop pipeline complete. Detected types: ${env.DETECTED_TYPES ?: 'none'}"
+        }
+    }
+}

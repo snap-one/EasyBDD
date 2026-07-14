@@ -11,8 +11,8 @@ This workspace contains a user-friendly BDD testing framework that doesn't rely 
 
 ## Key Components
 
-- `easy_bdd/core/` - Framework core modules (config, parser, generator, runner)
-- `easy_bdd/services/` - Protocol service implementations
+- `easybdd/core/` - Framework core modules (config, parser, generator, runner)
+- `easybdd/services/` - Protocol service implementations
 - `tests/cases/` - YAML test definitions
 - `tests/features/` - Generated Gherkin files
 - `config/` - Framework configuration
@@ -52,6 +52,6 @@ steps:
 
 ## Available Commands
 
-- `python -m easy_bdd run [path]` - Run tests
-- `python -m easy_bdd generate [path]` - Generate Gherkin only
+- `python -m easybdd run [path]` - Run tests
+- `python -m easybdd generate [path]` - Generate Gherkin only
 - Use `--tags` to filter tests by tags

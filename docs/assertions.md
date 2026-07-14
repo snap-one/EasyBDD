@@ -460,6 +460,24 @@ The following built-in Python functions are available in expressions:
 - `any()` - Check if any true
 - `all()` - Check if all true
 
+### Substring Helpers
+
+- `contains(container, item)` - Same as `item in container`, but casts both sides to `str()` first
+- `not_contains(container, item)` - Inverse of `contains()`
+
+Use these instead of the `'x' in str(y)` / `'x' not in str(y)` idiom when `y` (e.g. `last_response`)
+might not already be a string — they read the same either way, without the extra cast:
+
+```yaml
+# Instead of: expression: "'error' not in str(last_response)"
+- action: Assert
+  expression: "not_contains(last_response, 'error')"
+
+# Instead of: expression: "'${mac}' in str(last_response)"
+- action: Assert
+  expression: "contains(last_response, '${mac}')"
+```
+
 ### Example Usage
 
 ```yaml

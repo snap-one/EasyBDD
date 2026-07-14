@@ -83,7 +83,7 @@ ERROR: Could not start browser process
 **Solutions:**
 ```bash
 # 1. Run in headless mode
-python -m easy_bdd run tests/cases/test.yaml
+python -m easybdd run tests/cases/test.yaml
 
 # 2. Try different browser
 # Edit config/framework.yaml:
@@ -257,7 +257,7 @@ ls -la .env
 
 # 2. Load environment manually
 export BASE_URL="https://staging.example.com"
-python -m easy_bdd run tests/cases/test.yaml
+python -m easybdd run tests/cases/test.yaml
 
 # 3. Use default values in YAML
 variables:
@@ -276,7 +276,7 @@ logging:
 
 ```bash
 # Run with verbose output
-python -m easy_bdd run tests/cases/test.yaml --verbose
+python -m easybdd run tests/cases/test.yaml --verbose
 
 # Check logs
 tail -f logs/debug.log
@@ -383,22 +383,22 @@ cleanup:
 ### Isolate Failing Tests
 ```bash
 # Run single test
-python -m easy_bdd run tests/cases/failing_test.yaml
+python -m easybdd run tests/cases/failing_test.yaml
 
 # Run specific data iteration
 # Edit YAML to include only failing data item
 
 # Run with tags
-python -m easy_bdd run tests/cases/ --tags debug
+python -m easybdd run tests/cases/ --tags debug
 ```
 
 ### Validate Test Structure
 ```bash
 # Generate Gherkin only (validates syntax)
-python -m easy_bdd generate tests/cases/test.yaml
+python -m easybdd generate tests/cases/test.yaml
 
 # Dry run (parse without execution)
-python -m easy_bdd run tests/cases/test.yaml --dry-run
+python -m easybdd run tests/cases/test.yaml --dry-run
 ```
 
 ### Check Browser State
@@ -421,7 +421,7 @@ pip list | grep -E "(playwright|easy-bdd)"
 playwright --version
 
 # Test execution with debug
-python -m easy_bdd run tests/cases/test.yaml --verbose --debug
+python -m easybdd run tests/cases/test.yaml --verbose --debug
 
 # Browser information
 ls ~/.cache/ms-playwright/  # Linux/macOS
@@ -482,3 +482,251 @@ When reporting issues, include:
 ---
 
 *If you can't resolve an issue, create a detailed bug report with the information above.*
+
+---
+
+## TestRail & Runner Gotchas
+
+Issues discovered during live test-authoring and debugging sessions. Each item
+lists the symptom, root cause, and the fix or workaround.
+
+---
+
+### `expression: True` in `test.assert` raises TypeError
+
+**Error:**
+```
+TypeError: compile() arg 1 must be a string, bytes or AST object
+```
+
+**Root cause:** YAML bare `True` / `False` becomes a Python `bool`. The runner
+passes the value to `compile()`, which requires a string.
+
+**Solution:** Always quote expression values in YAML:
+```yaml
+# Wrong
+- action: test.assert
+  expression: True
+
+# Correct
+- action: test.assert
+  expression: "True"
+
+- action: test.assert
+  expression: "status_code == 200"
+```
+
+---
+
+### Method calls blocked in `test.assert` expressions
+
+**Error:**
+```
+AssertionError: expression evaluation blocked: method calls not permitted
+```
+
+**Root cause:** The expression evaluator restricts `.method()` calls for security.
+
+**Solution:** Use subscript (bracket) notation instead of method calls:
+```yaml
+# Wrong
+expression: "payload.get('status')"
+
+# Correct
+expression: "payload['status'] == 'ok'"
+```
+
+---
+
+### `store_as` param not working for `api.request`
+
+**Symptom:** Variable appears undefined in later steps after using `store_as:` on
+an `api.request` action.
+
+**Root cause:** The runner was reading `params.get("store_response")` only. The
+documented canonical name is `store_as`.
+
+**Solution:** Fixed in the runner — both `store_as` and `store_response` now
+work. Use `store_as:` going forward:
+```yaml
+- action: api.request
+  method: GET
+  url: ${api_base}/status
+  store_as: api_response
+```
+
+---
+
+### `aws.list_files` returns False / fails when no files match
+
+**Symptom:** Step marked as failed even though "no files found yet" is expected.
+
+**Root cause:** The handler returned `len(urls) > 0`, which evaluates to `False`
+on an empty result — causing the step to register as a failure.
+
+**Solution:** Fixed — the handler now always returns `True` and stores an empty
+list `[]`. Assert on the list length in a separate `test.assert` step if needed:
+```yaml
+- action: aws.list_files
+  bucket: my-bucket
+  prefix: exports/
+  store_as: found_files
+
+- action: test.assert
+  expression: "len(found_files) > 0"
+  message: "Expected at least one exported file"
+```
+
+---
+
+### `no_datalake: True` variable does not stop datalake posts
+
+**Symptom:** Datalake results are posted even though `no_datalake: True` is set
+in the test variables block.
+
+**Root cause:** The runner only checked the CLI `--no-datalake` flag. Test-level
+variables were never read for this setting.
+
+**Solution:** Fixed in `runner.py` and `testrail_runner.py` — both now check the
+`no_datalake` key in test variables and per-data-row variables. Set it at either
+level:
+```yaml
+variables:
+  no_datalake: True
+```
+
+---
+
+### `folder_prefix` set to a Python list causes S3 API error
+
+**Symptom:** S3 call fails with an error about an invalid prefix type.
+
+**Root cause:** The `folder_prefix` parameter was set to a YAML list, but the S3
+`list_objects` API requires a string prefix.
+
+**Solution:** Use `discover_prefix: true` to let the framework resolve the prefix
+dynamically, instead of passing a hard-coded list:
+```yaml
+# Wrong
+folder_prefix:
+  - exports/
+  - archive/
+
+# Correct
+discover_prefix: true
+```
+
+---
+
+### `testrail-create-run` creates duplicate runs
+
+**Symptom:** Running `testrail-create-run` twice for the same suite creates two identical open runs.
+
+**Root cause:** The command does not check for existing open runs before creating a new one.
+
+**Fix:** Use `--dry-run` to preview the runs that would be created before committing:
+
+```bash
+python -m easybdd testrail-create-run 77 52630 \
+  --given-section "VPS" \
+  --sections "Functions" "Firmware Resiliency" \
+  --dry-run
+```
+
+If duplicate runs are already present, close or delete the extras manually in TestRail.
+
+---
+
+### `ovrc disconnect` fails with "requires server_url" or routes to connect handler
+
+**Symptom:** An `ovrc disconnect` step errors out as if no server URL was
+provided, or behaves like a connect step.
+
+**Root cause:** The routing condition used `"connect" in action_lower`, which is
+`True` for the string `"ovrc disconnect"` because `disconnect` contains the
+substring `connect`. Disconnect steps were silently dispatched to the connect
+handler.
+
+**Solution:** Fixed — the connect branch now explicitly excludes disconnect:
+```python
+if "connect" in action_lower and "disconnect" not in action_lower:
+```
+
+No YAML changes are needed; existing test cases work correctly after the fix.
+
+---
+
+### `all_dummy` / `all_upgraded` assertion fails even though all devices are on the correct firmware
+
+**Symptom:** An `all_dummy` or `all_upgraded` aggregate assertion evaluates to `False` even after confirming that every active endpoint device is on the expected firmware.
+
+**Root cause:** The generator expression iterates ALL variables whose names end with `_fw_version_after_upgrade`, including model-level variables (e.g., `B-900-MOIP-4K-RX_fw_version_after_upgrade`) that were set during an earlier test phase and never updated. These stale values cause the `all(...)` check to fail.
+
+**Fix:** Scope the generator to per-MAC/unit-ID variables only, using the same prefix pattern that other assertions (like `all_ips_valid`) already use. For example, if per-device variables are named `$unit_id_<mac>_fw_version_after_upgrade`, add a `startswith` filter:
+
+```python
+# WRONG — picks up stale model-level variables from earlier phases
+all_dummy = all(
+    "-DM" in str(variables.get(k, ""))
+    for k in variables
+    if str(k).endswith("_fw_version_after_upgrade")
+)
+
+# CORRECT — scoped to per-MAC endpoint variables only
+all_dummy = all(
+    "-DM" in str(variables.get(k, ""))
+    for k in variables
+    if str(k).startswith("$unit_id_") and str(k).endswith("_fw_version_after_upgrade")
+)
+```
+
+**Lesson:** When writing aggregate assertions over dynamically-named variables, always scope to the exact prefix/suffix pattern to avoid picking up stale variables from earlier test phases.
+
+---
+
+### `Setup:` case fails with "Unrecognised body format"
+
+**Symptom:** A `Setup:` (or `Teardown:`) case that contains inline YAML steps fails to run with an error like `Unrecognised body format` or the steps are simply skipped.
+
+**Root cause:** In older versions, Setup: cases only supported `tag:` or `file:` body formats. Inline steps were not recognized.
+
+**Fix:** The runner now supports a `steps:` block directly in the Setup:/Teardown: case body. Write the body starting with `steps:`:
+
+```yaml
+steps:
+  - aws.list_files:
+      bucket_name: ${bucket_name}
+      folder_prefix: moip/
+      file_extension: .bin
+      store_as: firmware_files
+  - eval.run:
+      expression: "next((f for f in firmware_files if '-DM' not in f), None)"
+      store_as: upgrade_file
+```
+
+Alternatively, just write steps directly without the `steps:` key — the runner also recognizes a body that begins with `- ` (a YAML list) as inline steps.
+
+---
+
+### YAML parse error on `data: {deviceId: ${var}, ...}`
+
+**Symptom:** A step with a `data:` parameter containing a variable substitution fails at parse time with a YAML error:
+
+```
+could not find expected ':'
+mapping values are not allowed here
+```
+
+**Root cause:** When `${var}` appears inside a YAML flow mapping (`{...}`), the YAML parser may interpret the `{` in `${` as the start of a nested flow mapping, causing a parse error.
+
+**Fix:** Use Python dict literal style with single-quoted string values instead of YAML flow mapping syntax:
+
+```yaml
+# WRONG — ${wb_mac} confuses the YAML parser inside { }
+data: {deviceId: ${wb_mac}, version: 1, outlets: [13, 14, 15, 16]}
+
+# CORRECT — Python dict literal with single-quoted strings
+data: {'deviceId': '${wb_mac}', 'version': 1, 'outlets': [13, 14, 15, 16]}
+```
+
+Numeric values and lists do not need quotes. Only string values that contain or could be confused with YAML special characters need to be single-quoted.

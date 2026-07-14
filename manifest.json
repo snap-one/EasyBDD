@@ -1,0 +1,139 @@
+{
+  "manifest_version": "0.3",
+  "name": "easy-bdd",
+  "display_name": "Easy BDD Framework",
+  "version": "1.0.0",
+  "description": "AI-powered BDD testing assistant for the Easy BDD framework — run, validate, fix, and generate YAML test cases with TestRail and Playwright integration.",
+  "long_description": "Easy BDD is a YAML-driven BDD testing framework with multi-protocol support (browser, API, WebSocket, serial, AWS). This MCP server exposes the framework to AI models as tools, resources, and prompts.\n\n**Tools include:** running tests, validating YAML syntax, auto-fixing errors, probing selectors on live pages, importing Playwright recordings, syncing with TestRail, and generating tests via Ollama.\n\n**Prompts include:** generate_tests, debug_failure, and validate_and_fix — packaged workflows for common QA tasks.\n\n**Requires:** Python 3.10+, uv runtime.",
+  "author": {
+    "name": "ADI Global / Snap One Engineering",
+    "email": "mark.fomin@adiglobal.com"
+  },
+  "keywords": ["bdd", "testing", "playwright", "testrail", "yaml", "qa", "automation"],
+  "license": "MIT",
+  "server": {
+    "type": "python",
+    "entry_point": "easybdd/__main__.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory", "${__dirname}",
+        "--extra", "mcp",
+        "python", "-m", "easybdd", "mcp-serve"
+      ],
+      "env": {
+        "TESTRAIL_URL":      "${user_config.testrail_url}",
+        "TESTRAIL_USERNAME": "${user_config.testrail_username}",
+        "TESTRAIL_API_KEY":  "${user_config.testrail_api_key}",
+        "OLLAMA_BASE_URL":   "${user_config.ollama_base_url}",
+        "CRAWLER_AI_MODEL":  "${user_config.ollama_model}"
+      }
+    }
+  },
+  "tools": [
+    { "name": "list_tests",               "description": "List Easy BDD test files, optionally filtered by tags" },
+    { "name": "get_test",                 "description": "Return raw YAML content of a single test file" },
+    { "name": "validate_test",            "description": "Validate a test file or YAML snippet for syntax errors" },
+    { "name": "get_shared_steps",         "description": "Return shared_steps.yaml contents" },
+    { "name": "run_tests",                "description": "Run Easy BDD tests (dry_run=true by default)" },
+    { "name": "get_failure_trace",        "description": "Return execution trace from the most recent test report" },
+    { "name": "preview_fix",              "description": "Preview auto-correctable fixes without writing files" },
+    { "name": "apply_fix",               "description": "Apply auto-correctable fixes to a test YAML file in place" },
+    { "name": "validate_testrail_case",   "description": "Validate Easy BDD syntax in TestRail test cases via API" },
+    { "name": "probe_selector",           "description": "Test whether CSS/ARIA/text selectors resolve on a live page" },
+    { "name": "fix_test_selectors",       "description": "Heal selector issues in a YAML file against a live page" },
+    { "name": "fix_crawled_tests",        "description": "Batch-heal selector issues across multiple crawled test files" },
+    { "name": "get_testrail_run_failures","description": "Fetch failed/retest cases from a TestRail run" },
+    { "name": "repush_yaml_to_testrail",  "description": "Re-push a YAML file's steps to a TestRail case's Preconditions" },
+    { "name": "import_playwright_recording", "description": "Convert a Playwright recording to Easy BDD YAML test cases" },
+    { "name": "ollama_chat",              "description": "Send a prompt directly to the configured Ollama model" },
+    { "name": "ollama_analyze_test",      "description": "Ask Ollama to review an Easy BDD test case and suggest improvements" },
+    { "name": "ollama_generate_tests",    "description": "Ask Ollama to generate new Easy BDD test cases for a feature" },
+    { "name": "ollama_improve_testrail_case", "description": "Fetch a TestRail case and improve its steps via Ollama" },
+    { "name": "crawl_device",             "description": "Crawl a live device UI with Playwright and generate an Easy BDD/TestRail suite" }
+  ],
+  "tools_generated": false,
+  "prompts": [
+    {
+      "name": "generate_tests",
+      "description": "Generate Easy BDD test cases for a module or feature",
+      "arguments": ["module", "description"],
+      "text": "Generate complete, runnable Easy BDD YAML test cases for the module '${arguments.module}'. ${arguments.description}"
+    },
+    {
+      "name": "debug_failure",
+      "description": "Diagnose a failing test and suggest a concrete fix",
+      "arguments": ["test_name", "report_path"],
+      "text": "Diagnose why the Easy BDD test '${arguments.test_name}' failed (report: ${arguments.report_path}) and suggest a concrete YAML fix."
+    },
+    {
+      "name": "validate_and_fix",
+      "description": "Validate a test file and interactively apply suggested fixes",
+      "arguments": ["path"],
+      "text": "Validate the Easy BDD test file at '${arguments.path}', explain each issue found, and apply auto-fixable corrections after confirming with me."
+    },
+    {
+      "name": "debug_testrail_run",
+      "description": "End-to-end workflow to debug every failure in a TestRail run and optionally fix + re-push",
+      "arguments": ["run_id", "auto_fix"],
+      "text": "Debug every failing case in TestRail run R${arguments.run_id}: triage failures, validate the corresponding local YAML, probe live selectors, and (auto_fix=${arguments.auto_fix}) preview or apply and re-push fixes."
+    },
+    {
+      "name": "validate_testrail_suite",
+      "description": "Validate every case in a TestRail suite and produce a prioritised fix plan",
+      "arguments": ["project_id", "suite_id", "fix"],
+      "text": "Validate every Feature:/Shared: case in TestRail project ${arguments.project_id}, suite ${arguments.suite_id}. Summarise errors and warnings, then (fix=${arguments.fix}) propose or generate corrected YAML for each fixable issue."
+    },
+    {
+      "name": "create_test_from_description",
+      "description": "Generate Easy BDD tests from a plain-English feature description, optionally pushing them to TestRail",
+      "arguments": ["feature_description", "page_url", "project_id", "suite_id", "count"],
+      "text": "Generate ${arguments.count} Easy BDD test cases for: ${arguments.feature_description} (page: ${arguments.page_url}). Validate the YAML, then offer to push to TestRail project ${arguments.project_id} / suite ${arguments.suite_id} after confirmation."
+    }
+  ],
+  "user_config": {
+    "testrail_url": {
+      "type": "string",
+      "title": "TestRail URL",
+      "description": "Your TestRail instance URL (e.g. https://yourcompany.testrail.io)",
+      "required": false,
+      "default": ""
+    },
+    "testrail_username": {
+      "type": "string",
+      "title": "TestRail Username",
+      "description": "Your TestRail username / email address",
+      "required": false,
+      "default": ""
+    },
+    "testrail_api_key": {
+      "type": "string",
+      "title": "TestRail API Key",
+      "description": "TestRail API key (generate in My Settings → API Keys)",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "ollama_base_url": {
+      "type": "string",
+      "title": "Ollama Base URL",
+      "description": "Base URL for the local Ollama server",
+      "required": false,
+      "default": "http://localhost:11434"
+    },
+    "ollama_model": {
+      "type": "string",
+      "title": "Ollama Model",
+      "description": "Ollama model name for AI-powered test generation and analysis",
+      "required": false,
+      "default": "qwen3-coder:30b-a3b-q4_K_M"
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}

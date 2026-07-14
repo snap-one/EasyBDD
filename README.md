@@ -1,6 +1,6 @@
 # Easy BDD Testing Framework
 
-A YAML-based test automation framework supporting browser automation, REST APIs, WebSockets, serial/telnet connections, AWS S3, and more. Tests are written in plain YAML and run from the command line or a web-based test builder — no programming required.
+A TestRail-first test automation framework for web UI, REST API, and firmware resiliency testing. Test cases are authored directly in TestRail using plain dot-notation YAML — no programming required.
 
 ---
 
@@ -8,18 +8,33 @@ A YAML-based test automation framework supporting browser automation, REST APIs,
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-- [Test Format](#test-format)
-- [Variables](#variables)
+- [Authoring Tests in TestRail](#authoring-tests-in-testrail)
+  - [Case prefix taxonomy](#case-prefix-taxonomy)
+  - [Feature: case format](#feature-case-format)
+  - [Variables in TestRail](#variables-in-testrail)
+  - [Running from the CLI](#running-from-the-cli)
+  - [Case templates](#case-templates)
 - [Actions Reference](#actions-reference)
+  - [Browser / Web UI](#browser--web-ui)
+  - [API](#api)
+  - [SSH](#ssh)
+  - [Telnet](#telnet)
+  - [Serial](#serial)
+  - [WebSocket / OVRC / JSON-RPC](#websocket--ovrc--json-rpc)
+  - [AWS S3](#aws-s3)
+  - [Assertions and extraction](#assertions-and-extraction)
+  - [Test utilities](#test-utilities)
+  - [Eval](#eval)
 - [Control Flow](#control-flow)
-- [Shared Steps](#shared-steps)
+- [Shared Steps in TestRail](#shared-steps-in-testrail)
 - [Connections](#connections)
-- [TestRail Integration](#testrail-integration)
-- [Migration Tools](#migration-tools)
-- [Test Builder UI](#test-builder-ui)
 - [Configuration](#configuration)
-- [Project Structure](#project-structure)
+- [Local YAML (supplemental)](#local-yaml-supplemental)
+- [Test Builder UI](#test-builder-ui)
+- [AI Assistant Integration (MCP)](#ai-assistant-integration-mcp)
+- [Migration Tools](#migration-tools)
 - [CLI Reference](#cli-reference)
+- [Project Structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -30,21 +45,15 @@ A YAML-based test automation framework supporting browser automation, REST APIs,
 git clone <repository-url>
 cd Easy_BDD
 python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # macOS/Linux
+source .venv/bin/activate     # macOS/Linux
+# .venv\Scripts\activate      # Windows
 
 pip install --upgrade pip
 pip install -e .
 playwright install chromium
 ```
 
-Install Test Builder dependencies (required for the web UI):
-
-```bash
-pip install -r frontend/requirements_builder.txt
-```
-
-Configure credentials via `.env` in the project root:
+Add credentials to `.env` in the project root:
 
 ```
 TESTRAIL_URL=https://your-instance.testrail.com/
@@ -59,554 +68,657 @@ AWS_DEFAULT_REGION=us-east-1
 
 ## Quick Start
 
-**Start the web UI:**
+**Find and run all pending TestRail tests in a project:**
 
 ```bash
-python frontend/start_builder.py
-# Open http://localhost:8000
+python -m easybdd testrail-run --project-id 12
 ```
 
-**Run a test from the command line:**
+**Run a specific TestRail run by ID:**
 
 ```bash
-python -m easy_bdd run tests/cases/my_test.yaml
-python -m easy_bdd run tests/cases/my_test.yaml --headed   # visible browser
-python -m easy_bdd run tests/cases/ --tags smoke            # by tag
+python -m easybdd testrail-run --run-id 194434
 ```
+
+**List runs available to execute:**
+
+```bash
+python -m easybdd testrail-list --project-id 12
+```
+
+Results are posted back to TestRail automatically — pass/fail/skip per case, plus a run summary. See [Authoring Tests in TestRail](#authoring-tests-in-testrail) for how to write the cases.
+
+> **Running local YAML files:** `python -m easybdd run tests/cases/my_test.yaml` — see [Local YAML (supplemental)](#local-yaml-supplemental).
 
 ---
 
-## Test Format
+## Authoring Tests in TestRail
 
-Every test is a YAML file with the following structure:
+All test logic lives in TestRail. The runner discovers cases by their title prefix, reads their Preconditions field as YAML, executes the steps, and posts the result back.
 
-```yaml
-name: Login and verify dashboard
-description: Verifies a user can log in and reach the dashboard
-tags: [smoke, browser]
+### Case prefix taxonomy
 
+Every case title must begin with one of these prefixes:
+
+| Prefix | Purpose |
+|---|---|
+| `Feature: <name>` | **Primary test case.** Steps written inline in the Preconditions field as dot-notation YAML. |
+| `Var: <name>` | Variable definitions injected into all Feature/Test cases in the run. |
+| `Setup: <name>` | Runs before Feature/Test cases — use for authentication, device prep. |
+| `Teardown: <name>` | Runs after all Feature/Test cases — use for cleanup and logout. |
+| `Shared: <name>` | Reusable step library called by name from Feature: cases. |
+| `Test: <name>` | Pointer test — body contains `tag:` or `file:` routing to a local YAML file. |
+
+A typical TestRail run contains:
+
+```
+Var:  base_url           ← injects ${base_url} into all cases
+Var:  device_ip          ← injects ${device_ip}
+Setup: Login             ← auth steps, runs first
+Feature: Create device   ← test case 1
+Feature: Update firmware ← test case 2
+Teardown: Logout         ← cleanup, runs last
+```
+
+### Feature: case format
+
+Write dot-notation YAML directly in the **Preconditions** field of a `Feature:` case. No local files needed.
+
+**Step format — dot-notation, flush-left params (paste directly into TestRail Preconditions):**
+
+```
+- service.verb:
+param1: value1
+param2: value2
+```
+
+The runner re-indents parameters automatically — no manual alignment needed in TestRail.
+
+**Flow-style (single-line — preferred for complex params in TestRail):**
+
+```
+- service.verb: {param1: value1, param2: value2}
+```
+
+**Complete example — API test (Preconditions field):**
+
+```
 variables:
-  base_url: https://staging.example.com
-  username: testuser
-  password: ${DEVICE_PASSWORD}   # resolved from .env
+base_url: https://staging-api.example.com
+device_id: 1001
 
 steps:
-  - action: browser.open
-    url: ${base_url}/login
-
-  - action: browser.fill
-    selector: "#username"
-    value: ${username}
-
-  - action: browser.fill
-    selector: "#password"
-    value: ${password}
-
-  - action: browser.click
-    role: button
-    name: Sign In
-
-  - action: test.assert
-    expression: "'Dashboard' in page_content"
-    message: Expected dashboard after login
+- websocket.send:
+url: "${base_url}/devices/${device_id}"
+method: GET
+store_as: device
+- test.assert:
+expression: "${device.status} == 'online'"
+- test.log:
+message: "Device ${device_id} is ${device.status}"
 ```
 
-Optional `setup` and `cleanup` sections run before and after steps regardless of pass/fail:
+### Variables in TestRail
+
+**Var: cases** — create a case titled `Var: device_ip` with this in the Preconditions field:
 
 ```yaml
-setup:
-  - action: browser.open
-    url: ${base_url}
-
-cleanup:
-  - action: browser.screenshot
-    name: final-state
+device_ip: 192.168.1.100
+device_user: admin
 ```
 
----
+These key-value pairs are injected as variables into every Feature/Test case in the run. Use `Var:` cases for environment-specific values (IPs, URLs, credentials, firmware bucket names).
 
-## Variables
+**Inline variables block** — within a Feature: case's Preconditions field:
 
-Variables are referenced with `${variable_name}` anywhere in step parameters.
+```
+variables:
+timeout: 30
+product: WB-800
 
-### Scope resolution order (highest to lowest priority)
+steps:
+- test.log:
+message: "Testing ${product} at ${device_ip}"
+```
 
-1. Test-level variables (defined in the test file)
-2. Suite variables
-3. Workspace/collection variables
-4. Environment variables (from active environment or `.env`)
-5. Framework defaults
+Variables defined inline are scoped to that case. Variables from `Var:` cases are available across all cases.
 
-### Environment-specific values
+**Environment variable references** — reference `.env` or shell environment variables:
 
 ```yaml
 variables:
-  base_url: ${env.BASE_URL}
-  api_key: ${env.API_KEY}
+  password: "${DEVICE_PASSWORD}"
+  api_key: "${API_GATEWAY_KEY}"
 ```
 
-### Runtime variable capture
+**Parameterized cases** — run the same steps against multiple data rows:
 
-Store a value from one step and use it in later steps:
-
-```yaml
-- action: api.request
-  method: GET
-  url: ${base_url}/api/version
-  store_as: version_response
-
-- action: test.assert
-  expression: "'2.' in version_response"
 ```
+data:
+- mac: D4:6A:91:29:0F:5A
+  product: WB-800
+- mac: A8:3B:76:11:CC:22
+  product: WB-250
+
+steps:
+- ssh.connect:
+host: "${mac}"
+username: "${device_user}"
+password: "${device_pass}"
+- test.log:
+message: "Testing ${product} at ${mac}"
+- ssh.disconnect:
+host: "${mac}"
+```
+
+### Running from the CLI
+
+```bash
+# Run all EASY_BDD: runs with pending tests in a project
+python -m easybdd testrail-run --project-id 12
+
+# Run a specific run by ID
+python -m easybdd testrail-run --run-id 194434
+
+# Quiet output (errors only)
+python -m easybdd testrail-run --project-id 12 --quiet
+
+# Skip datalake reporting for this run
+python -m easybdd testrail-run --project-id 12 --no-datalake
+
+# List runs available in a project
+python -m easybdd testrail-list --project-id 12
+```
+
+The runner scans for runs whose name starts with `EASY_BDD:` (configurable via `TESTRAIL_RUN_PREFIX` in `.env` or `config/framework.yaml`).
+
+### Case templates
+
+Copy-paste templates for the three primary test types are in `examples/testrail/`:
+
+| Template | File | Use for |
+|---|---|---|
+| API test | `examples/testrail/api_test.yaml` | REST API — auth, GET/PUT, assert, schema validation, 404 test |
+| Browser / Web UI | `examples/testrail/browser_test.yaml` | Login flows, form fill, dropdown, cart, verify, screenshot |
+| Firmware resiliency | `examples/testrail/firmware_resiliency_test.yaml` | SSH connect, S3 firmware discovery, flash, reboot, health check |
+
+Paste the YAML into the Preconditions field of a `Feature:` case and adjust the variables.
 
 ---
 
 ## Actions Reference
 
-All actions use `service.verb` dot notation.
+All actions use `service.verb` dot-notation. In a TestRail `Feature:` case, write them as:
 
-### Browser
+```
+- service.verb:
+param: value
+```
+
+### Browser / Web UI
 
 | Action | Key Parameters |
 |---|---|
-| `browser.open` | `url` |
+| `browser.open` | `url`, `browser` (chromium/firefox/webkit), `headless` |
 | `browser.navigate` | `url` |
 | `browser.fill` | `selector`, `value` |
 | `browser.click` | `selector` or `role` + `name` |
-| `browser.press_key` | `key`, `selector` |
-| `browser.wait` | `seconds` |
-| `browser.wait_for_element` | `selector`, `timeout` |
-| `browser.wait_for_text` | `text` |
-| `browser.get_text` | `selector`, `store_as` |
-| `browser.get_title` | `store_as` |
-| `browser.assert_text` | `selector`, `text` |
-| `browser.assert_checked` | `selector` |
-| `browser.assert_not_checked` | `selector` |
-| `browser.screenshot` | `name` |
-| `browser.upload` | `selector`, `file_path` |
-| `browser.select` | `selector`, `value` |
+| `browser.double_click` | `selector` |
 | `browser.hover` | `selector` |
+| `browser.select` | `selector`, `value` |
+| `browser.press_key` | `selector`, `key` |
+| `browser.upload` | `selector`, `file` |
+| `browser.wait_for` | `selector`, `timeout` |
+| `browser.wait_for_url` | `url` (substring or glob), `timeout`; no `url` waits for page load |
+| `browser.verify_text` | `text`, `selector` |
+| `browser.verify_element` | `selector` |
+| `browser.screenshot` | `filename`, `path` |
 | `browser.scroll` | `selector` |
+| `browser.back` | — |
+| `browser.forward` | — |
 | `browser.refresh` | — |
 | `browser.close` | — |
 
-Use `iframe >> selector` to target elements inside iframes:
+**Examples:**
 
-```yaml
-- action: browser.upload
-  selector: "iframe >> #firmware-input"
-  file_path: Firmware/update.bin
 ```
-
-Role-based selectors (preferred over CSS where possible):
-
-```yaml
-- action: browser.click
-  role: button
-  name: Apply
+- browser.open:
+url: "${base_url}/login"
+- browser.fill:
+selector: "input[name=email]"
+value: "${username}"
+- browser.click:
+selector: "button[type=submit]"
+# Role-based selector (preferred — more resilient than CSS)
+- browser.click:
+role: button
+name: Apply
+# Wait for element before interacting
+- browser.wait_for:
+selector: ".dashboard"
+timeout: 15
+- browser.verify_text:
+selector: ".page-title"
+text: Dashboard
+- browser.screenshot:
+name: after-login
+# Target elements inside iframes
+- browser.upload:
+selector: "iframe >> #firmware-input"
+file: Firmware/update.bin
 ```
 
 ### API
 
-```yaml
-- action: api.request
-  method: POST
-  url: ${base_url}/api/v1/login
-  body: '{"username": "${username}", "password": "${password}"}'
-  headers:
-    Content-Type: application/json
-  store_as: login_response
+There is no dedicated REST helper action in this framework. API/JSON-RPC testing is done
+over WebSocket via `websocket.send` / `websocket.receive` (see [WebSocket / OVRC / JSON-RPC](#websocket--ovrc--json-rpc)),
+and generic response assertions are done with `test.assert_response` / `test.assert_schema`.
 
-- action: test.assert
-  expression: "last_response_code == 200"
+| Action | Key Parameters |
+|---|---|
+| `websocket.send` | `url`, `method`, `data`, `headers`, `store_as` |
+| `websocket.receive` | `url`, `wait_for`, `timeout`, `store_as` |
+| `test.assert_response` | `status`, `body`, `contains`, `schema`, `headers` |
+| `test.assert_schema` | `schema`, `data` |
 
-- action: test.assert
-  expression: "'token' in last_response_dict"
+**Examples:**
+
 ```
-
-### WebSocket
-
-```yaml
-- action: websocket.send
-  url: ${ws_url}
-  data: '{"deviceId": "${mac}", "version": 0}'
-  store_as: last_response
-
-- action: test.assert
-  expression: "'error' not in last_response"
-```
-
-### Telnet
-
-```yaml
-- action: telnet.send
-  host: ${device_ip}
-  port: 23
-  command: "?Firmware"
-  store_as: telnet_response
+# Send a JSON-RPC request over WebSocket
+- websocket.send:
+url: "${base_url}"
+method: dxGetAbout
+data:
+  deviceId: "${device_id}"
+store_as: device
+# Assert on the response
+- test.assert_response:
+status: 200
+contains: "online"
+# JSON schema validation
+- test.assert_schema:
+schema: {type: object, required: [id, status, name], properties: {id: {type: integer}, status: {type: string}, name: {type: string}}}
+data: "${device}"
 ```
 
 ### SSH
 
-```yaml
-- action: command.ssh
-  host: ${device_ip}
-  username: ${ssh_user}
-  password: ${ssh_password}
-  command: "cat /etc/firmware"
-  store_as: ssh_output
+Persistent SSH connections are pooled by `host:port` across steps within the same test. Use `ssh.*` for interactive sessions (firmware testing, device CLI). Note that `ssh.command` still takes `host` on every call (it looks up the pooled connection for that host rather than an implicit "current session").
+
+| Action | Key Parameters |
+|---|---|
+| `ssh.connect` | `host`, `username`, `password`, `timeout` |
+| `ssh.command` | `host`, `command`, `store_as`, `timeout` |
+| `ssh.disconnect` | `host` |
+
+**Example:**
+
+```
+- ssh.connect:
+host: "${device_ip}"
+username: "${device_user}"
+password: "${device_pass}"
+timeout: 30
+- ssh.command:
+host: "${device_ip}"
+command: cat /etc/firmware_version
+store_as: fw_version
+- test.assert:
+expression: "'2.' in ${fw_version}"
+- ssh.disconnect:
+host: "${device_ip}"
+```
+
+For one-shot commands without session state, use `command.ssh`:
+
+```
+- command.ssh:
+host: "${device_ip}"
+username: "${device_user}"
+password: "${device_pass}"
+command: "uptime"
+store_as: uptime
+```
+
+### Telnet
+
+`telnet.send` is a single stateless action that bundles connect + authenticate + send in one call.
+
+| Action | Key Parameters |
+|---|---|
+| `telnet.send` | `host`, `port`, `username`, `password`, `command`, `prompt`, `timeout`, `store_as` |
+
+**Example:**
+
+```
+- telnet.send:
+host: "${device_ip}"
+port: 23
+username: "${device_user}"
+password: "${device_pass}"
+command: "show version"
+store_as: version_output
+- test.assert:
+expression: "'${expected_version}' in ${version_output}"
 ```
 
 ### Serial
 
-```yaml
-- action: serial.send
-  port: COM3
-  baudrate: 115200
-  data: "?status\r\n"
-  store_as: serial_response
+`serial.send` is a single stateless action — port/baud rate are passed on each call.
+
+| Action | Key Parameters |
+|---|---|
+| `serial.send` | `command`, `port`, `baud_rate`, `prompt`, `timeout`, `store_as` |
+
+**Example:**
+
+```
+- serial.send:
+command: "?status\r\n"
+port: COM3
+baud_rate: 115200
+store_as: serial_response
+- test.assert:
+expression: "'OK' in ${serial_response}"
 ```
 
-### Assertions
+### WebSocket / OVRC / JSON-RPC
 
-```yaml
-# String contains
-- action: test.assert
-  expression: "'OK' in last_response"
+`websocket.send` connects to a WebSocket endpoint and, when `method` is given, wraps `data` in a
+JSON-RPC 2.0 envelope — this is how OvrC/firmware JSON-RPC calls are made (see
+`docs/jsonrpc-websocket.md` for the full payload format). Many `ovrc.*` spellings are aliases for
+the equivalent `jsonrpc.*` action (e.g. `ovrc.connect` → `jsonrpc.connect`, `ovrc.call` → `jsonrpc.send`).
 
-# HTTP status
-- action: test.assert
-  expression: "last_response_code == 200"
+| Action | Key Parameters |
+|---|---|
+| `websocket.send` | `url`, `method`, `data`, `headers`, `timeout`, `wait_for`, `store_as` |
+| `websocket.receive` | `url`, `wait_for`, `timeout`, `store_as` |
+| `websocket.connect` | `url` |
+| `websocket.disconnect` | `url` |
+| `jsonrpc.connect` (alias: `ovrc.connect`) | `url`, `device_id`, `timeout` |
+| `jsonrpc.send` (alias: `ovrc.call` / `ovrc.send`) | *(any additional parameters accepted)* |
+| `jsonrpc.get_about` (alias: `ovrc.get_about`) | `store_as` |
+| `jsonrpc.disconnect` (alias: `ovrc.disconnect`) | — |
 
-# JSON field access
-- action: test.assert
-  expression: "last_response_dict['status'] == 'active'"
+**Example:**
 
-# Regex match
-- action: test.assert
-  expression: "re.match(r'\\d+\\.\\d+\\.\\d+', firmware_version) is not None"
-
-# Soft assert — continues on failure, reports at end
-- action: test.assert
-  expression: "'warning' not in last_response"
-  soft: true
 ```
-
-### Eval
-
-Execute arbitrary Python expressions in the test context:
-
-```yaml
-- action: eval.exec
-  code: "token = last_response_dict['data']['token']"
-
-- action: eval.run
-  expression: "last_response_dict.get('firmware_version', '')"
-  store_as: firmware_version
+- websocket.send:
+url: "${ws_url}"
+method: dxGetAbout
+data:
+  deviceId: "${mac}"
+  version: 0
+store_as: ws_response
+- test.assert:
+expression: "'error' not in str(${ws_response})"
 ```
 
 ### AWS S3
 
-```yaml
-- action: aws.s3.get_latest
-  bucket_name: my-firmware-bucket
-  folder_prefix: firmware/device/
-  file_extension: .bin
-  store_filename_as: latest_fw_file
-  store_version_as: latest_version
+| Action | Key Parameters |
+|---|---|
+| `aws.list_files` | `bucket_name`, `folder_prefix`, `file_extension`, `filename_pattern`, `store_as` |
+| `aws.get_latest` | `store_as` |
+| `aws.upload` | `bucket_name`, `file_path`, `key`, `store_as` |
+| `aws.delete_folder` | `bucket_name`, `folder_prefix` |
 
-- action: browser.upload
-  selector: "#firmware-input"
-  file_path: Firmware/${latest_fw_file}
+**Example:**
+
+```
+- aws.list_files:
+bucket_name: firmware-releases
+folder_prefix: product-x/stable
+file_extension: .bin
+store_as: firmware_files
+- aws.get_latest:
+store_as: latest_firmware
+- test.log:
+message: "Latest firmware: ${latest_firmware.version} at ${latest_firmware.url}"
+```
+
+### Assertions and extraction
+
+There is no dedicated `test.extract` action. Pull nested values out of a stored response with
+`eval.run` (a single Python expression) instead — see [Eval](#eval).
+
+| Action | Key Parameters |
+|---|---|
+| `test.assert` | `expression` (Python-style boolean expression string), `message` |
+| `test.assert_schema` | `schema` (JSON Schema object), `data` |
+| `test.assert_response` | `status`, `body`, `contains`, `schema`, `headers` |
+| `test.assert_element_count` | `selector`, `count`, `timeout` |
+| `test.assert_element_visible` / `test.assert_element_not_visible` | `selector`, `timeout` |
+| `test.assert_element_enabled` / `test.assert_element_disabled` | `selector`, `timeout` |
+| `test.assert_text_contains` / `test.assert_text_equals` | `selector`, `text`, `timeout` |
+| `test.assert_value` | `selector`, `value`, `timeout` (input/select current value) |
+| `test.assert_url` | `url` (substring or glob), `exact`, `timeout` |
+| `browser.assert_checked` / `browser.assert_unchecked` | `selector`, `timeout` |
+| `test.check_assertions` | — (flush soft assertions) |
+
+**Examples:**
+
+```
+# Equality
+- test.assert:
+expression: "${last_status_code} == 200"
+# Contains substring
+- test.assert:
+expression: "'access_token' in ${response_body}"
+# Does not contain
+- test.assert:
+expression: "'error' not in ${device.status}"
+# Non-empty
+- test.assert:
+expression: "${fw_version} != ''"
+# Membership in a list
+- test.assert:
+expression: "${last_status_code} in [200, 201, 204]"
+# Greater than
+- test.assert:
+expression: "${process_count} > 0"
+message: "Expected at least one running process"
+# JSON schema validation
+- test.assert_schema:
+schema: {type: object, required: [id, status, name], properties: {id: {type: integer}, status: {type: string}, name: {type: string}}}
+data: "${device}"
+# Flush soft assertions (fail the test if any soft assertion failed)
+- test.check_assertions:
+# Extract a nested value from a stored response with eval.run
+- eval.run:
+expression: "login_response['data']['user']['id']"
+store_as: user_id
 ```
 
 ### Test utilities
 
-```yaml
-# Run another test as a step
-- action: test.run
-  path: tests/cases/shared/login.yaml
+| Action | Key Parameters |
+|---|---|
+| `test.sleep` | `seconds` |
+| `test.log` | `message` |
+| `test.print` | `message` |
+| `test.run` | `path` (run a local YAML test as a step) |
 
-# Log a message to the report
-- action: test.log
-  message: "Starting firmware upgrade sequence"
+**Examples:**
+
+```
+- test.sleep:
+seconds: 30
+- test.log:
+message: "Waiting for device ${device_ip} to reboot..."
+# Run a shared local YAML test as a sub-step
+- test.run:
+path: tests/cases/shared/login.yaml
+```
+
+### Eval
+
+Execute Python expressions in the test context. Use for complex data transformations that don't need a dedicated action.
+
+| Action | Key Parameters |
+|---|---|
+| `eval.exec` | `code` (multi-line Python), `store_as` |
+| `eval.run` | `expression` (single expression), `store_as`, `code` |
+
+**Examples:**
+
+```
+# Extract nested value with Python
+- eval.exec:
+code: |
+  token = auth_response['data']['access_token']
+  expiry = auth_response['data']['expires_in']
+# Evaluate an expression and store the result
+- eval.run:
+expression: "auth_response.get('firmware_version', 'unknown')"
+store_as: fw_version
 ```
 
 ---
 
 ## Control Flow
 
+Control flow constructs work in both TestRail `Feature:` cases and local YAML files.
+
 ### For each (loop over a list)
 
-```yaml
-- for_each: [1, 10, 30, 60]
-  loop_var: wait_seconds
+`for_each` takes an `items:` list and a `steps:` block. Each item is available inside the loop as `${item}`.
+
+```
+- for_each:
+  items: [1, 10, 30, 60]
   steps:
-    - action: browser.wait
-      seconds: ${wait_seconds}
-    - action: test.assert
-      expression: "'online' in last_response"
+  - test.sleep:
+    seconds: "${item}"
+  - test.assert:
+    expression: "${device.status} == 'online'"
 ```
 
 Loop over a list of dicts:
 
-```yaml
+```
 - for_each:
-    - {username: admin, role: administrator}
-    - {username: viewer, role: read-only}
-  loop_var: user
+  items: [{mac: "D4:6A:91:29:0F:5A", product: "WB-800"}, {mac: "A8:3B:76:11:CC:22", product: "WB-250"}]
   steps:
-    - action: api.request
-      method: GET
-      url: ${base_url}/api/users/${user.username}
-    - action: test.assert
-      expression: "last_response_dict['role'] == '${user.role}'"
+  - ssh.connect:
+    host: "${item.mac}"
+    username: "${device_user}"
+    password: "${device_pass}"
+  - test.log:
+    message: "Connected to ${item.product}"
+  - ssh.disconnect:
+    host: "${item.mac}"
 ```
 
-### While loop
+### Repeat (poll / retry loop)
 
-```yaml
-- while: "device_state != 'ready'"
-  loop_limit: 30
+There is no `while:` construct. Use `repeat:` with a fixed `count:` to poll — for example, waiting
+for a device to become ready:
+
+```
+- repeat:
+  count: 30
   steps:
-    - action: api.request
-      method: GET
-      url: ${base_url}/api/status
-      store_as: device_state
+  - websocket.send:
+    url: "${base_url}"
+    method: dxGetAbout
+    store_as: device_state
+  - test.sleep:
+    seconds: 5
+```
 
-    - action: browser.wait
-      seconds: 5
+### Conditional (if / else)
+
+`if:` takes `condition:` + `steps:`, with an optional sibling `else:` list.
+
+```
+- if:
+  condition: "${current_version} != ${target_version}"
+  steps:
+  - browser.upload:
+    selector: "#firmware-input"
+    file: "Firmware/${firmware_file}"
+  - browser.click:
+    role: button
+    name: Upgrade
+  else:
+  - test.log:
+    message: "Firmware already at target version — skipping"
 ```
 
 ### Try / Except / Finally
 
-```yaml
-- try:
-    - action: api.request
-      method: POST
-      url: ${base_url}/api/reboot
-  except:
-    - action: test.log
-      message: Reboot request failed — device may already be rebooting
-  finally:
-    - action: browser.wait
-      seconds: 30
+There is no `try:`/`except:`/`finally:` construct in this framework. Write the steps directly —
+if a step is expected to sometimes fail without aborting the test, that must be handled by the
+step itself (e.g. via soft assertions), not by a try/except wrapper:
+
+```
+- ssh.command:
+  host: "${device_ip}"
+  command: "reboot"
+- test.sleep:
+  seconds: 30
 ```
 
-### Conditional (if / then / else)
+### Parallel
 
-```yaml
-- condition: "current_version != target_version"
-  then:
-    - action: browser.upload
-      selector: "#firmware-input"
-      file_path: Firmware/${firmware_file}
-    - action: browser.click
-      role: button
-      name: Upgrade
-  else:
-    - action: test.log
-      message: Firmware already at target version — skipping upgrade
+`parallel:` runs its `steps:` concurrently:
 
+```
+- parallel:
+  steps:
+  - telnet.send:
+    host: "${device_ip}"
+    command: ping
+  - test.sleep:
+    seconds: 2
 ```
 
 ---
 
-## Shared Steps
+## Shared Steps in TestRail
 
-Shared steps are reusable step sequences that can be called by name from any test.
+Create a case titled `Shared: <step_name>` and write the reusable steps in its Preconditions field. Other `Feature:` cases call it by name.
 
-### Scopes
+**Defining a shared step (`Shared: authenticate` in TestRail):**
 
-- **Global** — stored in `shared_steps.yaml` at the project root, available to all tests
-- **Workspace-local** — stored in `tests/cases/{workspace}/shared_steps.yaml`, overrides global on name collision
-
-### Defining shared steps
-
-`tests/cases/networking/shared_steps.yaml`:
-
-```yaml
-authenticate:
-  description: Log in and store auth token
-  steps:
-    - action: api.request
-      method: POST
-      url: ${base_url}/api/login
-      body: '{"username": "${username}", "password": "${password}"}'
-    - action: eval.exec
-      code: "auth_token = last_response_dict['token']"
-
-verify_connectivity:
-  description: Ping device and assert it responds
-  steps:
-    - action: telnet.send
-      host: ${device_ip}
-      port: 23
-      command: "ping"
-    - action: test.assert
-      expression: "'pong' in last_response"
 ```
-
-### Using shared steps
-
-```yaml
 steps:
-  - shared_step: authenticate
-
-  - action: api.request
-    method: GET
-    url: ${base_url}/api/settings
-    headers:
-      Authorization: Bearer ${auth_token}
-
-  - shared_step: verify_connectivity
+- websocket.send:
+url: "${base_url}"
+method: dxLogin
+data:
+  username: "${API_USERNAME}"
+  password: "${API_PASSWORD}"
+store_as: auth_response
+- test.assert:
+expression: "'error' not in str(${auth_response})"
+- eval.run:
+expression: "auth_response['result']['access_token']"
+store_as: token
 ```
 
-### Managing shared steps in the UI
+**Calling it from a `Feature:` case:**
 
-The Test Builder includes a **Shared Steps** view (sidebar) with:
+```
+steps:
+- shared_step: authenticate
+- websocket.send:
+url: "${base_url}"
+method: dxListDevices
+headers: {Authorization: "Bearer ${token}"}
+store_as: devices
+- test.assert:
+expression: "'error' not in str(${devices})"
+```
 
-- Scope filter (global / workspace)
-- Create, edit, and delete shared steps
-- YAML preview before saving
+The runner automatically syncs all `Shared:` cases in the run before executing `Feature:` cases.
 
 ---
 
 ## Connections
 
-For protocols requiring persistent sessions (Telnet, Serial), connections are pooled across steps within a test run. Each `host:port` combination is reused automatically — you do not need to open or close connections explicitly.
-
----
-
-## TestRail Integration
-
-Easy BDD can discover test runs in TestRail, execute the matching tests, and post results back.
-
-### Configuration
-
-Add to `.env`:
-
-```
-TESTRAIL_URL=https://your-instance.testrail.com/
-TESTRAIL_USERNAME=automation@example.com
-TESTRAIL_API_KEY=your-api-key
-```
-
-### Discovering and running TestRail-linked tests
-
-Tests tagged with a TestRail case ID are automatically associated:
-
-```yaml
-tags: [C12345]
-```
-
-Run all TestRail-linked tests in a run:
-
-```bash
-python -m easy_bdd testrail-run --run-id 194434
-```
-
-List runs that have Easy BDD tests available:
-
-```bash
-python -m easy_bdd testrail-list
-```
-
-Results are posted back to TestRail automatically on completion.
-
----
-
-## Migration Tools
-
-Easy BDD includes migration tools for importing tests from other frameworks. Migrations are available both from the CLI and the Test Builder UI (Import / Migrate button in the Shared Steps view).
-
-### From Robot Framework
-
-Converts `.robot` files to Easy BDD YAML. Keywords become shared steps; test cases become test files.
-
-**Via API / UI:** paste or upload a `.robot` file in the Migration modal, select "Robot Framework", optionally choose a target workspace, and click Convert.
-
-**What gets converted:**
-
-| Robot Framework | Easy BDD |
-|---|---|
-| `Open Browser ${URL}` | `browser.open url: ${URL}` |
-| `Input Text locator value` | `browser.fill selector: locator value: value` |
-| `Click Element locator` | `browser.click selector: locator` |
-| `Sleep 5s` | `browser.wait seconds: 5` |
-| `GET ${url}` | `api.request method: GET url: ${url}` |
-| User-defined keywords | `shared_step: keyword_slug` |
-
-### From Previous BDD Framework (mybdd / pytest-bdd)
-
-Converts the pipe-delimited keyword format used in the previous custom framework, including `.feature` files and raw TestRail step blocks.
-
-**What gets converted:**
-
-| mybdd syntax | Easy BDD |
-|---|---|
-| `browser \| {"command": "open", "param": "url"} \|` | `browser.open url: url` |
-| `browser \| {"command": "click_by_role", "role": "button", "name": "Apply"} \|` | `browser.click role: button name: Apply` |
-| `browser \| {"command": "validate_checkbox_enabled", "param": "sel"} \|` | `browser.assert_checked selector: sel` |
-| `browser \| {"command": "containstext", "param": "b", "text": "..."} \|` | `browser.assert_text selector: b text: ...` |
-| `sleep \| 15 \|` | `browser.wait seconds: 15` |
-| `telnet \| {"host": "h", "command": "cmd"} \|` | `telnet.send host: h command: cmd` |
-| `ssh \| {"host": "h", "command": "cmd"} \|` | `command.ssh host: h command: cmd` |
-| `webservice \| $url \| GET \| /api/path \| {} \|` | `api.request method: GET url: ${url}/api/path` |
-| `webservice \| $url \| SEND \| dxGetAbout \| {...} \|` | `websocket.send url: ${url} data: {...}` |
-| `function \| {"name": "assert", "operator": "match", ...} \|` | `test.assert expression: ...` |
-| `function \| {"name": "eval", "string": "..."} \|` | `eval.exec code: ...` |
-| `\| value \| in response` | `test.assert expression: 'value' in last_response` |
-| `\| path == val \| in json_response` | `test.assert expression: last_response_dict['path'] == val` |
-| `response_code \| 200 \|` | `test.assert expression: last_response_code == 200` |
-| `Shared: name` | `shared_step: name` |
-| `$variable` | `${variable}` |
-| `gv.log[-1]['response_txt']` | `${last_response}` |
-| `Given:` case body (JSON variables) | `variables:` block |
-| `Shared:` case body | entry in `shared_steps.yaml` |
-| `Examples:` table (`\| val1 \|`) | `for_each:` loop |
-
-**Migrating a TestRail run directly:**
-
-See `_tr_migrate.py` in the project root for a script that fetches an entire TestRail run via API and writes all tests and shared steps to `tests/cases/tr_{run_id}/`.
-
----
-
-## Test Builder UI
-
-Start the server:
-
-```bash
-python frontend/start_builder.py
-```
-
-Open `http://localhost:8000`.
-
-### Views
-
-| View | Description |
-|---|---|
-| Tests | Create, edit, run, and copy YAML test files |
-| Test Suites | Group tests into suites with ordered execution |
-| Results | View execution history, download reports, rerun tests |
-| Metrics | Test health, failure trends, coverage by workspace |
-| Shared Steps | Manage global and workspace-local shared steps |
-| Environments | Manage named variable sets (staging, production, etc.) |
-| Queue | Monitor and control the continuous execution queue |
-
-### Creating a test
-
-1. Click **New Test** in the sidebar.
-2. Enter a name, description, and optional tags.
-3. Click **Add Step**, choose an action from the library, and fill in the parameters.
-4. Click **Save**. The test is written to `tests/cases/{workspace}/`.
-5. Click **Run** to execute immediately.
-
-### Running tests from the UI
-
-- Individual tests: **Run** button on the test card.
-- Suites: **Run Suite** in the Test Suites view.
-- Queued execution: add tests to the Queue for continuous or scheduled runs.
+Persistent connections (SSH, Telnet, Serial, WebSocket) are pooled across steps within the same test. Each unique `host:port` combination is reused automatically — you do not need to explicitly open/close connections between steps unless you want to reset state.
 
 ---
 
@@ -618,7 +730,7 @@ Open `http://localhost:8000`.
 config:
   browser:
     default: chrome
-    headless: false
+    headless: true
     window_size: [1920, 1080]
     timeout: 30
 
@@ -626,6 +738,10 @@ config:
     timeout: 30
     verify_ssl: true
     max_retries: 3
+
+  testrail:
+    run_prefix: "EASY_BDD:"          # Run name prefix to scan for
+    running_status_id: 7              # ID of the "Running" custom status
 
   reporting:
     output_dir: reports
@@ -644,124 +760,378 @@ environments:
     api_url: https://api.example.com
 ```
 
+Environment variables override `framework.yaml` for sensitive values — see `.env.example`.
+
 ---
 
-## Project Structure
+## Local YAML (supplemental)
+
+> **This section is supplemental.** The primary authoring surface is TestRail.
+> Local YAML is useful for: one-off debugging runs, CI pipelines that don't use
+> TestRail, or `Test:` cases that point to existing YAML files.
+
+### File format
 
 ```
-Easy_BDD/
-├── easy_bdd/
-│   ├── core/
-│   │   ├── parser.py          # YAML parser, TestStep dataclass, shared step loading
-│   │   └── runner.py          # Test executor, control flow, connection pooling
-│   └── services/
-│       ├── browser_service.py
-│       ├── api_service.py
-│       ├── aws_service.py
-│       ├── serial_service.py
-│       ├── telnet_service.py
-│       └── ovrc_api_service.py
-├── frontend/
-│   ├── test_builder_app.py    # FastAPI backend
-│   ├── action_definitions.py  # Action catalog
-│   ├── robot_migrator.py      # Robot Framework migration
-│   ├── bdd_migrator.py        # Previous BDD framework migration
-│   ├── static/
-│   │   └── test_builder.html  # Vue.js SPA
-│   └── start_builder.py
-├── tests/
-│   ├── cases/                 # YAML test files, organised by workspace
-│   │   └── {workspace}/
-│   │       ├── shared_steps.yaml
-│   │       └── *.yaml
-│   └── data/                  # CSV / JSON test data
-├── shared_steps.yaml          # Global shared steps
-├── config/
-│   └── framework.yaml
-├── reports/
-├── docs/
-└── .env
+name: Login and verify dashboard
+description: Verifies a user can log in and reach the dashboard
+tags: [smoke, browser]
+
+variables:
+base_url: https://staging.example.com
+username: "${STAGING_USER}"
+password: "${STAGING_PASS}"
+
+steps:
+- browser.open:
+url: "${base_url}/login"
+- browser.fill:
+selector: "#username"
+value: "${username}"
+- browser.fill:
+selector: "#password"
+value: "${password}"
+- browser.click:
+role: button
+name: Sign In
+- browser.wait_for:
+selector: ".dashboard"
+- browser.verify_text:
+selector: "h1"
+text: Dashboard
 ```
+
+Optional `setup` and `teardown` sections run before/after `steps` regardless of pass/fail:
+
+```
+setup:
+- browser.open:
+url: "${base_url}"
+
+teardown:
+- browser.screenshot:
+name: final-state
+```
+
+### Running local YAML
+
+```bash
+# Single test
+python -m easybdd run tests/cases/my_test.yaml
+
+# Folder (all tests)
+python -m easybdd run tests/cases/networking/
+
+# By tag
+python -m easybdd run --tags smoke
+python -m easybdd run --tags browser,api
+
+# Visible browser
+python -m easybdd run tests/cases/my_test.yaml --headed
+
+# Specific environment
+python -m easybdd run --env staging
+```
+
+### Shared steps (local)
+
+Global shared steps — `shared_steps.yaml` at the project root:
+
+```
+authenticate:
+description: Log in and store auth token
+steps:
+- websocket.send:
+  url: "${base_url}"
+  method: dxLogin
+  data:
+    username: "${username}"
+    password: "${password}"
+  store_as: auth_response
+- eval.run:
+  expression: "auth_response['result']['access_token']"
+  store_as: token
+```
+
+Workspace-local — `tests/cases/{workspace}/shared_steps.yaml` (overrides global on name collision).
+
+Call with:
+
+```
+steps:
+- shared_step: authenticate
+```
+
+### Variable scope (local YAML)
+
+Resolution order (highest to lowest priority):
+
+1. Test-level `variables:` block
+2. Suite variables
+3. Active environment from `--env`
+4. `.env` file / shell environment variables
+
+### Test: case (TestRail pointer to local YAML)
+
+A `Test:` case in TestRail routes to a local YAML file via its Preconditions field:
+
+```yaml
+# By tag — runs all local YAML tests that have this tag
+tag: smoke
+
+# Or by explicit file path
+file: tests/cases/networking/login.yaml
+```
+
+---
+
+## Test Builder UI
+
+A web interface for authoring TestRail cases without writing YAML by hand. Engineers pick actions from the framework catalog, fill in guided forms, and publish `Var:` / `Shared:` / `Setup:` / `Teardown:` / `Feature:` cases straight into a TestRail suite — no syntax or action-name spelling to get wrong.
+
+```bash
+python frontend/start_testrail_builder.py          # http://localhost:8091
+python frontend/start_testrail_builder.py --port 9000
+```
+
+Uses the same TestRail credentials as the runner (`.env`: `TESTRAIL_URL`, `TESTRAIL_USERNAME`, `TESTRAIL_API_KEY`).
+
+**Production instance:** the builder runs persistently on the main Jenkins server as the `easybdd-testrail-builder` systemd service (enabled at boot) — no need to run it locally. Open **<jenkins_url>:8091**. See [ONBOARDING.md](ONBOARDING.md#production-instance) for service management commands.
+
+What it does:
+
+- **Case types** — build any of the five case types; the correct title prefix is applied automatically.
+- **Step palette** — every action the runner supports (Browser, API, SSH, Telnet, Serial, WebSocket, OvrC, AWS, Floci, Eval, Test utilities…), searchable, with per-parameter forms, required-field markers, and help text.
+- **Control flow** — for_each / if-else / repeat / parallel blocks with nested steps.
+- **Shared steps** — call `Shared:` cases from the selected suite by picking them from a dropdown.
+- **Live preview + validation** — the Preconditions body is generated server-side and round-trip parsed with the runner's own parser before publishing, so what lands in TestRail is guaranteed to execute. Typos get "did you mean" suggestions.
+- **Publish & run** — create or update cases in a chosen section, then assemble selected cases into a run (run prefix added automatically) ready for `python -m easybdd testrail-run --run-id <id>`.
+- **Edit existing cases** — click any case in the suite browser to load it back into the editor. Legacy-format bodies load as a raw step with a warning instead of being silently dropped.
+
+---
+
+## AI Assistant Integration (MCP)
+
+Easy BDD exposes the framework to AI assistants (Claude, Cursor, GitHub Copilot Chat) via the **Model Context Protocol (MCP)**.
+
+### Claude Desktop & Cursor (recommended)
+
+Install the packaged `.mcpb` extension (no manual JSON editing required):
+
+```bash
+make build-mcpb   # creates easy-bdd-<version>.mcpb
+```
+
+Then open the `.mcpb` file with Claude Desktop or Cursor. You'll be prompted for optional credentials (TestRail URL/API key, Ollama base URL), which the server injects as environment variables.
+
+Requirements: `uv` must be installed on your machine (the extension uses `uv run` to launch the server).
+
+### Manual setup (Claude Code CLI, VS Code, other clients)
+
+Add to your MCP config (`.claude/settings.json` or equivalent):
+
+```json
+{
+  "mcpServers": {
+    "easy-bdd": {
+      "command": "/path/to/easybdd/.venv/bin/python",
+      "args": ["-m", "easybdd", "mcp-serve"],
+      "cwd": "/path/to/easybdd"
+    }
+  }
+}
+```
+
+### Available Tools & Prompts
+
+**Tools** — call these directly in your AI chat:
+- `list_tests`, `get_test`, `validate_test` — browse and validate YAML
+- `run_tests` — execute tests (dry-run by default)
+- `preview_fix`, `apply_fix` — auto-correct syntax errors
+- `get_failure_trace` — debug the last failure
+- `probe_selector`, `fix_test_selectors` — heal broken CSS/ARIA selectors on live pages
+- `get_testrail_run_failures`, `validate_testrail_case` — TestRail integration
+- `import_playwright_recording`, `ollama_generate_tests`, `ollama_analyze_test` — AI-powered test authoring
+- `crawl_device` — auto-generate tests from a live UI
+
+**Prompts** — use these via the MCP client's prompt picker (Claude Desktop `+` menu):
+- `generate_tests` — write YAML test cases for a module
+- `debug_failure` — diagnose why a test failed
+- `validate_and_fix` — interactively fix syntax errors
+- `debug_testrail_run` — triage every failure in a TestRail run
+- `validate_testrail_suite` — audit all cases in a suite for errors
+- `create_test_from_description` — generate tests from plain English + optionally push to TestRail
+
+See [MCP Setup Guide](docs/mcp-setup.md) for detailed setup, remote access (Streamable HTTP), and integration with all major IDEs.
+
+---
+
+## Migration Tools
+
+### From Robot Framework
+
+Converts `.robot` files to Easy BDD dot-notation YAML.
+
+```bash
+python frontend/robot_migrator.py input.robot --output tests/cases/converted.yaml
+```
+
+| Robot Framework | Easy BDD |
+|---|---|
+| `Open Browser ${URL}` | `browser.open url: ${URL}` |
+| `Input Text locator value` | `browser.fill selector: locator value: value` |
+| `Click Element locator` | `browser.click selector: locator` |
+| `Sleep 5s` | `test.sleep seconds: 5` |
+| `GET ${url}` | `websocket.send url: ${url} method: GET` |
+| User-defined keywords | `shared_step: keyword_slug` |
+
+### From Previous BDD Framework (mybdd / pytest-bdd)
+
+Converts pipe-delimited keyword format from the previous custom framework, including `.feature` files and raw TestRail step blocks.
+
+```bash
+python frontend/bdd_migrator.py --run-id <testrail_run_id>
+```
+
+| mybdd syntax | Easy BDD |
+|---|---|
+| `browser \| {"command": "open", "param": "url"} \|` | `browser.open url: url` |
+| `browser \| {"command": "click_by_role", ...} \|` | `browser.click role: button name: Apply` |
+| `sleep \| 15 \|` | `test.sleep seconds: 15` |
+| `telnet \| {"host": "h", "command": "cmd"} \|` | `telnet.send host: h command: cmd` |
+| `ssh \| {"host": "h", "command": "cmd"} \|` | `ssh.command host: h command: cmd` |
+| `webservice \| $url \| GET \| /path \| {} \|` | `websocket.send url: ${url}/path method: GET` |
+| `webservice \| $url \| SEND \| method \| {...} \|` | `websocket.send data: {...}` |
+| `function \| {"name": "assert", ...} \|` | `test.assert expression: ...` |
+| `\| value \| in response` | `test.assert expression: "value in ${last_response}"` |
+| `response_code \| 200 \|` | `test.assert expression: "${last_status_code} == 200"` |
+| `$variable` | `${variable}` |
 
 ---
 
 ## CLI Reference
 
 ```bash
-# Run a single test
-python -m easy_bdd run tests/cases/my_test.yaml
+# TestRail — primary
+python -m easybdd testrail-run --project-id 12
+python -m easybdd testrail-run --run-id 194434
+python -m easybdd testrail-run --project-id 12 --quiet
+python -m easybdd testrail-run --project-id 12 --no-datalake
+python -m easybdd testrail-list --project-id 12
 
-# Run with headed browser
-python -m easy_bdd run tests/cases/my_test.yaml --headed
+# Local YAML — supplemental
+python -m easybdd run tests/cases/my_test.yaml
+python -m easybdd run tests/cases/my_test.yaml --headed
+python -m easybdd run tests/cases/ --tags smoke
+python -m easybdd run --env staging
 
-# Run all tests in a folder
-python -m easy_bdd run tests/cases/networking/
+# Validation
+python -m easybdd validate tests/cases/
 
-# Run by tag
-python -m easy_bdd run --tags smoke
-python -m easy_bdd run --tags browser,api
+# Help
+python -m easybdd --help
+python -m easybdd testrail-run --help
+```
 
-# Run with a specific environment
-python -m easy_bdd run --env staging
+---
 
-# Validate test files (checks syntax and structure)
-python -m easy_bdd validate tests/cases/
+## Project Structure
 
-# List TestRail runs that have matching tests
-python -m easy_bdd testrail-list
-
-# Execute tests for a TestRail run and post results
-python -m easy_bdd testrail-run --run-id 194434
-
-# Convert a Playwright/Selenium recording
-python -m easy_bdd convert recorded_test.json --output tests/cases/converted.yaml
-
-# Docker execution
-python -m easy_bdd docker-run tests/cases/my_test.yaml --headless
+```
+Easy_BDD/
+├── easybdd/
+│   ├── core/
+│   │   ├── runner.py              # Execution engine, ActionRegistry, control flow
+│   │   ├── testrail_runner.py     # TestRail lifecycle — find, execute, post results
+│   │   ├── testrail_reporter.py   # Datalake reporting
+│   │   ├── parser.py              # YAML parser, YAML repair utilities
+│   │   └── validator.py           # Step schema and syntax validation
+│   └── services/
+│       ├── browser_service.py
+│       ├── api_service.py
+│       ├── aws_service.py
+│       ├── ssh_service.py
+│       ├── serial_service.py
+│       ├── telnet_service.py
+│       └── testrail_service.py
+├── examples/
+│   └── testrail/
+│       ├── api_test.yaml              # API test template
+│       ├── browser_test.yaml          # Browser / web UI test template
+│       └── firmware_resiliency_test.yaml  # SSH firmware resiliency template
+├── config/
+│   └── framework.yaml
+├── frontend/
+│   ├── mcp_server.py              # MCP server for AI assistant integration
+│   ├── bdd_migrator.py            # mybdd → Easy BDD migration
+│   ├── robot_migrator.py          # Robot Framework → Easy BDD migration
+│   ├── testrail_builder.py        # Test Builder UI backend (publish to TestRail)
+│   ├── start_testrail_builder.py  # Test Builder UI launcher (port 8091)
+│   ├── static/testrail_builder.html  # Test Builder UI frontend
+│   ├── action_definitions.py      # Action catalog (used by Test Builder UI)
+│   └── test_builder_app.py        # [DEPRECATED] old local web builder
+├── tests/                         # Local YAML test files (supplemental)
+│   └── cases/{workspace}/
+│       ├── shared_steps.yaml
+│       └── *.yaml
+├── reports/
+├── shared_steps.yaml              # Global shared steps (local YAML)
+└── .env
 ```
 
 ---
 
 ## Troubleshooting
 
+**No runs found**
+
+Ensure the TestRail run name starts with `EASY_BDD:` (or the configured `run_prefix`). Verify `.env` contains `TESTRAIL_URL`, `TESTRAIL_USERNAME`, and `TESTRAIL_API_KEY`.
+
+**YAML parse errors in TestRail case**
+
+The runner auto-repairs common TestRail rich-text formatting issues (HTML tags, indentation, quoted strings). If a case still fails to parse, paste the Preconditions content into a YAML validator to find the issue. Avoid smart quotes and non-breaking spaces — use plain ASCII.
+
+**Step not recognised / "Unknown action"**
+
+Check the action name uses dot-notation: `browser.click`, not `click element`. Deprecated space-separated names emit a warning and still work, but should be updated.
+
 **Browser does not open**
 
 ```bash
 playwright install chromium
-python -m easy_bdd run tests/cases/my_test.yaml --headed
+python -m easybdd run tests/cases/my_test.yaml --headed
 ```
 
-**Element not found**
+**SSH connection refused after reboot**
 
-Add an explicit wait or use a role-based selector, which is more stable than CSS:
+`ssh.connect` has no built-in retry parameters. Wrap it in a `repeat:` block with a `test.sleep`
+between attempts to wait for the device to come back:
 
-```yaml
-- action: browser.wait_for_element
-  selector: "#target"
-  timeout: 10000
-
-- action: browser.click
-  role: button
-  name: Submit
+```
+- repeat:
+count: 5
+steps:
+- ssh.connect:
+  host: "${device_ip}"
+  username: "${device_user}"
+  password: "${device_pass}"
+- test.sleep:
+  seconds: 15
 ```
 
-**Variables not substituting**
+**TestRail `running_status_id` error**
 
-Use `${variable_name}` with curly braces. Dollar-sign-only syntax (`$variable`) is not supported in Easy BDD.
+Set the correct ID for your TestRail instance's "Running" custom status in `.env`:
 
-**TestRail API errors**
+```
+TESTRAIL_RUNNING_STATUS_ID=7
+```
 
-Verify `.env` contains `TESTRAIL_URL`, `TESTRAIL_USERNAME`, and `TESTRAIL_API_KEY`, and that the API key has at least read access to the target project.
-
-**Slow AWS operations**
-
-Connection pooling is enabled by default. If you see repeated connection overhead, ensure you are not creating a new action instance per step — the runner handles this automatically.
+Check the value at **Administration → Statuses** in TestRail.
 
 **Getting help**
 
 ```bash
-python -m easy_bdd --help
-python -m easy_bdd run --help
+python -m easybdd --help
+python -m easybdd testrail-run --help
 ```
-
-Full documentation is in the `/docs` folder.

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Easy BDD Crawler</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <img src="../icons/icon48.png" alt="Easy BDD" class="logo" />
+    <div class="header-text">
+      <span class="title">Easy BDD Crawler</span>
+      <span id="server-status" class="badge badge-checking">checking…</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Server error banner -->
+    <div id="server-error" class="alert alert-error hidden">
+      Backend not reachable. Run: <code>python -m easybdd crawler start</code>
+    </div>
+
+    <!-- Config section -->
+    <section id="config-section">
+      <div class="form-row">
+        <label for="project-select">TestRail Project</label>
+        <select id="project-select">
+          <option value="">Loading…</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <label for="suite-select">Suite <span class="muted">(optional)</span></label>
+        <select id="suite-select">
+          <option value="">Create new suite</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <label for="section-name">Section name</label>
+        <input type="text" id="section-name" value="Auto-generated" />
+      </div>
+
+      <div class="form-row">
+        <label for="ai-provider">AI provider</label>
+        <select id="ai-provider">
+          <option value="rules">Rule-based (no API key)</option>
+          <option value="hybrid">Hybrid (rules + Ollama)</option>
+          <option value="intelligent">Auto-map (QAWolf-style)</option>
+          <option value="ollama">Ollama only</option>
+          <option value="claude">Claude (Anthropic)</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <label class="checkbox-label">
+          <input type="checkbox" id="create-run" checked />
+          Create TestRail test run after crawl
+        </label>
+      </div>
+    </section>
+
+    <!-- Status section (shown while crawling) -->
+    <section id="status-section" class="hidden">
+      <div class="stat-row">
+        <span class="stat-label">Pages visited</span>
+        <span id="stat-pages" class="stat-value">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Cases generated</span>
+        <span id="stat-cases" class="stat-value">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Status</span>
+        <span id="stat-state" class="stat-value">Crawling…</span>
+      </div>
+      <div id="error-list" class="error-list hidden"></div>
+    </section>
+
+    <!-- Done section -->
+    <section id="done-section" class="hidden">
+      <p class="done-msg">✓ Crawl complete</p>
+      <div class="stat-row">
+        <span class="stat-label">Cases generated</span>
+        <span id="done-cases" class="stat-value">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Cases pushed to TestRail</span>
+        <span id="done-pushed" class="stat-value">0</span>
+      </div>
+      <a id="testrail-run-link" href="#" target="_blank" class="hidden run-link">
+        Open TestRail run →
+      </a>
+      <div id="done-error" class="alert alert-error hidden"></div>
+    </section>
+  </main>
+
+  <footer>
+    <button id="btn-start" class="btn btn-primary" disabled>Start Crawl</button>
+    <button id="btn-stop"  class="btn btn-danger  hidden">Stop &amp; Push</button>
+    <button id="btn-reset" class="btn btn-secondary hidden">New Crawl</button>
+    <a id="options-link" class="options-link">⚙ Settings</a>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -191,17 +191,17 @@ Navigate to URL in existing browser
 # Simple upload
 - action: browser.upload
   selector: "#file-input"
-  file_path: "path/to/file.pdf"
+  file: "path/to/file.pdf"
 
 # Upload in iframe (handles hidden inputs automatically)
 - action: browser.upload
   selector: "iframe >> #file-input"
-  file_path: "Firmware/${firmware_file}"
+  file: "Firmware/${firmware_file}"
 
 # Multiple files
 - action: browser.upload
   selector: "#multi-file"
-  file_path: ["file1.txt", "file2.txt"]
+  file: ["file1.txt", "file2.txt"]
 ```
 
 #### browser.select / Select option
@@ -249,14 +249,14 @@ Navigate to URL in existing browser
 
 ### Keyboard Actions
 
-#### browser.press / Press key
+#### browser.press_key / Press key
 ```yaml
 # Press Enter
-- action: browser.press
+- action: browser.press_key
   key: "Enter"
 
 # Press on specific element
-- action: browser.press
+- action: browser.press_key
   selector: "#search-input"
   key: "Enter"
 
@@ -279,10 +279,6 @@ Navigate to URL in existing browser
 # Simple delay (milliseconds)
 - action: browser.wait
   timeout: 2000
-
-# Old syntax
-- action: Wait
-  time: 2  # Seconds
 ```
 
 #### browser.wait_for / Wait for element
@@ -305,17 +301,12 @@ Navigate to URL in existing browser
 ```yaml
 # Simple screenshot
 - action: browser.screenshot
-  name: "homepage"
+  filename: "homepage"
 
-# Full page
+# Custom output path
 - action: browser.screenshot
-  name: "full-page"
-  full_page: true
-
-# Element only
-- action: browser.screenshot
-  selector: "#error-message"
-  name: "error"
+  filename: "error"
+  path: "screenshots/errors"
 ```
 
 ### Content Extraction
@@ -468,52 +459,31 @@ Navigate to URL in existing browser
   store_as: "file_list"
   
   # Optional credentials
-  aws_access_key_id: "${AWS_KEY}"
-  aws_secret_access_key: "${AWS_SECRET}"
-  region_name: "us-east-1"
+  access_key_id: "${AWS_KEY}"
+  secret_access_key: "${AWS_SECRET}"
+  region: "us-east-1"
 ```
 
 ### aws.get_latest / Get Latest Firmware
 ```yaml
 - action: aws.get_latest
-  bucket_name: "firmware-bucket"
-  folder_prefix: "devices/model-x/"
-  file_extension: ".bin"
-  download_dir: "Firmware"
-  store_filename_as: "latest_firmware"
-  store_version_as: "latest_version"
-  
-  # Optional: get second-to-last
-  get_second_to_last: false
-```
-
-**Stored Variables:**
-- `{store_filename_as}` - Full S3 key (e.g., `firmware/v1.2.3/file.bin`)
-- `{store_filename_as}_basename` - Just filename (e.g., `file.bin`)
-- `{store_filename_as}_cloudfront_url` - CloudFront URL
-- `{store_version_as}` - Extracted version (e.g., `1.2.3`)
-
-### aws.download / Download File
-```yaml
-- action: aws.download
-  bucket_name: "my-bucket"
-  s3_key: "path/to/file.bin"
-  local_path: "downloads/file.bin"
+  store_as: "latest_firmware"
 ```
 
 ### aws.upload / Upload File
 ```yaml
 - action: aws.upload
   bucket_name: "my-bucket"
-  local_path: "file.txt"
-  s3_key: "uploads/file.txt"
+  file_path: "file.txt"
+  key: "uploads/file.txt"
+  store_as: "upload_result"
 ```
 
-### aws.delete / Delete File
+### aws.delete_folder / Delete S3 Folder
 ```yaml
-- action: aws.delete
+- action: aws.delete_folder
   bucket_name: "my-bucket"
-  s3_key: "old-file.txt"
+  folder_prefix: "old-files/"
 ```
 
 ---
@@ -523,10 +493,9 @@ Navigate to URL in existing browser
 ### jsonrpc.connect / Connect
 ```yaml
 - action: jsonrpc.connect
-  server_url: "wss://server.com:10444"
+  url: "wss://server.com:10444"
   device_id: "AA:BB:CC:DD:EE:FF"
-  protocol: "firmware-protocol"
-  verify_ssl: false
+  timeout: 10
 ```
 
 ### jsonrpc.disconnect / Disconnect
@@ -563,38 +532,45 @@ Navigate to URL in existing browser
   store_as: "device_info"
 ```
 
-#### jsonrpc.reset / Reset Device
+#### jsonrpc.reset_device / Reset Device
 ```yaml
-- action: jsonrpc.reset
+- action: jsonrpc.reset_device
 ```
 
 ### Network Settings
 
-#### jsonrpc.get_network / Get Network Settings
+#### jsonrpc.get_network_settings / Get Network Settings
 ```yaml
-- action: jsonrpc.get_network
+- action: jsonrpc.get_network_settings
   store_as: "network_config"
 ```
 
-#### jsonrpc.set_network / Set Network Settings
+#### jsonrpc.get_time_settings / Get Time Settings
 ```yaml
-- action: jsonrpc.set_network
-  device_name: "MyDevice"
-  device_ip: "192.168.1.100"
-  subnet_mask: "255.255.255.0"
-  gateway: "192.168.1.1"
-  dhcp_enabled: false
-  dns_server1: "8.8.8.8"
-  dns_server2: "8.8.4.4"
-  web_port: 80
+- action: jsonrpc.get_time_settings
+  store_as: "time_config"
 ```
 
-### Firmware Update
+---
 
-#### jsonrpc.update_firmware / Update Firmware
+## Wake-on-LAN
+
+### wol.send / Send Magic Packet
 ```yaml
-- action: jsonrpc.update_firmware
-  firmware_url: "${cloudfront_url}"
+# Wake device using mac_for_report suite variable (simplest)
+- wol.send: {}
+
+# Explicit MAC address
+- wol.send:
+    mac: 'AA:BB:CC:DD:EE:FF'
+
+# All options
+- wol.send:
+    mac: '${mac_for_report}'      # XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX
+    broadcast: 255.255.255.255    # default
+    port: 9                       # UDP port (default: 9, alt: 7)
+    sleep: 5                      # seconds to wait after sending (default: 5)
+    store_as: wol_result          # optional
 ```
 
 ---
@@ -612,12 +588,6 @@ Navigate to URL in existing browser
 - action: test.assert
   expression: "'success' in response_body"
   message: "Response should contain success"
-
-# Soft assertion (continue on failure)
-- action: test.assert
-  expression: "user_count > 0"
-  message: "Should have users"
-  soft_assert: true
 
 # Available variables in expressions:
 # - last_response, last_status, last_json, last_headers
@@ -645,7 +615,7 @@ Navigate to URL in existing browser
   status: 200
   headers:
     Content-Type: "application/json"
-  body_contains: "success"
+  contains: "success"
 ```
 
 ### test.check_assertions / Check Soft Assertions
@@ -666,7 +636,7 @@ Navigate to URL in existing browser
       selector: "#upgrade"
   else:
     - action: browser.screenshot
-      name: "no-upgrade-needed"
+      filename: "no-upgrade-needed"
 ```
 
 ### Multiple Conditions
@@ -894,7 +864,6 @@ aws:
 datalake:
   enabled: false
   s3_bucket: "test-results"
-  teams_webhook: "${TEAMS_WEBHOOK_URL}"
 ```
 
 ---
@@ -940,7 +909,7 @@ steps:
     message: "Should show dashboard"
   
   - action: browser.screenshot
-    name: "logged-in"
+    filename: "logged-in"
 
 cleanup:
   - action: browser.close
@@ -1005,12 +974,7 @@ variables:
 setup:
   # Get latest firmware from S3
   - action: aws.get_latest
-    bucket_name: "${bucket_name}"
-    folder_prefix: "${folder_prefix}"
-    file_extension: ".bin"
-    download_dir: "Firmware"
-    store_filename_as: "firmware_file"
-    store_version_as: "firmware_version"
+    store_as: "firmware_file"
   
   # Login to device
   - action: browser.open
@@ -1041,7 +1005,7 @@ steps:
       
       - action: browser.upload
         selector: "iframe >> #firmware-input"
-        file_path: "Firmware/${firmware_file_basename}"
+        file: "Firmware/${firmware_file}"
       
       - action: browser.click
         selector: "iframe >> #upload-button"
@@ -1050,7 +1014,7 @@ steps:
         timeout: 10000
     else:
       - action: browser.screenshot
-        name: "no-upgrade-needed"
+        filename: "no-upgrade-needed"
       
       - action: test.assert
         expression: "True"
@@ -1058,7 +1022,7 @@ steps:
 
 cleanup:
   - action: browser.screenshot
-    name: "final-state"
+    filename: "final-state"
   - action: browser.close
 ```
 
@@ -1068,26 +1032,26 @@ cleanup:
 
 ```bash
 # Run all tests
-python -m easy_bdd run
+python -m easybdd run
 
 # Run specific test
-python -m easy_bdd run tests/cases/my_test.yaml
+python -m easybdd run tests/cases/my_test.yaml
 
 # Run with tags
-python -m easy_bdd run --tags smoke
-python -m easy_bdd run --tags "critical,api"
+python -m easybdd run --tags smoke
+python -m easybdd run --tags "critical,api"
 
 # Run with browser visible
-python -m easy_bdd run tests/cases/browser_test.yaml --headed
+python -m easybdd run tests/cases/browser_test.yaml --headed
 
 # Generate Gherkin only
-python -m easy_bdd generate tests/cases/
+python -m easybdd generate tests/cases/
 
 # Validate tests
-python -m easy_bdd validate tests/cases/
+python -m easybdd validate tests/cases/
 
 # Validate with strict mode
-python -m easy_bdd validate tests/cases/ --strict
+python -m easybdd validate tests/cases/ --strict
 
 # View metrics
 make metrics-dashboard
@@ -1121,7 +1085,6 @@ TEST_PASSWORD=SecurePassword123!
 DEVICE_PASSWORD=admin123
 
 # Webhook URLs
-TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/...
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 

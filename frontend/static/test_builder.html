@@ -4043,88 +4043,9 @@
                             <h2><i class="fas fa-cog"></i> Settings</h2>
                         </div>
                         <div class="card-body">
-                            <!-- Teams Notifications Section -->
+                            <!-- OpenAI Configuration Section -->
                             <div class="settings-section">
-                                <h3><i class="fab fa-microsoft"></i> Microsoft Teams Notifications</h3>
-                                <p class="text-muted" style="margin-bottom: 1.5rem;">
-                                    Configure Teams webhook to receive test execution notifications.
-                                    <a href="https://docs.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook" target="_blank" style="color: var(--primary);">
-                                        Learn how to create a webhook <i class="fas fa-external-link-alt" style="font-size: 0.75rem;"></i>
-                                    </a>
-                                </p>
-
-                                <div class="form-group">
-                                    <label class="form-label">
-                                        <input type="checkbox" v-model="teamsConfig.enabled" style="margin-right: 8px;">
-                                        Enable Teams Notifications
-                                    </label>
-                                    <div class="form-help">
-                                        When enabled, test execution results will be posted to your Teams channel
-                                    </div>
-                                </div>
-
-                                <div v-if="teamsConfig.enabled" class="form-group">
-                                    <label class="form-label form-label-required">Teams Webhook URL</label>
-                                    <input
-                                        v-model="teamsConfig.webhook_url"
-                                        type="text"
-                                        class="form-control"
-                                        placeholder="https://outlook.office.com/webhook/..."
-                                        @blur="saveTeamsConfig">
-                                    <div class="form-help">
-                                        Your Microsoft Teams incoming webhook URL. This will be stored securely.
-                                    </div>
-                                </div>
-
-                                <div v-if="teamsConfig.enabled" class="form-group">
-                                    <label class="form-label">
-                                        <input type="checkbox" v-model="teamsConfig.notify_on_success" style="margin-right: 8px;">
-                                        Notify on Successful Tests
-                                    </label>
-                                    <div class="form-help">
-                                        Send notifications even when tests pass (default: only failures)
-                                    </div>
-                                </div>
-
-                                <div v-if="teamsConfig.enabled" class="form-group">
-                                    <label class="form-label">
-                                        <input type="checkbox" v-model="teamsConfig.include_screenshots" style="margin-right: 8px;">
-                                        Include Screenshots
-                                    </label>
-                                    <div class="form-help">
-                                        Attach screenshots to Teams notifications for failed tests
-                                    </div>
-                                </div>
-
-                                <div v-if="teamsConfig.enabled" class="form-group">
-                                    <label class="form-label">
-                                        <input type="checkbox" v-model="teamsConfig.include_html_report" style="margin-right: 8px;">
-                                        Include HTML Report Link
-                                    </label>
-                                    <div class="form-help">
-                                        Include a link to download the HTML test report in the notification
-                                    </div>
-                                </div>
-
-                                <div v-if="teamsConfig.enabled" style="margin-top: 1.5rem;">
-                                    <button class="btn btn-primary" @click="saveTeamsConfig">
-                                        <i class="fas fa-save"></i> Save Teams Configuration
-                                    </button>
-                                    <button class="btn btn-secondary" @click="testTeamsConnection" :disabled="!teamsConfig.webhook_url">
-                                        <i class="fas fa-paper-plane"></i> Test Connection
-                                    </button>
-                                </div>
-
-                                <div v-if="teamsTestResult" class="alert" :class="teamsTestResult.success ? 'alert-success' : 'alert-danger'" style="margin-top: 1rem;">
-                                    <i class="fas" :class="teamsTestResult.success ? 'fa-check-circle' : 'fa-exclamation-circle'"></i>
-                                    {{ teamsTestResult.message }}
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- OpenAI Configuration Section -->
-                        <div class="settings-section" style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border);">
-                            <h3><i class="fas fa-robot"></i> OpenAI API Configuration</h3>
+                                <h3><i class="fas fa-robot"></i> OpenAI API Configuration</h3>
                             <p class="text-muted" style="margin-bottom: 1.5rem;">
                                 Configure your OpenAI API key for the AI Assistant feature. Your API key is stored locally and never shared.
                                 <a href="https://platform.openai.com/api-keys" target="_blank" style="color: var(--primary);">
@@ -7376,18 +7297,9 @@
                     activeEnvironmentId: null,
                     showCreateEnvironmentModal: false,
                     showEditEnvironmentModal: false,
-                    // Teams configuration
-                    teamsConfig: {
-                        enabled: false,
-                        webhook_url: '',
-                        notify_on_success: false,
-                        include_screenshots: false,
-                        include_html_report: false
-                    },
                     openaiConfig: {
                         api_key: ''
                     },
-                    teamsTestResult: null,
                     openaiTestResult: null,
                     pagerdutyConfig: {
                         api_key: '',
@@ -13001,7 +12913,7 @@ Would you like to enter a selector manually?
                 },
                 openDocInGitHub(docName) {
                     // Open GitHub URL for the document (fallback to GitHub if needed)
-                    const baseUrl = 'https://github.com/mfomin-snapone/easy_bdd/blob/main';
+                    const baseUrl = 'https://github.com/mfomin-snapone/easybdd/blob/main';
                     const docMap = {
                         'README': `${baseUrl}/README.md`,
                         'setup': `${baseUrl}/docs/setup.md`,
@@ -14700,42 +14612,12 @@ Would you like to enter a selector manually?
                     });
                 },
                 async loadSettings() {
-                    await this.loadTeamsConfig();
-                },
-                async loadTeamsConfig() {
-                    try {
-                        const response = await axios.get('/api/settings/teams');
-                        if (response.data) {
-                            this.teamsConfig = {
-                                enabled: response.data.enabled || false,
-                                webhook_url: response.data.webhook_url || '',
-                                notify_on_success: response.data.notify_on_success || false,
-                                include_screenshots: response.data.include_screenshots || false,
-                                include_html_report: response.data.include_html_report || false
-                            };
-                        }
-                    } catch (error) {
-                        console.error('Failed to load Teams configuration:', error);
-                        // If endpoint doesn't exist yet, use defaults
-                        this.teamsConfig = {
-                            enabled: false,
-                            webhook_url: '',
-                            notify_on_success: false,
-                            include_screenshots: false,
-                            include_html_report: false
-                        }
-                        // Load OpenAI config from localStorage
-                        const savedOpenAIKey = localStorage.getItem('openai_api_key');
-                        if (savedOpenAIKey) {
-                            this.openaiConfig.api_key = savedOpenAIKey;
-                        }
-                    }
-                    // Always try to load OpenAI key from localStorage (even if Teams config loaded successfully)
+                    // Load OpenAI config from localStorage
                     const savedOpenAIKey = localStorage.getItem('openai_api_key');
                     if (savedOpenAIKey) {
                         this.openaiConfig.api_key = savedOpenAIKey;
                     }
-                    
+
                     // Load PagerDuty config from localStorage
                     const savedPagerDutyKey = localStorage.getItem('pagerduty_api_key');
                     if (savedPagerDutyKey) {
@@ -14748,31 +14630,6 @@ Would you like to enter a selector manually?
                     const savedPagerDutyBaseUrl = localStorage.getItem('pagerduty_api_base_url');
                     if (savedPagerDutyBaseUrl) {
                         this.pagerdutyConfig.api_base_url = savedPagerDutyBaseUrl;
-                    }
-                },
-                async saveTeamsConfig() {
-                    try {
-                        if (this.teamsConfig.enabled && !this.teamsConfig.webhook_url) {
-                            alert('Please enter a Teams webhook URL');
-                            return;
-                        }
-
-                        await axios.put('/api/settings/teams', this.teamsConfig);
-                        this.teamsTestResult = {
-                            success: true,
-                            message: 'Teams configuration saved successfully'
-                        };
-
-                        // Clear test result after 3 seconds
-                        setTimeout(() => {
-                            this.teamsTestResult = null;
-                        }, 3000);
-                    } catch (error) {
-                        console.error('Failed to save Teams configuration:', error);
-                        this.teamsTestResult = {
-                            success: false,
-                            message: 'Failed to save Teams configuration: ' + (error.response?.data?.detail || error.message)
-                        };
                     }
                 },
                 async saveOpenAIConfig() {
@@ -14920,34 +14777,6 @@ Would you like to enter a selector manually?
                         this.pagerdutyTestResult = {
                             success: false,
                             message: '❌ Connection failed: ' + errorMsg
-                        };
-                    }
-                },
-                async testTeamsConnection() {
-                    try {
-                        if (!this.teamsConfig.webhook_url) {
-                            alert('Please enter a Teams webhook URL first');
-                            return;
-                        }
-
-                        this.teamsTestResult = {
-                            success: false,
-                            message: 'Testing connection...'
-                        };
-
-                        const response = await axios.post('/api/settings/teams/test', {
-                            webhook_url: this.teamsConfig.webhook_url
-                        });
-
-                        this.teamsTestResult = {
-                            success: response.data.success || false,
-                            message: response.data.message || (response.data.success ? 'Test notification sent successfully!' : 'Failed to send test notification')
-                        };
-                    } catch (error) {
-                        console.error('Failed to test Teams connection:', error);
-                        this.teamsTestResult = {
-                            success: false,
-                            message: 'Failed to test connection: ' + (error.response?.data?.detail || error.message)
                         };
                     }
                 },

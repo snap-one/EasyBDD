@@ -1,0 +1,175 @@
+def WORKSPACE = '/var/lib/jenkins/workspace/EASY_BDD'
+
+pipeline {
+    agent any
+
+    parameters {
+        choice(
+            name: 'PROJECT',
+            choices: [
+                '59 - JDM Automation',
+                '74 - Audio',
+                '76 - Routers',
+                '77 - Power',
+                '78 - Surveillance',
+                '79 - Switches',
+                '80 - Access Points',
+                '81 - Media Distribution',
+            ],
+            description: 'TestRail project containing the suite to convert'
+        )
+        string(
+            name: 'SUITE_ID',
+            defaultValue: '',
+            description: 'TestRail suite ID to convert (e.g. 106662). Leave blank to use RUN_ID instead.'
+        )
+        string(
+            name: 'RUN_ID',
+            defaultValue: '',
+            description: 'TestRail run ID to read cases from instead of a suite (optional, overrides SUITE_ID)'
+        )
+        string(
+            name: 'OUTPUT_DIR',
+            defaultValue: '',
+            description: 'Output directory for generated YAML files (default: tests/cases/<suite_slug>)'
+        )
+        string(
+            name: 'TARGET_SUITE_ID',
+            defaultValue: '',
+            description: 'Existing Easy BDD TestRail suite ID to write converted cases into (leave blank to create a new suite)'
+        )
+        string(
+            name: 'TARGET_SUITE_NAME',
+            defaultValue: '',
+            description: 'Name for the new TestRail suite (default: EASYBDD: <source suite name>)'
+        )
+        string(
+            name: 'TAG',
+            defaultValue: '',
+            description: 'Tag to add to every generated test case (default: slugified suite name)'
+        )
+        booleanParam(
+            name: 'NO_TESTRAIL',
+            defaultValue: false,
+            description: 'Only write local YAML files — do NOT create a new TestRail suite'
+        )
+        booleanParam(
+            name: 'NO_YAML',
+            defaultValue: false,
+            description: 'Only create the TestRail suite — do NOT write local YAML files'
+        )
+        booleanParam(
+            name: 'DRY_RUN',
+            defaultValue: true,
+            description: 'Preview what would be created without writing any files or TestRail cases (recommended for first run)'
+        )
+        string(
+            name: 'BRANCH',
+            defaultValue: 'main',
+            description: 'Git branch to run from'
+        )
+    }
+
+    options {
+        buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '100'))
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('Validate parameters') {
+            steps {
+                script {
+                    if (!params.SUITE_ID && !params.RUN_ID) {
+                        error('Either SUITE_ID or RUN_ID must be provided.')
+                    }
+                }
+            }
+        }
+
+        stage('Convert TestRail suite') {
+            steps {
+                script {
+                    def projectId = params.PROJECT.split(' - ')[0].trim()
+                    def branch    = params.BRANCH.trim() ?: 'main'
+
+                    def sourceArg = params.RUN_ID
+                        ? "--run ${params.RUN_ID.trim()}"
+                        : "--suite ${params.SUITE_ID.trim()}"
+
+                    def outputArg       = params.OUTPUT_DIR      ? "--output-dir '${params.OUTPUT_DIR.trim()}'"       : ''
+                    def targetSuiteArg  = params.TARGET_SUITE_ID ? "--target-suite ${params.TARGET_SUITE_ID.trim()}"  : ''
+                    def targetNameArg   = params.TARGET_SUITE_NAME ? "--target-suite-name '${params.TARGET_SUITE_NAME.trim()}'" : ''
+                    def tagArg          = params.TAG              ? "--tag '${params.TAG.trim()}'"                     : ''
+                    def noTestrailFlag  = params.NO_TESTRAIL      ? '--no-testrail'                                   : ''
+                    def noYamlFlag      = params.NO_YAML          ? '--no-yaml'                                       : ''
+                    def dryRunFlag      = params.DRY_RUN          ? '--dry-run'                                       : ''
+
+                    sh """#!/bin/bash
+                        cd ${WORKSPACE}
+                        git fetch origin
+                        git checkout ${branch}
+                        git pull origin ${branch}
+
+                        set -a && . .env && set +a
+                        . env/bin/activate
+
+                        python -m easybdd testrail-convert ${projectId} \\
+                            ${sourceArg} \\
+                            ${outputArg} \\
+                            ${targetSuiteArg} \\
+                            ${targetNameArg} \\
+                            ${tagArg} \\
+                            ${noTestrailFlag} \\
+                            ${noYamlFlag} \\
+                            ${dryRunFlag}
+                    """
+                }
+            }
+        }
+
+        stage('Commit generated YAML files') {
+            when {
+                allOf {
+                    expression { return !params.DRY_RUN }
+                    expression { return !params.NO_YAML }
+                }
+            }
+            steps {
+                script {
+                    def branch = params.BRANCH.trim() ?: 'main'
+                    sh """#!/bin/bash
+                        cd ${WORKSPACE}
+                        git config user.email "jenkins@snapone.com"
+                        git config user.name "Jenkins"
+                        git add tests/cases/ || true
+                        if git diff --cached --quiet; then
+                            echo "No new YAML files to commit."
+                        else
+                            git commit -m "ci: auto-generated Easy BDD YAML from TestRail suite ${params.SUITE_ID ?: 'run-' + params.RUN_ID} [skip ci]"
+                            git push origin ${branch}
+                            echo "Committed and pushed generated YAML files."
+                        fi
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                def projectName = params.PROJECT.split(' - ')[1].trim()
+                def source      = params.RUN_ID ? "run ${params.RUN_ID}" : "suite ${params.SUITE_ID}"
+                def mode        = params.DRY_RUN ? '[DRY RUN]' : ''
+                currentBuild.displayName = "#${BUILD_NUMBER} — ${projectName}: convert ${source} ${mode}".trim()
+                currentBuild.description = [
+                    "Project: ${projectName}",
+                    "Source: ${source}",
+                    params.TARGET_SUITE_ID ? "Target suite: ${params.TARGET_SUITE_ID}" : 'New suite',
+                    params.DRY_RUN ? 'Mode: dry run (no files written)' : 'Mode: live',
+                ].join(' | ')
+            }
+        }
+    }
+}

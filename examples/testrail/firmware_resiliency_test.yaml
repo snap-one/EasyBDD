@@ -1,0 +1,155 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TestRail Case Template: Firmware Resiliency (SSH/Telnet)
+# ─────────────────────────────────────────────────────────────────────────────
+# HOW TO USE:
+#   1. In TestRail, create a case titled:  Feature: <Your Test Name>
+#   2. Paste this YAML into the Preconditions field (strip these comment lines).
+#   3. Set device IP, credentials, and firmware bucket in your Var: cases or
+#      variables block below.
+#
+# TYPICAL RUN STRUCTURE IN TESTRAIL:
+#   Var:  device_ip       — injects ${device_ip} into all cases
+#   Var:  firmware_bucket — injects ${bucket_name}, ${folder_prefix}
+#   Feature: Firmware Resiliency — this template
+#
+# SSH vs TELNET:
+#   ssh.*    — Paramiko sessions; persistent across steps in one test
+#   telnet.* — Telnet sessions; persistent across steps in one test
+#   command.ssh — One-shot SSH command (no session state)
+# ─────────────────────────────────────────────────────────────────────────────
+
+variables:
+  device_ip: 192.168.1.100
+  device_user: admin
+  device_pass: ${DEVICE_PASSWORD}
+  bucket_name: firmware-releases
+  folder_prefix: product-x/stable
+  firmware_pattern: ".*\\.bin$"
+  # How long to wait after reboot before reconnecting (seconds)
+  reboot_wait: 90
+
+steps:
+
+  # ── 1. Discover latest firmware from S3 ───────────────────────────────────
+  - aws.list_files:
+      bucket_name: ${bucket_name}
+      folder_prefix: ${folder_prefix}
+      file_extension: .bin
+      filename_pattern: ${firmware_pattern}
+      store_as: firmware_files
+
+  - aws.get_latest:
+      files: ${firmware_files}
+      store_as: latest_firmware
+
+  - test.log:
+      message: "Latest firmware: ${latest_firmware}"
+
+  # ── 2. Connect via SSH and check baseline firmware version ────────────────
+  - ssh.connect:
+      host: ${device_ip}
+      username: ${device_user}
+      password: ${device_pass}
+      timeout: 30
+
+  - ssh.command:
+      command: cat /etc/firmware_version
+      store_as: current_version
+
+  - test.log:
+      message: "Current firmware: ${current_version}"
+
+  # ── 3. Upload firmware to device ──────────────────────────────────────────
+  - ssh.command:
+      command: wget -q -O /tmp/firmware.bin ${latest_firmware.url}
+      timeout: 120
+
+  - ssh.command:
+      command: md5sum /tmp/firmware.bin
+      store_as: upload_checksum
+
+  - test.assert:
+      value: ${upload_checksum}
+      contains: firmware.bin
+
+  # ── 4. Flash firmware ─────────────────────────────────────────────────────
+  - ssh.command:
+      command: /usr/sbin/flash_firmware /tmp/firmware.bin
+      timeout: 180
+      # Expected: device may drop connection after this command
+      ignore_error: true
+
+  # ── 5. Wait for reboot ────────────────────────────────────────────────────
+  - test.sleep:
+      seconds: ${reboot_wait}
+
+  # ── 6. Reconnect and verify new firmware ──────────────────────────────────
+  - ssh.connect:
+      host: ${device_ip}
+      username: ${device_user}
+      password: ${device_pass}
+      timeout: 60
+      retry: 5
+      retry_delay: 10
+
+  - ssh.command:
+      command: cat /etc/firmware_version
+      store_as: new_version
+
+  - test.log:
+      message: "New firmware after flash: ${new_version}"
+
+  - test.assert:
+      value: ${new_version}
+      equals: ${latest_firmware.version}
+
+  # ── 7. Resiliency checks — verify device is healthy post-flash ────────────
+  - ssh.command:
+      command: uptime
+      store_as: uptime_output
+
+  - test.assert:
+      value: ${uptime_output}
+      not_empty: true
+
+  - ssh.command:
+      command: "ps aux | grep -c '[a-z]'"
+      store_as: process_count
+
+  - test.assert:
+      value: ${process_count}
+      greater_than: 5
+
+  # Check network interfaces are up
+  - ssh.command:
+      command: "ip link show | grep -c 'state UP'"
+      store_as: iface_up_count
+
+  - test.assert:
+      value: ${iface_up_count}
+      greater_than: 0
+
+  # ── 8. Optional: Telnet fallback check (some devices expose CLI via Telnet)
+  # Uncomment if your device supports Telnet in addition to SSH.
+  #
+  # - telnet.connect:
+  #     host: ${device_ip}
+  #     port: 23
+  #     username: ${device_user}
+  #     password: ${device_pass}
+  #
+  # - telnet.command:
+  #     command: show version
+  #     store_as: telnet_version
+  #
+  # - test.assert:
+  #     value: ${telnet_version}
+  #     contains: ${latest_firmware.version}
+  #
+  # - telnet.disconnect: {}
+
+  # ── 9. Disconnect SSH ─────────────────────────────────────────────────────
+  - ssh.disconnect: {}
+
+  - test.log:
+      message: "Firmware resiliency test complete — ${device_ip} now running ${new_version}"

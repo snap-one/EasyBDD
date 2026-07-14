@@ -1,7 +1,19 @@
 """
-Modern Test Builder Web Application
-FastAPI backend for visual test creation and editing
+DEPRECATED — The local web builder is no longer the primary authoring surface.
+
+Test cases are now authored directly in TestRail using the Easy BDD case prefix
+taxonomy (Feature:, Test:, Var:, Setup:, Teardown:, Shared:) and dot-notation
+step syntax. Run tests via `python -m easybdd testrail-run --project-id <id>`.
+
+This file is kept for reference only and is not actively maintained.
 """
+
+import warnings as _warnings
+_warnings.warn(
+    "The Easy BDD web builder is deprecated. Author test cases in TestRail instead.",
+    DeprecationWarning,
+    stacklevel=1,
+)
 
 import asyncio
 import json
@@ -1208,7 +1220,7 @@ async def execute_test(
             )
 
             # Build command - use absolute path
-            cmd = [python_executable, "-m", "easy_bdd", "run", str(test_path)]
+            cmd = [python_executable, "-m", "easybdd", "run", str(test_path)]
 
             if request.headless:
                 cmd.append("--headless")
@@ -1310,9 +1322,6 @@ async def execute_test(
                 }
             )
 
-            # Send Teams notification if enabled
-            await send_teams_notification(test_id, running_tests[test_id], test_path)
-
             print(
                 f"[BACKGROUND TASK] Test {test_id} completed. Status: {running_tests[test_id]['status']}"
             )
@@ -1342,9 +1351,7 @@ async def execute_test(
                 }
             )
 
-            # Send Teams notification for error
             running_tests[test_id]["status"] = "error"
-            await send_teams_notification(test_id, running_tests[test_id], test_path)
 
     # Verify execution record exists before starting background task
     if test_id not in running_tests:
@@ -2956,7 +2963,7 @@ async def generate_report_from_json_file(
         with open(result_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        # Import HTMLReporter directly from file to avoid importing entire easy_bdd package
+        # Import HTMLReporter directly from file to avoid importing entire easybdd package
         import importlib.util
         import sys
         from pathlib import Path as PathLib
@@ -2968,7 +2975,7 @@ async def generate_report_from_json_file(
 
         try:
             # Import directly from the file to avoid __init__.py dependencies
-            html_reporter_path = project_root / "easy_bdd" / "core" / "html_reporter.py"
+            html_reporter_path = project_root / "easybdd" / "core" / "html_reporter.py"
             if not html_reporter_path.exists():
                 raise HTTPException(
                     status_code=500, detail="HTMLReporter module not found"
@@ -3485,7 +3492,7 @@ async def execute_test_suite_background(
                 )
 
                 # Build command
-                cmd = [python_executable, "-m", "easy_bdd", "run", str(test_path)]
+                cmd = [python_executable, "-m", "easybdd", "run", str(test_path)]
 
                 if request.headless:
                     cmd.append("--headless")
@@ -4522,14 +4529,31 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                 (function() {
                     'use strict';
 
-                    // Check if script has already been injected - MUST be first!
+                    // Remove existing event listeners if script was already injected
                     if (window.__easybdd_recorder_injected__) {
-                        console.log('[EasyBDD Recorder] Script already injected, skipping...');
-                        return;
+                        console.log('[EasyBDD Recorder] Script already injected, removing old listeners...');
+                        
+                        // Remove all existing event listeners by cloning and replacing the document
+                        // This is the most reliable way to remove all listeners
+                        if (window.__easybdd_recorder__ && window.__easybdd_recorder__.listenersRemoved) {
+                            // Already cleaned up, just return
+                            return;
+                        }
+                        
+                        // Mark that we're cleaning up
+                        if (!window.__easybdd_recorder__) {
+                            window.__easybdd_recorder__ = {};
+                        }
+                        window.__easybdd_recorder__.listenersRemoved = true;
                     }
 
                     // Mark as injected immediately
                     window.__easybdd_recorder_injected__ = true;
+                    
+                    // Reset cleanup flag for new injection
+                    if (window.__easybdd_recorder__) {
+                        window.__easybdd_recorder__.listenersRemoved = false;
+                    }
 
                     console.log('[EasyBDD Recorder] Highlight/locator script starting...');
 
@@ -4598,26 +4622,68 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                         window.__easybdd_recorder__.locatorTooltip = document.createElement('div');
                         window.__easybdd_recorder__.locatorTooltip.className = '__recorder_locator__';
                         const rect = element.getBoundingClientRect();
-                        // Position tooltip above the element with more space to avoid blocking
-                        // Try to position it 100px above, or to the right if not enough space above
+                        
+                        // Tooltip dimensions (will be calculated after creation, but estimate)
+                        const tooltipMaxWidth = 400;
+                        const tooltipPadding = 24; // 12px padding on each side
+                        const tooltipMargin = 20; // Space from element
+                        
+                        // Viewport dimensions
+                        const viewportWidth = window.innerWidth;
                         const viewportHeight = window.innerHeight;
+                        const scrollX = window.scrollX;
+                        const scrollY = window.scrollY;
+
+                        // Calculate preferred position (above element, centered)
+                        let tooltipTop = rect.top + scrollY - 110;
+                        let tooltipLeft = rect.left + scrollX + (rect.width / 2) - (tooltipMaxWidth / 2);
+                        
+                        // Ensure tooltip stays within viewport bounds
+                        // Check right boundary
+                        if (tooltipLeft + tooltipMaxWidth > scrollX + viewportWidth - tooltipMargin) {
+                            tooltipLeft = scrollX + viewportWidth - tooltipMaxWidth - tooltipMargin;
+                        }
+                        
+                        // Check left boundary
+                        if (tooltipLeft < scrollX + tooltipMargin) {
+                            tooltipLeft = scrollX + tooltipMargin;
+                        }
+                        
+                        // Check if there's enough space above, otherwise position below or to the right
                         const spaceAbove = rect.top;
                         const spaceBelow = viewportHeight - rect.bottom;
-                        const spaceRight = window.innerWidth - rect.right;
-
-                        let tooltipTop, tooltipLeft;
-                        if (spaceAbove > 120) {
-                            // Position above with good clearance
-                            tooltipTop = rect.top + window.scrollY - 110;
-                            tooltipLeft = rect.left + window.scrollX + (rect.width / 2) - 200; // Center it relative to element
-                        } else if (spaceRight > 450) {
-                            // Position to the right
-                            tooltipTop = rect.top + window.scrollY;
-                            tooltipLeft = rect.right + window.scrollX + 20;
-                        } else {
-                            // Position below if no space above or right
-                            tooltipTop = rect.bottom + window.scrollY + 10;
-                            tooltipLeft = rect.left + window.scrollX + (rect.width / 2) - 200;
+                        const spaceRight = viewportWidth - rect.right;
+                        
+                        if (spaceAbove < 120 && spaceBelow > 120) {
+                            // Not enough space above, position below
+                            tooltipTop = rect.bottom + scrollY + 10;
+                            tooltipLeft = rect.left + scrollX + (rect.width / 2) - (tooltipMaxWidth / 2);
+                            // Re-check boundaries for below position
+                            if (tooltipLeft + tooltipMaxWidth > scrollX + viewportWidth - tooltipMargin) {
+                                tooltipLeft = scrollX + viewportWidth - tooltipMaxWidth - tooltipMargin;
+                            }
+                            if (tooltipLeft < scrollX + tooltipMargin) {
+                                tooltipLeft = scrollX + tooltipMargin;
+                            }
+                        } else if (spaceAbove < 120 && spaceBelow < 120 && spaceRight > tooltipMaxWidth + tooltipMargin) {
+                            // Not enough space above or below, position to the right
+                            tooltipTop = rect.top + scrollY;
+                            tooltipLeft = rect.right + scrollX + 20;
+                            // Ensure it doesn't go off the right edge
+                            if (tooltipLeft + tooltipMaxWidth > scrollX + viewportWidth - tooltipMargin) {
+                                tooltipLeft = scrollX + viewportWidth - tooltipMaxWidth - tooltipMargin;
+                            }
+                        }
+                        
+                        // Ensure tooltip doesn't go below viewport
+                        const estimatedTooltipHeight = 120; // Estimate based on content
+                        if (tooltipTop + estimatedTooltipHeight > scrollY + viewportHeight - tooltipMargin) {
+                            tooltipTop = scrollY + viewportHeight - estimatedTooltipHeight - tooltipMargin;
+                        }
+                        
+                        // Ensure tooltip doesn't go above viewport
+                        if (tooltipTop < scrollY + tooltipMargin) {
+                            tooltipTop = scrollY + tooltipMargin;
                         }
 
                         window.__easybdd_recorder__.locatorTooltip.style.cssText = `
@@ -4634,19 +4700,55 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                             pointer-events: none;
                             opacity: 0.95;
                             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                            max-width: 400px;
+                            max-width: ${tooltipMaxWidth}px;
+                            width: max-content;
+                            min-width: 200px;
                             line-height: 1.6;
                             border: 1px solid #3b82f6;
+                            word-wrap: break-word;
+                            overflow-wrap: break-word;
+                            box-sizing: border-box;
                         `;
 
                         window.__easybdd_recorder__.locatorTooltip.innerHTML = `
-                            <div style="color: #3b82f6; font-weight: bold; margin-bottom: 4px;">Selector:</div>
-                            <div style="color: #60a5fa; word-break: break-all;">${info.selector}</div>
-                            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #334155; color: #94a3b8; font-size: 11px;">
+                            <div style="color: #3b82f6; font-weight: bold; margin-bottom: 4px; word-wrap: break-word; overflow-wrap: break-word;">Selector:</div>
+                            <div style="color: #60a5fa; word-break: break-all; word-wrap: break-word; overflow-wrap: break-word; white-space: normal; max-width: 100%;">${info.selector}</div>
+                            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #334155; color: #94a3b8; font-size: 11px; word-wrap: break-word; overflow-wrap: break-word; white-space: normal;">
                                 ${info.details}
                             </div>
                         `;
                         document.body.appendChild(window.__easybdd_recorder__.locatorTooltip);
+                        
+                        // After appending, adjust position if tooltip extends beyond viewport
+                        const tooltipRect = window.__easybdd_recorder__.locatorTooltip.getBoundingClientRect();
+                        let adjustedLeft = tooltipLeft;
+                        let adjustedTop = tooltipTop;
+                        
+                        // Check if tooltip extends beyond right edge
+                        if (tooltipRect.right > viewportWidth - tooltipMargin) {
+                            adjustedLeft = viewportWidth - tooltipRect.width - tooltipMargin - scrollX;
+                        }
+                        
+                        // Check if tooltip extends beyond left edge
+                        if (tooltipRect.left < tooltipMargin) {
+                            adjustedLeft = tooltipMargin + scrollX;
+                        }
+                        
+                        // Check if tooltip extends beyond bottom edge
+                        if (tooltipRect.bottom > viewportHeight - tooltipMargin) {
+                            adjustedTop = viewportHeight - tooltipRect.height - tooltipMargin - scrollY;
+                        }
+                        
+                        // Check if tooltip extends beyond top edge
+                        if (tooltipRect.top < tooltipMargin) {
+                            adjustedTop = tooltipMargin + scrollY;
+                        }
+                        
+                        // Apply adjustments if needed
+                        if (adjustedLeft !== tooltipLeft || adjustedTop !== tooltipTop) {
+                            window.__easybdd_recorder__.locatorTooltip.style.left = adjustedLeft + 'px';
+                            window.__easybdd_recorder__.locatorTooltip.style.top = adjustedTop + 'px';
+                        }
                     }
                     function removeLocatorTooltip() {
                         if (window.__easybdd_recorder__.locatorTooltip) window.__easybdd_recorder__.locatorTooltip.remove();
@@ -4896,7 +4998,17 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                     })();
 
                     // Mouse over highlighting
-                    document.addEventListener('mouseover', (e) => {
+                    // Remove any existing mouseover/mouseout listeners first
+                    if (window.__easybdd_recorder__) {
+                        if (window.__easybdd_recorder__.mouseoverHandler) {
+                            document.removeEventListener('mouseover', window.__easybdd_recorder__.mouseoverHandler, true);
+                        }
+                        if (window.__easybdd_recorder__.mouseoutHandler) {
+                            document.removeEventListener('mouseout', window.__easybdd_recorder__.mouseoutHandler, true);
+                        }
+                    }
+                    
+                    const mouseoverHandler = (e) => {
                         if (e.target.classList.contains('__recorder_highlight__') ||
                             e.target.classList.contains('__recorder_locator__') ||
                             e.target.classList.contains('__recorder_badge__') ||
@@ -4905,9 +5017,9 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                         }
                         showHighlight(e.target);
                         showLocatorTooltip(e.target);
-                    }, true);
-
-                    document.addEventListener('mouseout', (e) => {
+                    };
+                    
+                    const mouseoutHandler = (e) => {
                         if (e.target.classList.contains('__recorder_highlight__') ||
                             e.target.classList.contains('__recorder_locator__') ||
                             e.target.classList.contains('__recorder_badge__')) {
@@ -4918,7 +5030,15 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                             removeHighlight();
                             removeLocatorTooltip();
                         }
-                    }, true);
+                    };
+                    
+                    // Store handler references for cleanup
+                    if (!window.__easybdd_recorder__) window.__easybdd_recorder__ = {};
+                    window.__easybdd_recorder__.mouseoverHandler = mouseoverHandler;
+                    window.__easybdd_recorder__.mouseoutHandler = mouseoutHandler;
+                    
+                    document.addEventListener('mouseover', mouseoverHandler, true);
+                    document.addEventListener('mouseout', mouseoutHandler, true);
 
                     // Context menu for right-click assertions (using namespace)
                     function createContextMenu() {
@@ -5203,8 +5323,22 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                 }
 
                 // Show context menu on right-click
-                document.addEventListener('contextmenu', (e) => {
+                // Remove any existing contextmenu listener first
+                if (window.__easybdd_recorder__ && window.__easybdd_recorder__.contextmenuHandler) {
+                    document.removeEventListener('contextmenu', window.__easybdd_recorder__.contextmenuHandler, true);
+                }
+                if (window.__easybdd_recorder__ && window.__easybdd_recorder__.contextmenuClickHandler) {
+                    document.removeEventListener('click', window.__easybdd_recorder__.contextmenuClickHandler);
+                }
+                
+                const contextmenuHandler = (e) => {
+                    // Only show context menu if recording is active
+                    if (!window.__easybdd_recorder__ || !window.__easybdd_recorder__.recordingBadge) {
+                        return; // Not recording, allow default context menu
+                    }
+                    
                     e.preventDefault();
+                    e.stopPropagation();
                     window.__easybdd_recorder__.contextTarget = e.target;
 
                     hideContextMenu();
@@ -5212,17 +5346,34 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                     window.__easybdd_recorder__.contextMenu.style.left = e.pageX + 'px';
                     window.__easybdd_recorder__.contextMenu.style.top = e.pageY + 'px';
                     document.body.appendChild(window.__easybdd_recorder__.contextMenu);
-                }, true);
-
-                // Hide context menu on click outside
-                document.addEventListener('click', (e) => {
+                    
+                    // Ensure menu is visible and on top
+                    window.__easybdd_recorder__.contextMenu.style.display = 'block';
+                    window.__easybdd_recorder__.contextMenu.style.zIndex = '1000000';
+                };
+                
+                const contextmenuClickHandler = (e) => {
                     if (window.__easybdd_recorder__.contextMenu && !window.__easybdd_recorder__.contextMenu.contains(e.target)) {
                         hideContextMenu();
                     }
-                });
+                };
+                
+                // Store handler references for cleanup
+                if (!window.__easybdd_recorder__) window.__easybdd_recorder__ = {};
+                window.__easybdd_recorder__.contextmenuHandler = contextmenuHandler;
+                window.__easybdd_recorder__.contextmenuClickHandler = contextmenuClickHandler;
+                
+                document.addEventListener('contextmenu', contextmenuHandler, true);
+                // Hide context menu on click outside (use capture=false for this one)
+                document.addEventListener('click', contextmenuClickHandler);
 
                 // Track clicks (but not on context menu or recorder UI)
-                document.addEventListener('click', async (e) => {
+                // Remove any existing click listener first to prevent duplicates
+                if (window.__easybdd_recorder__ && window.__easybdd_recorder__.clickHandler) {
+                    document.removeEventListener('click', window.__easybdd_recorder__.clickHandler, true);
+                }
+                
+                const clickHandler = async (e) => {
                     // Skip if we're in element selection mode (for asserts)
                     if (document.getElementById('__recorder_element_selection_instruction__')) {
                         return; // Let the element selection handler take care of it
@@ -5256,13 +5407,25 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                     } catch (error) {
                         console.error('[EasyBDD Recorder] Error recording click:', error);
                     }
-                }, true);
+                };
+                
+                // Store handler reference for cleanup
+                if (!window.__easybdd_recorder__) window.__easybdd_recorder__ = {};
+                window.__easybdd_recorder__.clickHandler = clickHandler;
+                
+                document.addEventListener('click', clickHandler, true);
 
                 // Track input/typing with improved debouncing to avoid splitting words
+                // Remove any existing input listener first to prevent duplicates
+                if (window.__easybdd_recorder__ && window.__easybdd_recorder__.inputHandler) {
+                    document.removeEventListener('input', window.__easybdd_recorder__.inputHandler, true);
+                }
+                
                 let typingTimeout = null;
                 let lastRecordedValue = null;
                 let lastRecordedSelector = null;
-                document.addEventListener('input', async (e) => {
+                
+                const inputHandler = async (e) => {
                     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
                         const selector = getSelector(e.target);
                         const currentValue = e.target.value || e.target.textContent || '';
@@ -5321,14 +5484,25 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                             }
                         }, 1500); // Increased from 300ms to 1500ms to wait for complete input
                     }
-                }, true);
+                };
+                
+                // Store handler reference for cleanup
+                if (!window.__easybdd_recorder__) window.__easybdd_recorder__ = {};
+                window.__easybdd_recorder__.inputHandler = inputHandler;
+                
+                document.addEventListener('input', inputHandler, true);
 
                 // Track form submissions - Note: Form submission is typically handled by clicking submit buttons
                 // We don't need to record form.submit events separately as clicking the submit button is already recorded
                 // If you need to explicitly submit a form, use browser.click on the submit button
 
                 // Track select changes
-                document.addEventListener('change', async (e) => {
+                // Remove any existing change listener first to prevent duplicates
+                if (window.__easybdd_recorder__ && window.__easybdd_recorder__.changeHandler) {
+                    document.removeEventListener('change', window.__easybdd_recorder__.changeHandler, true);
+                }
+                
+                const changeHandler = async (e) => {
                     if (e.target.tagName === 'SELECT') {
                         const selector = getSelector(e.target);
                         const value = e.target.value;
@@ -5338,12 +5512,8 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                                 value: value
                             });
                         }
-                    }
-                }, true);
-
-                // Track checkbox/radio changes
-                document.addEventListener('change', async (e) => {
-                    if (e.target.type === 'checkbox' || e.target.type === 'radio') {
+                    } else if (e.target.type === 'checkbox' || e.target.type === 'radio') {
+                        // Track checkbox/radio changes
                         const selector = getSelector(e.target);
                         const checked = e.target.checked;
                         if (window.recordAction && selector) {
@@ -5353,7 +5523,13 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                             });
                         }
                     }
-                }, true);
+                };
+                
+                // Store handler reference for cleanup
+                if (!window.__easybdd_recorder__) window.__easybdd_recorder__ = {};
+                window.__easybdd_recorder__.changeHandler = changeHandler;
+                
+                document.addEventListener('change', changeHandler, true);
                 })();
             """
 
@@ -5377,10 +5553,34 @@ async def run_recorder(session_id: str, url: str, headless: bool):
                     try:
                         await frame.wait_for_load_state("networkidle", timeout=5000)
                         # Clear the injection flag and namespace to allow re-injection
+                        # Also remove all event listeners before re-injecting
                         await page.evaluate(
                             """
                             window.__easybdd_recorder_injected__ = false;
                             if (window.__easybdd_recorder__) {
+                                // Remove all event listeners to prevent duplicates
+                                if (window.__easybdd_recorder__.clickHandler) {
+                                    document.removeEventListener('click', window.__easybdd_recorder__.clickHandler, true);
+                                }
+                                if (window.__easybdd_recorder__.inputHandler) {
+                                    document.removeEventListener('input', window.__easybdd_recorder__.inputHandler, true);
+                                }
+                                if (window.__easybdd_recorder__.changeHandler) {
+                                    document.removeEventListener('change', window.__easybdd_recorder__.changeHandler, true);
+                                }
+                                if (window.__easybdd_recorder__.mouseoverHandler) {
+                                    document.removeEventListener('mouseover', window.__easybdd_recorder__.mouseoverHandler, true);
+                                }
+                                if (window.__easybdd_recorder__.mouseoutHandler) {
+                                    document.removeEventListener('mouseout', window.__easybdd_recorder__.mouseoutHandler, true);
+                                }
+                                if (window.__easybdd_recorder__.contextmenuHandler) {
+                                    document.removeEventListener('contextmenu', window.__easybdd_recorder__.contextmenuHandler, true);
+                                }
+                                if (window.__easybdd_recorder__.contextmenuClickHandler) {
+                                    document.removeEventListener('click', window.__easybdd_recorder__.contextmenuClickHandler);
+                                }
+                                
                                 // Clean up old elements
                                 if (window.__easybdd_recorder__.highlightEl) {
                                     window.__easybdd_recorder__.highlightEl.remove();
@@ -5467,332 +5667,6 @@ def record_action(session_id: str, action: str, parameters: Dict[str, Any]):
         )
     except Exception as e:
         print(f"[RECORDER] Error broadcasting message: {e}")
-
-
-# ==================== SETTINGS API ====================
-
-SETTINGS_FILE = Path(__file__).parent / "test_builder_settings.json"
-
-
-class TeamsConfig(BaseModel):
-    """Teams notification configuration"""
-
-    enabled: bool = False
-    webhook_url: str = ""
-    notify_on_success: bool = False
-    include_screenshots: bool = False
-    include_html_report: bool = False
-
-
-class TeamsTestRequest(BaseModel):
-    """Request model for testing Teams connection"""
-
-    webhook_url: str
-
-
-def load_settings() -> Dict[str, Any]:
-    """Load settings from JSON file"""
-    if SETTINGS_FILE.exists():
-        try:
-            with open(SETTINGS_FILE, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Error loading settings: {e}")
-            return {}
-    return {}
-
-
-def save_settings(settings: Dict[str, Any]) -> None:
-    """Save settings to JSON file"""
-    try:
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump(settings, f, indent=2)
-    except Exception as e:
-        print(f"Error saving settings: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to save settings: {e}")
-
-
-@app.get("/api/settings/teams")
-async def get_teams_config():
-    """Get Teams notification configuration"""
-    settings = load_settings()
-    teams_config = settings.get("teams", {})
-
-    # Also check environment variable for webhook URL (for backward compatibility)
-    if not teams_config.get("webhook_url") and os.environ.get("TEAMS_WEBHOOK_URL"):
-        teams_config["webhook_url"] = os.environ.get("TEAMS_WEBHOOK_URL")
-
-    return teams_config
-
-
-@app.put("/api/settings/teams")
-async def update_teams_config(config: TeamsConfig):
-    """Update Teams notification configuration"""
-    settings = load_settings()
-    settings["teams"] = config.model_dump()
-    save_settings(settings)
-
-    # Also set environment variable for backward compatibility
-    if config.webhook_url:
-        os.environ["TEAMS_WEBHOOK_URL"] = config.webhook_url
-
-    return {"success": True, "message": "Teams configuration updated"}
-
-
-async def send_teams_notification(
-    test_id: str, test_result: Dict[str, Any], test_path: Path
-):
-    """Send Teams notification for test completion"""
-    try:
-        settings = load_settings()
-        teams_config = settings.get("teams", {})
-
-        # Check if Teams notifications are enabled
-        if not teams_config.get("enabled", False):
-            return
-
-        webhook_url = teams_config.get("webhook_url", "")
-        if not webhook_url:
-            # Fallback to environment variable
-            webhook_url = os.environ.get("TEAMS_WEBHOOK_URL", "")
-
-        if not webhook_url:
-            print("[TEAMS] Webhook URL not configured, skipping notification")
-            return
-
-        # Check if we should notify (only failures or all)
-        status = test_result.get("status", "unknown")
-        notify_on_success = teams_config.get("notify_on_success", False)
-
-        if status == "completed" and not notify_on_success:
-            print(
-                "[TEAMS] Test passed and notify_on_success is disabled, skipping notification"
-            )
-            return
-
-        # Prepare message
-        test_name = test_path.stem if test_path else "Unknown Test"
-        status_emoji = "✅" if status == "completed" else "❌"
-        status_text = "PASSED" if status == "completed" else "FAILED"
-
-        # Calculate duration
-        started = test_result.get("started")
-        finished = test_result.get("finished")
-        duration = "N/A"
-        if started and finished:
-            try:
-                start_time = datetime.fromisoformat(started.replace("Z", "+00:00"))
-                end_time = datetime.fromisoformat(finished.replace("Z", "+00:00"))
-                duration_seconds = (end_time - start_time).total_seconds()
-                if duration_seconds < 60:
-                    duration = f"{duration_seconds:.1f}s"
-                else:
-                    duration = f"{duration_seconds / 60:.1f}m"
-            except Exception:
-                pass
-
-        # Get output summary (last few lines)
-        output = test_result.get("output", [])
-        output_summary = "\n".join(output[-10:]) if output else "No output available"
-
-        message_body = [
-            {
-                "type": "TextBlock",
-                "text": f"{status_emoji} Test Execution: {status_text}",
-                "wrap": True,
-                "weight": "Bolder",
-                "size": "Large",
-                "color": "Good" if status == "completed" else "Attention",
-            },
-            {
-                "type": "TextBlock",
-                "text": f"**Test:** {test_name}",
-                "wrap": True,
-                "spacing": "Medium",
-            },
-            {
-                "type": "TextBlock",
-                "text": f"**Duration:** {duration}",
-                "wrap": True,
-                "spacing": "Small",
-            },
-        ]
-
-        # Add error details if failed
-        if status != "completed":
-            error = test_result.get("error", "")
-            if error:
-                message_body.append(
-                    {
-                        "type": "TextBlock",
-                        "text": f"**Error:** {error[:200]}",
-                        "wrap": True,
-                        "spacing": "Medium",
-                        "color": "Attention",
-                    }
-                )
-
-        # Add output summary
-        if output_summary and len(output_summary) > 0:
-            message_body.append(
-                {
-                    "type": "TextBlock",
-                    "text": f"**Output:**\n```\n{output_summary[-500:]}\n```",
-                    "wrap": True,
-                    "spacing": "Medium",
-                    "fontType": "Monospace",
-                    "size": "Small",
-                }
-            )
-
-        # Add timestamp
-        message_body.append(
-            {
-                "type": "TextBlock",
-                "text": f"*Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*",
-                "wrap": True,
-                "isSubtle": True,
-                "size": "Small",
-                "spacing": "Large",
-            }
-        )
-
-        # Prepare card actions (for HTML report link)
-        card_actions = []
-        include_html_report = teams_config.get("include_html_report", False)
-        if include_html_report:
-            result_file = test_result.get("result_file")
-            if result_file:
-                # Get base URL (try to get from environment or use default)
-                base_url = os.environ.get("BASE_URL", "http://localhost:8000")
-                report_url = f"{base_url}/api/results/{result_file}/generate-report"
-
-                card_actions.append(
-                    {
-                        "type": "Action.OpenUrl",
-                        "title": "📊 Download HTML Report",
-                        "url": report_url,
-                    }
-                )
-
-        teams_message = {
-            "type": "message",
-            "attachments": [
-                {
-                    "contentType": "application/vnd.microsoft.card.adaptive",
-                    "content": {
-                        "type": "AdaptiveCard",
-                        "body": message_body,
-                        "actions": card_actions if card_actions else None,
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                        "version": "1.2",
-                    },
-                }
-            ],
-        }
-
-        # Remove actions if empty (some Teams clients don't like empty arrays)
-        if not card_actions:
-            teams_message["attachments"][0]["content"].pop("actions", None)
-
-        # Send notification
-        try:
-            import requests
-
-            response = requests.post(
-                webhook_url,
-                headers={"Content-Type": "application/json"},
-                json=teams_message,
-                timeout=10,
-            )
-            if response.status_code in [200, 202]:
-                print(f"[TEAMS] Notification sent successfully for test {test_id}")
-            else:
-                print(
-                    f"[TEAMS] Failed to send notification. Status: {response.status_code}"
-                )
-        except ImportError:
-            print("[TEAMS] requests library not available, cannot send notification")
-        except Exception as e:
-            print(f"[TEAMS] Error sending notification: {e}")
-    except Exception as e:
-        print(f"[TEAMS] Error preparing notification: {e}")
-
-
-@app.post("/api/settings/teams/test")
-async def test_teams_connection(request: TeamsTestRequest):
-    """Test Teams webhook connection by sending a test message"""
-    print(
-        f"[TEAMS TEST] Received test request with webhook_url: {request.webhook_url[:50]}..."
-    )
-    webhook_url = request.webhook_url
-
-    if not webhook_url:
-        raise HTTPException(status_code=400, detail="Webhook URL is required")
-
-    try:
-        import requests
-
-        test_message = {
-            "type": "message",
-            "attachments": [
-                {
-                    "contentType": "application/vnd.microsoft.card.adaptive",
-                    "content": {
-                        "type": "AdaptiveCard",
-                        "body": [
-                            {
-                                "type": "TextBlock",
-                                "text": "✅ Test notification from Easy BDD Test Builder",
-                                "wrap": True,
-                                "weight": "Bolder",
-                                "size": "Large",
-                            },
-                            {
-                                "type": "TextBlock",
-                                "text": "If you received this message, your Teams webhook is configured correctly!",
-                                "wrap": True,
-                                "spacing": "Medium",
-                            },
-                            {
-                                "type": "TextBlock",
-                                "text": f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                                "wrap": True,
-                                "isSubtle": True,
-                                "size": "Small",
-                            },
-                        ],
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                        "version": "1.2",
-                    },
-                }
-            ],
-        }
-
-        response = requests.post(
-            webhook_url,
-            headers={"Content-Type": "application/json"},
-            json=test_message,
-            timeout=10,
-        )
-
-        if response.status_code == 200 or response.status_code == 202:
-            return {
-                "success": True,
-                "message": "Test notification sent successfully! Check your Teams channel.",
-            }
-        else:
-            return {
-                "success": False,
-                "message": f"Failed to send notification. Status: {response.status_code}, Response: {response.text[:200]}",
-            }
-    except ImportError:
-        raise HTTPException(status_code=500, detail="requests library not available")
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Error sending test notification: {str(e)}",
-        }
 
 
 @app.get("/api/chat/tokens")
@@ -6363,7 +6237,7 @@ async def execute_test_internal(test_id: str, test_path: Path, request: TestExec
     python_executable = str(venv_python) if venv_python.exists() else sys.executable
     
     # Build command
-    cmd = [python_executable, "-m", "easy_bdd", "run", str(test_path)]
+    cmd = [python_executable, "-m", "easybdd", "run", str(test_path)]
     
     if request.headless:
         cmd.append("--headless")

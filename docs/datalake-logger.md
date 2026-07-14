@@ -1,6 +1,6 @@
 # Datalake Logger
 
-**Comprehensive logging with error hints, Teams notifications, and metrics posting**
+**Comprehensive logging with error hints and metrics posting**
 
 ---
 
@@ -10,7 +10,6 @@ The Datalake Logger provides advanced logging capabilities including:
 
 - **Loguru Integration**: Beautiful console logging with colors
 - **Error Hints**: AI-powered or rule-based error explanations
-- **Teams Notifications**: Automatic posting to Microsoft Teams
 - **Datalake Metrics**: Post test results to data analytics platform
 - **Limited Tracebacks**: Show only project-relevant stack frames
 
@@ -40,9 +39,6 @@ pip install -e ".[ai]"
 ### Environment Variables
 
 ```bash
-# Teams webhook URL
-export TEAMS_WEBHOOK_URL="https://your-teams-webhook-url"
-
 # Datalake configuration
 export DATALAKE_URL="https://your-datalake-endpoint"
 export DATALAKE_API_KEY="your-api-key"
@@ -60,13 +56,8 @@ config:
   logging:
     enabled: true
     artifact_path: "reports/artifacts"
-    post_results: true  # Set to false to disable Teams/Datalake posting
+    post_results: true  # Set to false to disable Datalake posting
     console_to_file: true
-    
-    # Teams configuration
-    teams:
-      enabled: true
-      webhook_url: "${TEAMS_WEBHOOK_URL}"
     
     # Datalake configuration
     datalake:
@@ -91,7 +82,7 @@ config:
 ### Basic Logging
 
 ```python
-from easy_bdd.core.datalake_logger import get_logger
+from easybdd.core.datalake_logger import get_logger
 
 # Get logger instance
 logger = get_logger()
@@ -142,41 +133,6 @@ logger.error_hint_subs.append([
 
 ---
 
-## Teams Notifications
-
-Automatically posts errors to Microsoft Teams:
-
-**Setup:**
-
-1. Create a Teams webhook:
-   - Go to Teams channel → Connectors → Incoming Webhook
-   - Copy the webhook URL
-
-2. Set environment variable:
-   ```bash
-   export TEAMS_WEBHOOK_URL="your-webhook-url"
-   ```
-
-3. Enable in configuration:
-   ```yaml
-   logging:
-     teams:
-       enabled: true
-   ```
-
-**Example Notification:**
-
-```
-[Test Run TEST001]
-
-API request: GET /api/users
-
-builtins.AssertionError: Expected 200, got 404
-Hint: Check API endpoint and authentication.
-```
-
----
-
 ## Datalake Metrics
 
 Post test metrics to analytics platform:
@@ -200,7 +156,7 @@ logger.datalake_post(
     console="Test passed\nAll assertions successful",
     run_url="https://testrail.example.com/run/123",
     success=True,
-    type="easy_bdd"
+    type="easybdd"
 )
 ```
 
@@ -247,11 +203,11 @@ Only shows stack frames from your project:
 Traceback (most recent call last):
   File "/usr/lib/python3.12/site-packages/...", line 123
   ...
-  File "/your/project/easy_bdd/core/runner.py", line 456, in execute_step
+  File "/your/project/easybdd/core/runner.py", line 456, in execute_step
     service.click_element(selector)
 
 # Limited traceback (relevant only)
-  File "/your/project/easy_bdd/core/runner.py", line 456, in execute_step
+  File "/your/project/easybdd/core/runner.py", line 456, in execute_step
 ```
 
 ### Console to File
@@ -312,7 +268,7 @@ except Exception as e:
 The logger is automatically integrated:
 
 ```python
-from easy_bdd.core.runner import TestRunner
+from easybdd.core.runner import TestRunner
 
 runner = TestRunner(config_path="config/framework.yaml")
 
@@ -360,7 +316,7 @@ logger.error("Test failed")
 
 ```yaml
 logging:
-  post_results: false  # No Teams/Datalake posts during development
+  post_results: false  # No Datalake posts during development
 ```
 
 ### 3. Add Context to Errors
@@ -414,18 +370,6 @@ pip list | grep loguru
 pip install loguru
 ```
 
-### Teams Posts Not Sending
-
-```bash
-# Verify webhook URL is set
-echo $TEAMS_WEBHOOK_URL
-
-# Test manually
-curl -X POST $TEAMS_WEBHOOK_URL \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Test message"}'
-```
-
 ### Datalake Posts Failing
 
 ```python
@@ -475,14 +419,13 @@ steps:
   # Logger automatically:
   # - Logs each step
   # - Tracks timing
-  # - Posts errors to Teams
   # - Submits metrics to datalake
 ```
 
 ### Custom Logging in Python
 
 ```python
-from easy_bdd.core.datalake_logger import get_logger
+from easybdd.core.datalake_logger import get_logger
 import datetime
 
 logger = get_logger(
@@ -533,13 +476,11 @@ The Datalake Logger provides enterprise-grade logging:
 |---------|---------|
 | **Loguru Integration** | Beautiful, colorful console output |
 | **Error Hints** | Quick problem diagnosis |
-| **Teams Notifications** | Real-time team alerts |
 | **Datalake Metrics** | Track performance and ROI |
 | **Limited Tracebacks** | Focus on relevant code |
 
 **Next Steps:**
 - Configure environment variables
 - Add custom error hints
-- Enable Teams notifications
 - Track metrics in datalake
 - Review [Configuration Guide](BROWSER_CONFIG.md)
