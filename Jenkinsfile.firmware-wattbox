@@ -1,6 +1,6 @@
 // Jenkinsfile for jpdsauto/Wattbox-Firmware
 // Detects which firmware types changed (.bin files) and creates one
-// TestRail run per SKU (Given: case) in the matching subsections.
+// TestRail run per SKU (Var: case) in the matching subsections.
 
 pipeline {
     agent { label 'built-in' }
@@ -63,17 +63,17 @@ pipeline {
                         vps : [
                             keyword   : 'vps',
                             sections  : ['Functions', 'Firmware Resiliency', 'VPS Web UI',  'VPS API'],
-                            givenSection: 'VPS',
+                            varSection: 'VPS',
                         ],
                         wifi: [
                             keyword   : 'wifi',
                             sections  : ['Functions', 'Firmware Resiliency', 'WiFi Web UI', 'WiFi API'],
-                            givenSection: 'WiFi',
+                            varSection: 'WiFi',
                         ],
                         ns  : [
                             keyword   : 'ns',
                             sections  : ['Functions', 'Firmware Resiliency', 'NS Web UI',   'NS API'],
-                            givenSection: 'NS',
+                            varSection: 'NS',
                         ],
                     ]
 
@@ -158,15 +158,15 @@ pipeline {
                     def firmwareTypes = [
                         vps : [
                             sections    : ['Functions', 'Firmware Resiliency', 'VPS Web UI',  'VPS API'],
-                            givenSection: 'VPS',
+                            varSection: 'VPS',
                         ],
                         wifi: [
                             sections    : ['Functions', 'Firmware Resiliency', 'WiFi Web UI', 'WiFi API'],
-                            givenSection: 'WiFi',
+                            varSection: 'WiFi',
                         ],
                         ns  : [
                             sections    : ['Functions', 'Firmware Resiliency', 'NS Web UI',   'NS API'],
-                            givenSection: 'NS',
+                            varSection: 'NS',
                         ],
                     ]
 
@@ -175,14 +175,14 @@ pipeline {
                         if (!cfg) { echo "⚠ Unknown firmware type '${type}' — skipping"; return }
 
                         def sectionsArg = cfg.sections.collect { "\"${it}\"" }.join(' ')
-                        echo "Creating runs for ${type.toUpperCase()} (Given: section: '${cfg.givenSection}')"
+                        echo "Creating runs for ${type.toUpperCase()} (Var: section: '${cfg.varSection}')"
 
                         sh """
                             set -a && . ${EASY_BDD_DIR}/.env && set +a
                             . ${EASY_BDD_DIR}/env/bin/activate
                             python -m easybdd testrail-create-run \\
                                 ${PROJECT_ID} ${SUITE_ID} \\
-                                --given-section "${cfg.givenSection}" \\
+                                --var-section "${cfg.varSection}" \\
                                 --sections ${sectionsArg} \\
                                 --description "Firmware drop detected in commit ${env.GIT_COMMIT?.take(8) ?: 'unknown'} (branch: ${env.GIT_BRANCH ?: 'main'})"
                         """

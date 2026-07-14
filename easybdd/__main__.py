@@ -94,7 +94,7 @@ _COMMANDS = {
             ("--prefix",            "str",  "EASYBDD:",    "Run name prefix"),
             ("--description",       "str",  "",             "Run description (supports JSON run-config syntax)"),
             ("--milestone-id",      "int",  None,           "Associate run with this milestone"),
-            ("--given-section",     "str",  None,           "Section with Given: cases — creates one run per Given: case (per-SKU mode)"),
+            ("--var-section",       "str",  None,           "Section with Var: cases — creates one run per Var: case (per-SKU mode)"),
             ("--run-name-template", "str",  "{prefix} {sku} Smoke Test", "Format string for per-SKU run names ({prefix}, {sku}, {product_category})"),
             ("--product-category",  "str",  "",             "Substituted as {product_category} in --run-name-template"),
             ("--dry-run",           "flag", None,           "Preview what would be created without creating it"),
@@ -105,13 +105,13 @@ _COMMANDS = {
             ("Create a run with only the Firmware and Functions sections",
              "easybdd testrail-create-run 79 106670 --sections Firmware Functions"),
             ("Per-SKU mode: one run per device in the 'Products' section",
-             "easybdd testrail-create-run 79 106670 --given-section Products --sections Firmware Functions"),
+             "easybdd testrail-create-run 79 106670 --var-section Products --sections Firmware Functions"),
             ("Dry-run to preview without creating",
-             "easybdd testrail-create-run 79 106670 --given-section Products --sections Firmware --dry-run"),
+             "easybdd testrail-create-run 79 106670 --var-section Products --sections Firmware --dry-run"),
         ],
         "notes": [
             "--sections uses case-insensitive substring match against section names",
-            "--given-section mode requires Given: case titles in that section (e.g. 'Given: AN-220-SW-R-16-POE')",
+            "--var-section mode requires Var: case titles in that section (e.g. 'Var: AN-220-SW-R-16-POE')",
         ],
     },
 
@@ -895,14 +895,14 @@ Examples:
         help="Milestone ID to associate the run with",
     )
     trcr_parser.add_argument(
-        "--given-section",
+        "--var-section",
         metavar="SECTION",
         default=None,
         help=(
-            "Name of the section containing 'Given:' cases (one per SKU/variant). "
-            "When set, creates one run per Given: case found in that section. "
-            "The Given: case is always included; --sections controls the rest of the cases. "
-            'Example: --given-section "VPS" --sections "Functions" "Firmware Resiliency" "VPS Web UI" "VPS API"'
+            "Name of the section containing 'Var:' cases (one per SKU/variant). "
+            "When set, creates one run per Var: case found in that section. "
+            "The Var: case is always included; --sections controls the rest of the cases. "
+            'Example: --var-section "VPS" --sections "Functions" "Firmware Resiliency" "VPS Web UI" "VPS API"'
         ),
     )
     trcr_parser.add_argument(
@@ -910,7 +910,7 @@ Examples:
         default=None,
         metavar="TEMPLATE",
         help=(
-            'Python format string for per-Given run names. '
+            'Python format string for per-Var run names. '
             'Available variables: {prefix}, {sku}, {product_category}. '
             'Default: "{prefix} {sku} Smoke Test"'
         ),
@@ -2351,8 +2351,8 @@ def testrail_create_run(args) -> int:
 
     Two modes:
       - Default: one run for the whole suite (or --sections subset).
-      - --given-section MODE: find Given: cases in a section, create one
-        run per Given: case (one per SKU/variant).
+      - --var-section MODE: find Var: cases in a section, create one
+        run per Var: case (one per SKU/variant).
     """
     from .services.testrail_service import TestRailService, TestRailError
 
@@ -2421,30 +2421,30 @@ def testrail_create_run(args) -> int:
         print(f"     {run_url}")
         return run
 
-    # ── MODE: --given-section ───────────────────────────────────────────────
-    if args.given_section:
-        given_section_label = args.given_section.lower()
-        given_section_ids = {
+    # ── MODE: --var-section ─────────────────────────────────────────────────
+    if args.var_section:
+        var_section_label = args.var_section.lower()
+        var_section_ids = {
             s["id"] for s in all_sections
-            if given_section_label == s["name"].lower() or given_section_label in s["name"].lower()
+            if var_section_label == s["name"].lower() or var_section_label in s["name"].lower()
         }
-        if not given_section_ids:
-            print(f"Given section '{args.given_section}' not found.", file=sys.stderr)
+        if not var_section_ids:
+            print(f"Var section '{args.var_section}' not found.", file=sys.stderr)
             print(f"Available: {', '.join(s['name'] for s in all_sections)}", file=sys.stderr)
             return 1
 
-        given_cases = [
+        var_cases = [
             c for c in all_cases
-            if c.get("section_id") in given_section_ids
-            and c.get("title", "").startswith("Given:")
+            if c.get("section_id") in var_section_ids
+            and c.get("title", "").startswith("Var:")
         ]
-        if not given_cases:
-            print(f"No 'Given:' cases found in section '{args.given_section}'.")
+        if not var_cases:
+            print(f"No 'Var:' cases found in section '{args.var_section}'.")
             return 0
 
-        print(f"\nFound {len(given_cases)} Given: case(s) in '{args.given_section}':")
-        for gc in given_cases:
-            sku = gc["title"].replace("Given:", "").strip()
+        print(f"\nFound {len(var_cases)} Var: case(s) in '{args.var_section}':")
+        for gc in var_cases:
+            sku = gc["title"].replace("Var:", "").strip()
             print(f"  → {sku}")
 
         # Resolve the shared sections (Functions, Firmware Resiliency, etc.)
@@ -2452,7 +2452,7 @@ def testrail_create_run(args) -> int:
         shared_case_ids = [
             c["id"] for c in all_cases
             if c.get("section_id") in shared_section_ids
-            and not c.get("title", "").startswith("Given:")
+            and not c.get("title", "").startswith("Var:")
         ]
 
         name_template = (
@@ -2462,19 +2462,19 @@ def testrail_create_run(args) -> int:
 
         if args.dry_run:
             print("\n[dry-run] Would create:")
-            for gc in given_cases:
-                sku = gc["title"].replace("Given:", "").strip()
+            for gc in var_cases:
+                sku = gc["title"].replace("Var:", "").strip()
                 run_name = name_template.format(
                     prefix=prefix, sku=sku, product_category=product_category
                 )
                 total = 1 + len(shared_case_ids)
-                print(f"  Run: '{run_name}'  ({total} cases: 1 Given + {len(shared_case_ids)} shared)")
+                print(f"  Run: '{run_name}'  ({total} cases: 1 Var + {len(shared_case_ids)} shared)")
             return 0
 
         print()
         created = 0
-        for gc in given_cases:
-            sku = gc["title"].replace("Given:", "").strip()
+        for gc in var_cases:
+            sku = gc["title"].replace("Var:", "").strip()
             run_name = name_template.format(
                 prefix=prefix, sku=sku, product_category=product_category
             )
@@ -2485,8 +2485,8 @@ def testrail_create_run(args) -> int:
             except Exception as e:
                 print(f"  ❌ Failed to create run for '{sku}': {e}", file=sys.stderr)
 
-        print(f"\nCreated {created}/{len(given_cases)} run(s).")
-        return 0 if created == len(given_cases) else 1
+        print(f"\nCreated {created}/{len(var_cases)} run(s).")
+        return 0 if created == len(var_cases) else 1
 
     # ── MODE: single run ────────────────────────────────────────────────────
     run_name = args.name or f"{prefix} {suite_name}"
