@@ -876,3 +876,48 @@ class AWSService:
         except Exception as e:
             self._log(f"Error deleting {s3_key}: {str(e)}", "error")
             raise
+
+    def list_keys(
+        self,
+        bucket_name: str,
+        folder_prefix: str = None,
+        file_extension: str = None,
+        access_key_id: str = None,
+        secret_access_key: str = None,
+        region: str = None,
+    ) -> List[str]:
+        """
+        List raw object keys in a bucket, optionally filtered by prefix/extension.
+
+        Unlike list_firmware_files, this returns bare S3 keys with no URL
+        building, version sorting, or download side effects — a lean
+        primitive for callers that just need to know what's actually in a
+        bucket (e.g. reconciling it against another source of truth).
+
+        Args:
+            bucket_name: S3 bucket name
+            folder_prefix: Folder prefix to filter objects
+            file_extension: File extension to filter (case-insensitive)
+            access_key_id: AWS Access Key ID
+            secret_access_key: AWS Secret Access Key
+            region: AWS Region
+
+        Returns:
+            List of matching object keys
+        """
+        self._get_s3_clients(bucket_name, access_key_id, secret_access_key, region)
+
+        if folder_prefix:
+            objects = self._current_bucket.objects.filter(Prefix=folder_prefix)
+        else:
+            objects = self._current_bucket.objects.all()
+
+        ext_lower = file_extension.lower() if file_extension else None
+        keys = []
+        for obj in objects:
+            if obj.key.endswith("/"):
+                continue
+            if ext_lower and not obj.key.lower().endswith(ext_lower):
+                continue
+            keys.append(obj.key)
+        return keys

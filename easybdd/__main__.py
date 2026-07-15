@@ -300,6 +300,32 @@ _COMMANDS = {
         ],
     },
 
+    "floci-reconcile": {
+        "summary": "Delete Floci objects that no longer have a matching file in a repo checkout",
+        "usage":   "easybdd floci-reconcile <bucket_name> <repo_root> [options]",
+        "required": [
+            ("bucket_name", "str",  "Floci bucket name"),
+            ("repo_root",   "path", "Path to the checked-out firmware repo to compare Floci against"),
+        ],
+        "optional": [
+            ("--extension",    "str",  ".bin",                    "File extension to reconcile on both sides"),
+            ("--key-prefix",   "str",  "",                        "Prefix prepended to each expected key (must match upload-time prefix)"),
+            ("--execute",      "flag", None,                      "Actually delete stale objects (default: dry-run report only)"),
+            ("--endpoint-url", "str",  "$FLOCI_ENDPOINT_URL or http://localhost:4566", "Floci endpoint URL"),
+            ("--region",       "str",  "us-east-1",               "Region passed to boto3 (Floci does not validate it)"),
+        ],
+        "examples": [
+            ("Preview what would be cleaned up (no changes made)",
+             "easybdd floci-reconcile wattbox /var/lib/jenkins/workspace/Wattbox-Firmware"),
+            ("Actually delete the stale objects",
+             "easybdd floci-reconcile wattbox /var/lib/jenkins/workspace/Wattbox-Firmware --execute"),
+        ],
+        "notes": [
+            "Defaults to a dry run — pass --execute to actually delete anything",
+            "One-time/periodic cleanup only — the CI mirror stage already keeps Floci in sync with new commits going forward",
+        ],
+    },
+
     "mcp-serve": {
         "summary": "Start the Easy BDD MCP server (for Claude / AI integrations)",
         "usage":   "easybdd mcp-serve [options]",
@@ -331,6 +357,7 @@ _ALL_COMMANDS_SUMMARY = [
     ("mcp-serve",           "Start the MCP server for AI integrations"),
     ("floci-upload",        "Upload local file(s) to a Floci-emulated S3 bucket"),
     ("floci-delete",        "Delete object(s) from a Floci-emulated S3 bucket by repo-relative path"),
+    ("floci-reconcile",     "Delete Floci objects that no longer have a matching file in a repo checkout"),
     ("docker-run",          "Build and run a test inside a Docker container"),
     ("record",              "Launch Playwright codegen and convert recording to YAML"),
     ("selector-audit",      "Scan YAML files for fragile CSS/XPath selectors"),
@@ -918,6 +945,51 @@ Examples:
         help="Region passed to boto3 (default: us-east-1; Floci does not validate it)",
     )
 
+    # Floci reconcile command — one-time/periodic cleanup for drift the
+    # incremental CI mirror stage can't see on its own (it only reacts to
+    # commit-to-commit deltas, so anything removed from the repo before that
+    # mirror stage existed, or during any gap in CI coverage, never gets
+    # cleaned up by it). Compares a repo checkout's actual current files
+    # against Floci's actual current contents and removes what's stale.
+    floci_reconcile_parser = subparsers.add_parser(
+        "floci-reconcile",
+        help="Delete Floci objects that no longer have a matching file in a repo checkout",
+    )
+    floci_reconcile_parser.add_argument(
+        "bucket_name", help="Floci bucket name"
+    )
+    floci_reconcile_parser.add_argument(
+        "repo_root", help="Path to the checked-out firmware repo to compare Floci against"
+    )
+    floci_reconcile_parser.add_argument(
+        "--extension",
+        default=".bin",
+        help="File extension to reconcile on both sides (default: .bin)",
+    )
+    floci_reconcile_parser.add_argument(
+        "--key-prefix",
+        default="",
+        metavar="PREFIX",
+        help="Prefix prepended to each expected key (must match the prefix used at upload time)",
+    )
+    floci_reconcile_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually delete the stale objects. Without this flag, only reports what would be deleted.",
+    )
+    floci_reconcile_parser.add_argument(
+        "--endpoint-url",
+        default=None,
+        dest="endpoint_url",
+        metavar="URL",
+        help="Floci endpoint URL (default: $FLOCI_ENDPOINT_URL or http://localhost:4566)",
+    )
+    floci_reconcile_parser.add_argument(
+        "--region",
+        default="us-east-1",
+        help="Region passed to boto3 (default: us-east-1; Floci does not validate it)",
+    )
+
     # TestRail list command
     trcr_parser = subparsers.add_parser(
         "testrail-create-run",
@@ -1172,6 +1244,8 @@ Examples:
             return floci_upload(args)
         elif args.command == "floci-delete":
             return floci_delete(args)
+        elif args.command == "floci-reconcile":
+            return floci_reconcile(args)
         elif args.command == "selector-audit":
             return selector_audit(args)
         elif args.command == "record":
@@ -1266,6 +1340,75 @@ def floci_delete(args) -> int:
         return 1
 
     print(f"\nDeleted {len(args.paths)} key(s) from Floci bucket '{args.bucket_name}'.")
+    return 0
+
+
+def floci_reconcile(args) -> int:
+    """Delete Floci objects that no longer have a matching file in a repo checkout.
+
+    The CI mirror stage only reacts to commit-to-commit git diffs, so it
+    can't clean up drift from before it existed or from any gap in CI
+    coverage. This walks the repo checkout's actual current files and Floci's
+    actual current contents and removes whatever's only on the Floci side.
+    """
+    from .services.floci_service import FlociService
+
+    service = FlociService(logger=print, endpoint_url=args.endpoint_url)
+
+    repo_root = Path(args.repo_root)
+    if not repo_root.is_dir():
+        print(f"Error: repo root not found: {args.repo_root}", file=sys.stderr)
+        return 1
+
+    ext_lower = args.extension.lower()
+    expected_keys = set()
+    for path in repo_root.rglob("*"):
+        if not path.is_file() or not path.name.lower().endswith(ext_lower):
+            continue
+        key = str(path.relative_to(repo_root)).replace(os.sep, "/")
+        if args.key_prefix:
+            key = f"{args.key_prefix.rstrip('/')}/{key}"
+        expected_keys.add(key)
+
+    actual_keys = set(
+        service.list_keys(
+            bucket_name=args.bucket_name,
+            file_extension=args.extension,
+            region=args.region,
+        )
+    )
+
+    stale = sorted(actual_keys - expected_keys)
+
+    print(f"Repo checkout ({repo_root}): {len(expected_keys)} '{args.extension}' file(s)")
+    print(f"Floci bucket '{args.bucket_name}': {len(actual_keys)} '{args.extension}' object(s)")
+    print(f"Stale in Floci (not in repo checkout): {len(stale)}")
+
+    if not stale:
+        print("Nothing to clean up — Floci matches the repo checkout.")
+        return 0
+
+    for key in stale:
+        print(f"  stale: {key}")
+
+    if not args.execute:
+        print(f"\nDry run — no objects deleted. Re-run with --execute to delete these {len(stale)} key(s).")
+        return 0
+
+    failures = 0
+    for key in stale:
+        try:
+            service.delete_object(bucket_name=args.bucket_name, s3_key=key, region=args.region)
+            print(f"[Floci] Deleted {args.bucket_name}/{key}")
+        except Exception as e:
+            print(f"Error deleting {key} from Floci: {e}", file=sys.stderr)
+            failures += 1
+
+    if failures:
+        print(f"\n{failures} of {len(stale)} stale key(s) failed to delete.", file=sys.stderr)
+        return 1
+
+    print(f"\nDeleted {len(stale)} stale key(s) from Floci bucket '{args.bucket_name}'.")
     return 0
 
 
