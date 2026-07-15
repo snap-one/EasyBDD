@@ -8,8 +8,11 @@ pipeline {
         timestamps()
     }
 
+    // This Jenkins server has no public endpoint for GitHub to webhook
+    // into, so githubPush() never fires — poll instead. Same workaround
+    // used by Wattbox-Firmware's Jenkinsfile.easybdd.
     triggers {
-        githubPush()
+        pollSCM('H/5 * * * *')
     }
 
     environment {
