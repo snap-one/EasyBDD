@@ -277,6 +277,29 @@ _COMMANDS = {
         ],
     },
 
+    "floci-delete": {
+        "summary": "Delete object(s) from a Floci-emulated S3 bucket by repo-relative path",
+        "usage":   "easybdd floci-delete <bucket_name> <path>... [options]",
+        "required": [
+            ("bucket_name", "str", "Floci bucket name"),
+            ("path",        "path", "One or more repo-relative paths to delete (need not exist on disk)"),
+        ],
+        "optional": [
+            ("--key-prefix",   "str",  "",                        "Prefix prepended to each key (must match upload-time prefix)"),
+            ("--flatten",      "flag", None,                      "Use just the basename as the key (must match upload-time --flatten)"),
+            ("--endpoint-url", "str",  "$FLOCI_ENDPOINT_URL or http://localhost:4566", "Floci endpoint URL"),
+            ("--region",       "str",  "us-east-1",               "Region passed to boto3 (Floci does not validate it)"),
+        ],
+        "examples": [
+            ("Remove a firmware file deleted from the repo",
+             "easybdd floci-delete wattbox wattbox/upgrade_moip_4.7.0.bin"),
+        ],
+        "notes": [
+            "Deleting a key that isn't present in the bucket is not an error (matches S3 delete semantics)",
+            "--key-prefix/--flatten must match whatever was passed to floci-upload for the same file, or the derived key won't line up",
+        ],
+    },
+
     "mcp-serve": {
         "summary": "Start the Easy BDD MCP server (for Claude / AI integrations)",
         "usage":   "easybdd mcp-serve [options]",
@@ -307,6 +330,7 @@ _ALL_COMMANDS_SUMMARY = [
     ("generate",            "Generate Gherkin .feature files from YAML tests"),
     ("mcp-serve",           "Start the MCP server for AI integrations"),
     ("floci-upload",        "Upload local file(s) to a Floci-emulated S3 bucket"),
+    ("floci-delete",        "Delete object(s) from a Floci-emulated S3 bucket by repo-relative path"),
     ("docker-run",          "Build and run a test inside a Docker container"),
     ("record",              "Launch Playwright codegen and convert recording to YAML"),
     ("selector-audit",      "Scan YAML files for fragile CSS/XPath selectors"),
@@ -855,6 +879,45 @@ Examples:
         help="Region passed to boto3 (default: us-east-1; Floci does not validate it)",
     )
 
+    # Floci delete command — remove object(s) from a Floci-emulated S3 bucket
+    # by the same repo-relative path convention floci-upload keys them under,
+    # so a file removed from a firmware repo can be removed from Floci too
+    # without needing it to still exist on disk.
+    floci_delete_parser = subparsers.add_parser(
+        "floci-delete",
+        help="Delete object(s) from a Floci-emulated S3 bucket by repo-relative path",
+    )
+    floci_delete_parser.add_argument(
+        "bucket_name", help="Floci bucket name"
+    )
+    floci_delete_parser.add_argument(
+        "paths", nargs="+", metavar="PATH",
+        help="Repo-relative path(s) to delete (matching how floci-upload derived their key — the file need not exist on disk)",
+    )
+    floci_delete_parser.add_argument(
+        "--key-prefix",
+        default="",
+        metavar="PREFIX",
+        help="Prefix prepended to each object key (must match the prefix used at upload time)",
+    )
+    floci_delete_parser.add_argument(
+        "--flatten",
+        action="store_true",
+        help="Use just the basename as the object key (must match --flatten used at upload time)",
+    )
+    floci_delete_parser.add_argument(
+        "--endpoint-url",
+        default=None,
+        dest="endpoint_url",
+        metavar="URL",
+        help="Floci endpoint URL (default: $FLOCI_ENDPOINT_URL or http://localhost:4566)",
+    )
+    floci_delete_parser.add_argument(
+        "--region",
+        default="us-east-1",
+        help="Region passed to boto3 (default: us-east-1; Floci does not validate it)",
+    )
+
     # TestRail list command
     trcr_parser = subparsers.add_parser(
         "testrail-create-run",
@@ -1107,6 +1170,8 @@ Examples:
             return mcp_serve(args)
         elif args.command == "floci-upload":
             return floci_upload(args)
+        elif args.command == "floci-delete":
+            return floci_delete(args)
         elif args.command == "selector-audit":
             return selector_audit(args)
         elif args.command == "record":
@@ -1160,6 +1225,47 @@ def floci_upload(args) -> int:
         return 1
 
     print(f"\nUploaded {len(args.file_paths)} file(s) to Floci bucket '{args.bucket_name}'.")
+    return 0
+
+
+def floci_delete(args) -> int:
+    """Delete object(s) from a Floci-emulated S3 bucket by repo-relative path.
+
+    Mirrors floci_upload's key derivation exactly (--key-prefix/--flatten) so
+    a path already removed from disk (deleted or renamed away in git) still
+    maps to the same object key it was mirrored under, letting a CI stage
+    keep Floci's contents in sync with the firmware repo on deletes too.
+    """
+    from .services.floci_service import FlociService
+
+    service = FlociService(logger=print, endpoint_url=args.endpoint_url)
+
+    failures = 0
+    for file_path in args.paths:
+        key = (
+            os.path.basename(file_path)
+            if args.flatten
+            else file_path.replace(os.sep, "/").lstrip("./")
+        )
+        if args.key_prefix:
+            key = f"{args.key_prefix.rstrip('/')}/{key}"
+
+        try:
+            service.delete_object(
+                bucket_name=args.bucket_name,
+                s3_key=key,
+                region=args.region,
+            )
+            print(f"[Floci] Deleted {args.bucket_name}/{key}")
+        except Exception as e:
+            print(f"Error deleting {key} from Floci: {e}", file=sys.stderr)
+            failures += 1
+
+    if failures:
+        print(f"\n{failures} of {len(args.paths)} key(s) failed to delete.", file=sys.stderr)
+        return 1
+
+    print(f"\nDeleted {len(args.paths)} key(s) from Floci bucket '{args.bucket_name}'.")
     return 0
 
 

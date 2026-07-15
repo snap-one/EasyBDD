@@ -839,3 +839,40 @@ class AWSService:
         except Exception as e:
             self._log(f"Error deleting folder: {str(e)}", "error")
             raise
+
+    def delete_object(
+        self,
+        bucket_name: str,
+        s3_key: str,
+        access_key_id: str = None,
+        secret_access_key: str = None,
+        region: str = None,
+    ) -> bool:
+        """
+        Delete a single object from S3 by key.
+
+        S3's delete_object is idempotent — deleting a key that doesn't exist
+        is not an error — so callers (e.g. a CI mirror step reacting to a
+        git-removed file) don't need to check existence first.
+
+        Args:
+            bucket_name: S3 bucket name
+            s3_key: Object key to delete
+            access_key_id: AWS Access Key ID
+            secret_access_key: AWS Secret Access Key
+            region: AWS Region
+
+        Returns:
+            True if successful
+        """
+        self._get_s3_clients(bucket_name, access_key_id, secret_access_key, region)
+
+        try:
+            self._log(f"Deleting {bucket_name}/{s3_key}")
+            self._s3_client.delete_object(Bucket=bucket_name, Key=s3_key)
+            self._log(f"Deleted: {s3_key}")
+            return True
+
+        except Exception as e:
+            self._log(f"Error deleting {s3_key}: {str(e)}", "error")
+            raise
