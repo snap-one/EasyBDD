@@ -154,19 +154,52 @@ Run `python -m easybdd floci-upload ?` for full contextual help.
 
 ---
 
+## CLI: `floci-delete`
+
+Removes object(s) from a Floci bucket by the same repo-relative path
+`floci-upload` would key them under — the path does **not** need to exist on
+disk, so this works for files already deleted/renamed away in git:
+
+```bash
+python -m easybdd floci-delete <bucket_name> <path>... [options]
+```
+
+| Flag | Description |
+|---|---|
+| `--key-prefix PREFIX` | Prefix prepended to each key — must match what was passed to `floci-upload` for the same file |
+| `--flatten` | Use just the basename as the key — must match `--flatten` used at upload time |
+| `--endpoint-url URL` | Floci endpoint (default: `$FLOCI_ENDPOINT_URL` or `http://localhost:4566`) |
+| `--region REGION` | Region passed to boto3 (default: `us-east-1`; Floci doesn't validate it) |
+
+```bash
+# Remove a firmware file that no longer exists in the repo
+python -m easybdd floci-delete wattbox wattbox/upgrade_moip_4.7.0.bin
+```
+
+Deleting a key that isn't present in the bucket is not an error (matches S3
+delete semantics). Run `python -m easybdd floci-delete ?` for full contextual
+help.
+
+---
+
 ## CI/CD: Mirroring Firmware into Floci
 
 [Jenkinsfile.firmware-wattbox](../Jenkinsfile.firmware-wattbox) already
 detects which `.bin` firmware files changed in a firmware-repo commit (to
 create targeted TestRail runs). A **"Mirror Firmware to Floci"** stage runs
-right after detection and pushes every changed `.bin` file into Floci via
-`floci-upload`, preserving each file's relative repo path as its object key
-so the Floci bucket's layout matches the real S3 bucket's layout.
+right after detection and splits those changed files into two groups:
+
+- Files still present on disk are pushed into Floci via `floci-upload`,
+  preserving each file's relative repo path as its object key so the Floci
+  bucket's layout matches the real S3 bucket's layout.
+- Files no longer present on disk (deleted, or renamed away — `git diff
+  --name-only` lists both the old and new path for a rename) are removed
+  from Floci via `floci-delete`, using that same repo-relative path as the
+  key, so Floci doesn't accumulate stale firmware the repo no longer has.
 
 This stage is independent of both the real S3 upload path and TestRail run
-creation — it runs whenever there are changed firmware files still present on
-disk (deleted files are skipped, not treated as failures), regardless of
-whether any of them matched a known firmware type.
+creation — it runs whenever there are changed `.bin` files in the commit,
+regardless of whether any of them matched a known firmware type.
 
 Configure the target bucket and endpoint via the `environment` block:
 

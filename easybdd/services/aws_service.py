@@ -12,6 +12,7 @@ Provides S3 operations including:
 import os
 import re
 import boto3
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple, Union
 from pathlib import Path
 from urllib.parse import quote as _url_quote
@@ -379,6 +380,7 @@ class AWSService:
 
         object_urls = []
         cloudfront_urls = []
+        last_modified_by_key = {}
         scanned = 0
         skipped_ext = skipped_pattern = skipped_version = skipped_specific = 0
 
@@ -479,11 +481,18 @@ class AWSService:
                         self._log(f"  ↓ Downloading: {key} → {local_file}")
                         self._current_bucket.download_file(key, str(local_file))
 
+                # Recorded for every matched key so _sort_urls_by_version can fall
+                # back to actual upload time for filenames that don't carry a
+                # parseable build timestamp (e.g. dev/test build tags).
+                last_modified_by_key[key] = obj.last_modified
+
             # Choose URLs to return
             urls = cloudfront_urls if cloudfront_url else object_urls
 
             # Sort URLs by version (intelligent numeric sorting)
-            urls = self._sort_urls_by_version(urls, bucket_name, cloudfront_url)
+            urls = self._sort_urls_by_version(
+                urls, bucket_name, cloudfront_url, last_modified_by_key
+            )
 
             # Summary
             self._log(
@@ -510,16 +519,32 @@ class AWSService:
             raise
 
     def _sort_urls_by_version(
-        self, urls: List[str], bucket_name: str, cloudfront_url: str = None
+        self,
+        urls: List[str],
+        bucket_name: str,
+        cloudfront_url: str = None,
+        last_modified_by_key: Dict[str, Any] = None,
     ) -> List[str]:
-        """Sort URLs newest-first by build timestamp, non-DM before DM per timestamp.
+        """Sort URLs newest-first by recency, non-DM before DM per build.
 
         Filename format: <prefix>_<semver>-<YYMMDDHHII>[-DM].<ext>
-        The 10-digit build timestamp is the primary sort key (descending).
-        Non-DM variants sort before DM for the same timestamp, matching the
+        The 10-digit build timestamp, converted to a real UTC epoch, is the
+        primary recency signal (descending) so it's directly comparable
+        against the S3 "last modified" fallback below.
+
+        Ad-hoc/dev build tags (e.g. a branch-derived "jpdse2749c" suffix
+        instead of a YYMMDDHHII timestamp) don't carry a parseable date, and
+        the app semver embedded in the filename (e.g. "2.10.0.0") is
+        identical across every build — so a naive semver-only fallback ties
+        every ad-hoc build together and, worse, always ranks them below any
+        real timestamped build regardless of how the ad-hoc suffix is
+        renamed. Falling back to the object's actual S3 upload time
+        (last_modified) instead means a newly-uploaded ad-hoc build is
+        correctly recognised as the latest.
+
+        Non-DM variants sort before DM for the same recency, matching the
         interleaved pair order expected by callers (index 0 = newest non-DM,
         index 1 = newest DM, index 2 = second-newest non-DM, ...).
-        Falls back to full key string for files without a recognisable timestamp.
         """
 
         def extract_filename(url):
@@ -532,11 +557,26 @@ class AWSService:
         def sort_key(url):
             key, filename = extract_filename(url)
             is_dm = 1 if "-DM." in filename or filename.endswith("-DM") else 0
+
             # Primary: 10-digit build timestamp (e.g. wattbox firmware)
             m = re.search(r"-(\d{10})(?:-DM)?(?:\.|$)", filename)
             if m:
-                return (-int(m.group(1)), is_dm, key)
-            # Fallback: semver X.Y.Z (e.g. upgrade_moip_4.7.0.bin)
+                try:
+                    recency = (
+                        datetime.strptime(m.group(1), "%y%m%d%H%M")
+                        .replace(tzinfo=timezone.utc)
+                        .timestamp()
+                    )
+                    return (-recency, is_dm, key)
+                except ValueError:
+                    pass  # not a real date (e.g. "9999999999") — fall through
+
+            # Fallback: actual S3 upload time, for ad-hoc build tags
+            if last_modified_by_key and key in last_modified_by_key:
+                return (-last_modified_by_key[key].timestamp(), is_dm, key)
+
+            # Last resort: semver X.Y.Z (e.g. upgrade_moip_4.7.0.bin) when no
+            # upload-time data is available at all
             sv = re.search(r"(\d+)\.(\d+)\.(\d+)", filename)
             if sv:
                 version_int = int(sv.group(1)) * 1_000_000 + int(sv.group(2)) * 1_000 + int(sv.group(3))
@@ -621,17 +661,41 @@ class AWSService:
 
             self._log(f"Found {len(filtered)} files matching criteria")
 
-            # Sort by version (use cached regex)
+            # Sort by recency (use cached regex). The app semver embedded in
+            # the filename (e.g. "2.10.0.0") is identical across every build
+            # of a given firmware, so sorting on it alone (as before) leaves
+            # every same-app-version file tied and picks an arbitrary one via
+            # Python's stable sort — not actually the latest. Prefer the
+            # 10-digit build timestamp (converted to a real UTC epoch) and
+            # fall back to the object's S3 upload time for filenames that
+            # don't carry one (e.g. ad-hoc/dev build tags like "jpdse2749c"),
+            # only falling back to the semver tuple if neither is available.
+            build_timestamp_regex = self._get_compiled_regex(r"-(\d{10})(?:-DM)?(?:\.|$)")
             version_sort_regex = self._get_compiled_regex(r"(\d+)\.(\d+)\.(\d+)\.(\d+)")
+            last_modified_by_key = {obj.key: obj.last_modified for obj in objects}
 
-            def extract_version_tuple(filename):
-                """Extract version for sorting."""
+            def extract_recency(filename):
+                """Extract a comparable recency value for sorting (higher = newer)."""
+                m = build_timestamp_regex.search(filename)
+                if m:
+                    try:
+                        return (
+                            datetime.strptime(m.group(1), "%y%m%d%H%M")
+                            .replace(tzinfo=timezone.utc)
+                            .timestamp()
+                        )
+                    except ValueError:
+                        pass  # not a real date — fall through
+                lm = last_modified_by_key.get(filename)
+                if lm is not None:
+                    return lm.timestamp()
                 match = version_sort_regex.search(filename)
                 if match:
-                    return tuple(int(x) for x in match.groups())
-                return (0, 0, 0, 0)
+                    major, minor, patch, build = (int(x) for x in match.groups())
+                    return major * 1_000_000_000 + minor * 1_000_000 + patch * 1_000 + build
+                return 0
 
-            filtered.sort(key=extract_version_tuple)
+            filtered.sort(key=extract_recency)
 
             # Get appropriate file
             if get_second_to_last and len(filtered) >= 2:
@@ -775,3 +839,85 @@ class AWSService:
         except Exception as e:
             self._log(f"Error deleting folder: {str(e)}", "error")
             raise
+
+    def delete_object(
+        self,
+        bucket_name: str,
+        s3_key: str,
+        access_key_id: str = None,
+        secret_access_key: str = None,
+        region: str = None,
+    ) -> bool:
+        """
+        Delete a single object from S3 by key.
+
+        S3's delete_object is idempotent — deleting a key that doesn't exist
+        is not an error — so callers (e.g. a CI mirror step reacting to a
+        git-removed file) don't need to check existence first.
+
+        Args:
+            bucket_name: S3 bucket name
+            s3_key: Object key to delete
+            access_key_id: AWS Access Key ID
+            secret_access_key: AWS Secret Access Key
+            region: AWS Region
+
+        Returns:
+            True if successful
+        """
+        self._get_s3_clients(bucket_name, access_key_id, secret_access_key, region)
+
+        try:
+            self._log(f"Deleting {bucket_name}/{s3_key}")
+            self._s3_client.delete_object(Bucket=bucket_name, Key=s3_key)
+            self._log(f"Deleted: {s3_key}")
+            return True
+
+        except Exception as e:
+            self._log(f"Error deleting {s3_key}: {str(e)}", "error")
+            raise
+
+    def list_keys(
+        self,
+        bucket_name: str,
+        folder_prefix: str = None,
+        file_extension: str = None,
+        access_key_id: str = None,
+        secret_access_key: str = None,
+        region: str = None,
+    ) -> List[str]:
+        """
+        List raw object keys in a bucket, optionally filtered by prefix/extension.
+
+        Unlike list_firmware_files, this returns bare S3 keys with no URL
+        building, version sorting, or download side effects — a lean
+        primitive for callers that just need to know what's actually in a
+        bucket (e.g. reconciling it against another source of truth).
+
+        Args:
+            bucket_name: S3 bucket name
+            folder_prefix: Folder prefix to filter objects
+            file_extension: File extension to filter (case-insensitive)
+            access_key_id: AWS Access Key ID
+            secret_access_key: AWS Secret Access Key
+            region: AWS Region
+
+        Returns:
+            List of matching object keys
+        """
+        self._get_s3_clients(bucket_name, access_key_id, secret_access_key, region)
+
+        if folder_prefix:
+            objects = self._current_bucket.objects.filter(Prefix=folder_prefix)
+        else:
+            objects = self._current_bucket.objects.all()
+
+        ext_lower = file_extension.lower() if file_extension else None
+        keys = []
+        for obj in objects:
+            if obj.key.endswith("/"):
+                continue
+            if ext_lower and not obj.key.lower().endswith(ext_lower):
+                continue
+            keys.append(obj.key)
+        return keys
