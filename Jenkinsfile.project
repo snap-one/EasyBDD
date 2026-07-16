@@ -49,8 +49,30 @@ pipeline {
         stage('Run TestRail Tests') {
             steps {
                 script {
-                    def projectId = params.PROJECT_ID.split(' - ')[0].trim()
-                    def projectName = params.PROJECT_ID.split(' - ')[1].trim()
+                    // Map job names to project IDs for auto-detection
+                    def PROJECT_MAP = [
+                        'JDM Automation': '59 - JDM Automation',
+                        'Audio': '74 - Audio',
+                        'Routers': '76 - Routers',
+                        'Power': '77 - Power',
+                        'Surveillance': '78 - Surveillance',
+                        'Switches': '79 - Switches',
+                        'Access Points': '80 - Access Points',
+                        'Media Distribution': '81 - Media Distribution',
+                    ]
+
+                    // Auto-detect project from job name if present
+                    def jobName = env.JOB_NAME ?: ''
+                    def selectedProject = params.PROJECT_ID
+                    
+                    PROJECT_MAP.each { projectName, projectChoice ->
+                        if (jobName.contains(projectName)) {
+                            selectedProject = projectChoice
+                        }
+                    }
+
+                    def projectId = selectedProject.split(' - ')[0].trim()
+                    def projectName = selectedProject.split(' - ')[1].trim()
                     def runId = params.RUN_ID?.trim()
                     def runPrefix = params.RUN_PREFIX?.trim() ?: 'EASYBDD:'
                     def findOnly = params.FIND_ONLY ? '--find-only' : ''
