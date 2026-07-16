@@ -1,4 +1,4 @@
-def WORKSPACE = '/var/lib/jenkins/workspace/EASY_BDD'
+def WORKSPACE = '/var/lib/jenkins/workspace/EASYBDD'
 
 pipeline {
     agent any
