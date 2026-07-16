@@ -2275,6 +2275,76 @@ async def crawl_device(
 
 
 # ---------------------------------------------------------------------------
+# Onboarding routes (plain HTTP, only active for sse / streamable-http)
+#
+# Engineers set up their Claude client with one command — see onboarding/:
+#   macOS / Linux:  curl -fsSL http://192.168.100.100:8092/setup | bash
+#   Windows:        irm http://192.168.100.100:8092/setup.ps1 | iex
+# Human-readable instructions live at /onboard.
+# ---------------------------------------------------------------------------
+
+_ONBOARDING_DIR = _PROJECT_ROOT / "onboarding"
+
+
+def _onboarding_script(name: str):
+    from starlette.responses import PlainTextResponse
+
+    path = _ONBOARDING_DIR / name
+    if not path.exists():
+        return PlainTextResponse(f"echo 'Setup script {name} not found on server.'", status_code=404)
+    return PlainTextResponse(path.read_text(encoding="utf-8"))
+
+
+@mcp.custom_route("/setup", methods=["GET"])
+async def route_setup_sh(request):
+    return _onboarding_script("setup-easybdd-mcp.sh")
+
+
+@mcp.custom_route("/setup.ps1", methods=["GET"])
+async def route_setup_ps1(request):
+    return _onboarding_script("setup-easybdd-mcp.ps1")
+
+
+@mcp.custom_route("/onboard", methods=["GET"])
+async def route_onboard(request):
+    from starlette.responses import HTMLResponse
+
+    base = f"http://{request.url.hostname}:{request.url.port or 80}"
+    return HTMLResponse(textwrap.dedent(f"""\
+        <!doctype html>
+        <html><head><meta charset="utf-8"><title>Easy BDD MCP setup</title>
+        <style>
+          body {{ font-family: system-ui, sans-serif; max-width: 46rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }}
+          code, pre {{ background: #f4f4f4; border-radius: 6px; padding: 0.15rem 0.4rem; }}
+          pre {{ padding: 0.8rem; overflow-x: auto; }}
+          h1 {{ font-size: 1.5rem; }} h2 {{ font-size: 1.15rem; margin-top: 2rem; }}
+        </style></head><body>
+        <h1>Connect Claude to Easy BDD</h1>
+        <p>One-time setup. You need Claude Desktop (<a href="https://claude.ai/download">claude.ai/download</a>)
+        or Claude Code installed, and to be on the office network / VPN. No other tools,
+        no repository checkout, no coding.</p>
+
+        <h2>Windows</h2>
+        <p>Open <strong>PowerShell</strong> (Start menu &rarr; type "PowerShell") and paste:</p>
+        <pre>irm {base}/setup.ps1 | iex</pre>
+
+        <h2>macOS / Linux</h2>
+        <p>Open <strong>Terminal</strong> and paste:</p>
+        <pre>curl -fsSL {base}/setup | bash</pre>
+
+        <h2>Then</h2>
+        <ol>
+          <li>Fully quit Claude Desktop (system tray / menu bar &rarr; Quit) and reopen it.</li>
+          <li>In a new chat, click the tools (sliders) icon under the message box &mdash; you should see <code>easybdd</code>.</li>
+          <li>Try: <em>"Using the easybdd tools, list the available tests."</em></li>
+        </ol>
+
+        <p>Problems? Contact Mark Fomin.</p>
+        </body></html>
+    """))
+
+
+# ---------------------------------------------------------------------------
 # Server entry-point (called from __main__.py)
 # ---------------------------------------------------------------------------
 

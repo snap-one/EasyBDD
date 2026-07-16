@@ -50,5 +50,11 @@ The in-repo "Floci Browser" web UI (`frontend/floci_browser.py`, port 8092,
 or reference it.
 
 - Port map on `192.168.100.100`: 8091 TestRail builder, 8092 Easy BDD MCP
-  server (`easy-bdd-mcp.service`, runs from `/home/jenkins/Easy_BDD`),
-  4566 Floci (S3 endpoint + built-in UI).
+  server (`easy-bdd-mcp.service`, runs from `/home/jenkins/EasyBDD` — its
+  systemd unit does `git pull --ff-only` on start, so deploy = push to main
+  + `sudo systemctl restart easy-bdd-mcp`), 4566 Floci (S3 endpoint +
+  built-in UI).
+- The MCP server also serves engineer self-setup over plain HTTP:
+  `http://192.168.100.100:8092/onboard` (instructions page), `/setup`
+  (macOS/Linux bash installer), `/setup.ps1` (Windows PowerShell installer).
+  Script sources: `onboarding/` in this repo.
