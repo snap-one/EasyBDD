@@ -17,7 +17,7 @@ deprecated app with only copy-paste YAML export and no real TestRail push.
 
 - Runs persistently on `192.168.100.100` as systemd unit
   `easybdd-testrail-builder.service`, from
-  `/var/lib/jenkins/workspace/EASYBDD/frontend`, enabled at boot,
+  `/var/lib/jenkins/workspace/EASY_BDD/frontend`, enabled at boot,
   auto-restarts on failure. Reachable at `http://192.168.100.100:8091`.
 - After pulling new code into that checkout, run
   `sudo systemctl restart easybdd-testrail-builder` to pick it up.
@@ -41,26 +41,15 @@ container; see `docs/floci-integration.md` and
 - If Floci data looks missing or the container isn't up after a reboot,
   check `systemctl status floci.service` and `floci doctor` first.
 
-## Floci Browser UI
+## Browsing Floci buckets
 
-`frontend/floci_browser.py` (started via `frontend/start_floci_browser.py`,
-port 8092) is an S3-console-style web UI for browsing Floci bucket contents —
-buckets, folder navigation, previews, download/upload, delete with
-confirmation. Endpoint resolved like `FlociService` (`FLOCI_ENDPOINT_URL`,
-default `http://localhost:4566`).
+Use Floci's **built-in web console**, served by the emulator itself:
+`http://192.168.100.100:4566/_floci/ui` (locally
+`http://localhost:4566/_floci/ui`). There is no separate service to manage.
+The in-repo "Floci Browser" web UI (`frontend/floci_browser.py`, port 8092,
+`easybdd-floci-browser.service`) was retired in July 2026 — do not recreate
+or reference it.
 
-- The `easybdd-floci-browser.service` systemd unit is **not currently
-  installed** on `192.168.100.100`, and its default port 8092 is taken there
-  by the MCP server (see port map below). Run the browser locally instead:
-  `python frontend/start_floci_browser.py --port <free port>`. If you install
-  it on the server via `sudo bash scripts/install_floci_browser_service.sh`,
-  set `FLOCI_BROWSER_PORT` to a free port first.
-- Port map on `192.168.100.100`:
-  - 8091 — TestRail builder (`easybdd-testrail-builder.service`, from
-    `/var/lib/jenkins/workspace/EASYBDD/frontend`).
-  - 8092 — MCP server (`easy-bdd-mcp.service`, from the separate
-    `/home/jenkins/Easy_BDD` checkout; it runs `git pull --ff-only` on every
-    start).
-  - 4566 — Floci itself.
-  - 8090 — occupied by an unrelated `bifrost-http` process; don't assign it
-    to Easy BDD services.
+- Port map on `192.168.100.100`: 8091 TestRail builder, 8092 Easy BDD MCP
+  server (`easy-bdd-mcp.service`, runs from `/home/jenkins/Easy_BDD`),
+  4566 Floci (S3 endpoint + built-in UI).

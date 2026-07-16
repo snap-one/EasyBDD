@@ -128,9 +128,9 @@ The builder also runs persistently on the main Jenkins server
 just open **<jenkins_url>:8091**.
 
 - Service unit: `/etc/systemd/system/easybdd-testrail-builder.service`
-- Runs from `/var/lib/jenkins/workspace/EASYBDD/frontend` (the Jenkins
-  workspace checkout on the server), as the `jenkins` user
-- Loads TestRail credentials from `/var/lib/jenkins/workspace/EASYBDD/.env`
+- Runs from `/var/lib/jenkins/workspace/EASY_BDD/frontend` (the same checkout
+  Jenkins pipelines use for `EASY_BDD_DIR`), as the `jenkins` user
+- Loads TestRail credentials from `/var/lib/jenkins/workspace/EASY_BDD/.env`
 - Enabled at boot (`systemctl enable`) and auto-restarts on failure
 
 To pick up new code after a `git pull` in that checkout:
@@ -146,28 +146,14 @@ sudo systemctl status easybdd-testrail-builder
 journalctl -u easybdd-testrail-builder -f
 ```
 
-### Floci Browser (web UI, port 8092)
+### Browsing Floci buckets (web UI)
 
-A second web app in the same style: an S3-console-like browser for the local
-[Floci](docs/floci-integration.md) S3 emulator — browse buckets and folders,
-preview/download objects, upload, and delete (with confirmation).
-
-```bash
-python frontend/start_floci_browser.py    # http://localhost:8092
-```
-
-Endpoint comes from `FLOCI_ENDPOINT_URL` (env or `.env`), default
-`http://localhost:4566`.
-
-There is currently **no** persistent `easybdd-floci-browser` service on the
-server — on `192.168.100.100`, port 8092 is used by the MCP server
-(`easy-bdd-mcp.service`), so run the browser locally. If you do want it on
-the server, install it with
-`sudo bash scripts/install_floci_browser_service.sh` after setting
-`FLOCI_BROWSER_PORT` to a free port, then manage it with the same
-`systemctl`/`journalctl` commands as above (unit name
-`easybdd-floci-browser`). Full details:
-[docs/floci-integration.md](docs/floci-integration.md#web-ui-floci-browser).
+To inspect the local [Floci](docs/floci-integration.md) S3 emulator's buckets
+and objects, use Floci's built-in web console, served by the emulator itself:
+**http://localhost:4566/_floci/ui** (or
+**http://192.168.100.100:4566/_floci/ui** on the Floci host). No extra
+service required. Details:
+[docs/floci-integration.md](docs/floci-integration.md#web-ui).
 
 ---
 
@@ -200,14 +186,8 @@ Add to `.claude/settings.json` (or your client's MCP config):
 **Remote server (client on a different machine) — Streamable HTTP:**
 
 ```bash
-python -m easybdd mcp-serve --streamable-http --host 0.0.0.0 --port 8092
+python -m easybdd mcp-serve --streamable-http --host 0.0.0.0 --port 8090
 ```
-
-On `192.168.100.100` this already runs persistently as the
-`easy-bdd-mcp.service` systemd unit, listening on port **8092** — from the
-separate `/home/jenkins/Easy_BDD` checkout, which it updates with
-`git pull --ff-only` on every start. (Don't use port 8090 on that host — it's
-occupied by an unrelated `bifrost-http` process.)
 
 Then bridge Claude Desktop to it with `mcp-remote` (requires Node.js on the client
 machine) — see [docs/mcp-setup.md](docs/mcp-setup.md#remote-access--streamable-http-recommended)
