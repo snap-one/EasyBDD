@@ -1,0 +1,62 @@
+pipeline {
+    agent any
+
+    triggers {
+        cron('H/5 * * * *')
+    }
+
+    options {
+        buildDiscarder(logRotator(
+            daysToKeepStr: '30',
+            numToKeepStr: '500',
+            artifactDaysToKeepStr: '7',
+            artifactNumToKeepStr: '50'
+        ))
+        timestamps()
+        timeout(time: 60, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('Check for Test Runs') {
+            steps {
+                script {
+                    currentBuild.displayName = "#${BUILD_NUMBER} — Switches"
+                    currentBuild.description = "Checking for active test runs..."
+
+                    def output = sh(
+                        script: '''#!/bin/bash
+                            set -a && . /home/jenkins/EasyBDD/.env && set +a
+                            . /home/jenkins/EasyBDD/env/bin/activate
+                            cd /home/jenkins/EasyBDD
+                            python -m easybdd testrail-run 79 --prefix 'EASYBDD:' 2>&1 || true
+                        ''',
+                        returnStdout: true
+                    ).trim()
+
+                    if (output.contains('No test run found') || 
+                        output.contains('No tests in run') || 
+                        output.contains('0 test cases') ||
+                        output.isEmpty()) {
+                        
+                        currentBuild.description = "No active test runs found - build deleted"
+                        currentBuild.result = 'ABORTED'
+                        return
+                    }
+
+                    currentBuild.description = "Test execution completed"
+                    echo output
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                if (currentBuild.result == 'ABORTED') {
+                    echo "Build marked as empty - will be discarded by cleanup policy"
+                }
+            }
+        }
+    }
+}
