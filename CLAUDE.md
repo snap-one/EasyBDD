@@ -17,7 +17,7 @@ deprecated app with only copy-paste YAML export and no real TestRail push.
 
 - Runs persistently on `192.168.100.100` as systemd unit
   `easybdd-testrail-builder.service`, from
-  `/var/lib/jenkins/workspace/EASY_BDD/frontend`, enabled at boot,
+  `/var/lib/jenkins/workspace/EASYBDD/frontend`, enabled at boot,
   auto-restarts on failure. Reachable at `http://192.168.100.100:8091`.
 - After pulling new code into that checkout, run
   `sudo systemctl restart easybdd-testrail-builder` to pick it up.
