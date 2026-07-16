@@ -381,6 +381,7 @@ class AWSService:
         object_urls = []
         cloudfront_urls = []
         last_modified_by_key = {}
+        url_to_key: Dict[str, str] = {}
         scanned = 0
         skipped_ext = skipped_pattern = skipped_version = skipped_specific = 0
 
@@ -457,6 +458,7 @@ class AWSService:
                 encoded_key = _url_quote(key, safe="/")
                 s3_url = self._build_object_url(bucket_name, encoded_key, protocol)
                 object_urls.append(s3_url)
+                url_to_key[s3_url] = key
 
                 # Build CloudFront URL if specified
                 if cloudfront_url:
@@ -468,6 +470,7 @@ class AWSService:
                             f"{bucket_name}.s3.amazonaws.com", cloudfront_url
                         )
                     cloudfront_urls.append(cf_url)
+                    url_to_key[cf_url] = key
 
                 # Download file if requested
                 if download_dir:
@@ -491,7 +494,7 @@ class AWSService:
 
             # Sort URLs by version (intelligent numeric sorting)
             urls = self._sort_urls_by_version(
-                urls, bucket_name, cloudfront_url, last_modified_by_key
+                urls, bucket_name, cloudfront_url, last_modified_by_key, url_to_key
             )
 
             # Summary
@@ -524,6 +527,7 @@ class AWSService:
         bucket_name: str,
         cloudfront_url: str = None,
         last_modified_by_key: Dict[str, Any] = None,
+        url_to_key: Dict[str, str] = None,
     ) -> List[str]:
         """Sort URLs newest-first by recency, non-DM before DM per build.
 
@@ -548,7 +552,12 @@ class AWSService:
         """
 
         def extract_filename(url):
-            if cloudfront_url:
+            if url_to_key and url in url_to_key:
+                key = url_to_key[url]
+            elif cloudfront_url:
+                # Fallback string-splitting for callers that don't pass
+                # url_to_key — only correct for AWS/CloudFront-shaped URLs,
+                # not Floci's path-style host/bucket/key URLs.
                 key = url.split(f"{cloudfront_url}/")[-1]
             else:
                 key = url.split(f"{bucket_name}.s3.amazonaws.com/")[-1]
