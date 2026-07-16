@@ -15,10 +15,10 @@ pipeline {
     }
 
     environment {
-        PROJECT_DIR = '/home/jenkins/Easy_BDD'
-        VENV        = '/home/jenkins/Easy_BDD/env'
-        PYTHON      = '/home/jenkins/Easy_BDD/env/bin/python'
-        PIP         = '/home/jenkins/Easy_BDD/env/bin/pip'
+        PROJECT_DIR = '/home/jenkins/EasyBDD'
+        VENV        = '/home/jenkins/EasyBDD/env'
+        PYTHON      = '/home/jenkins/EasyBDD/env/bin/python'
+        PIP         = '/home/jenkins/EasyBDD/env/bin/pip'
         // TestRail smoke suite — same project/suite used by
         // Jenkinsfile.create-smoke-run and the GitHub Action in
         // docs/ci-cd-integration.md. Cases here are authored via the
