@@ -1,5 +1,3 @@
-def WORKSPACE = '/var/lib/jenkins/workspace/EASYBDD'
-
 pipeline {
     agent any
 
@@ -36,6 +34,18 @@ pipeline {
         timeout(time: 60, unit: 'MINUTES')
     }
 
+    environment {
+        // One shared, pre-provisioned .env (secrets) and venv (dependencies)
+        // reused read-only across every build/executor -- avoids needing to
+        // recreate secrets or rebuild the venv per concurrent build slot.
+        // Safe to share: `easybdd` itself is resolved from the CURRENT
+        // directory when invoked as `python -m easybdd` (it is not
+        // pip-installed into this venv), so each build still runs the code
+        // checked out in its OWN WORKSPACE below, never this shared one's.
+        SHARED_ENV_FILE      = '/var/lib/jenkins/workspace/EASYBDD/.env'
+        SHARED_VENV_ACTIVATE = '/var/lib/jenkins/workspace/EASYBDD/env/bin/activate'
+    }
+
     stages {
         stage('Run TestRail Project') {
             steps {
@@ -45,14 +55,19 @@ pipeline {
                     def runPrefix   = params.RUN_PREFIX.trim()
                     def branch      = params.BRANCH.trim() ?: 'main'
 
+                    // WORKSPACE here is Jenkins' own per-build workspace
+                    // (auto-suffixed @2, @3, ... for concurrent builds of
+                    // this job), not a directory shared across builds --
+                    // each concurrent run gets its own checkout, Firmware/
+                    // downloads, reports/, and generated test artifacts.
                     sh """#!/bin/bash
-                        cd ${WORKSPACE}
+                        cd "${WORKSPACE}"
                         git fetch origin
                         git checkout ${branch}
                         git pull origin ${branch}
                         rm -f reports/run_${projectId}.properties
-                        set -a && . .env && set +a
-                        . env/bin/activate
+                        set -a && . "${SHARED_ENV_FILE}" && set +a
+                        . "${SHARED_VENV_ACTIVATE}"
                         python -m easybdd testrail-run ${projectId} --prefix '${runPrefix}' || true
                     """
                 }
