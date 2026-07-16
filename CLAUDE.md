@@ -2,10 +2,9 @@
 
 ## Branch workflow (192.168.100.100)
 
-When working in this repo on `192.168.100.100`, always commit changes to the
-`stage` branch first (`git checkout stage`, creating it from `origin/stage`
-if needed). Only merge/push to `origin main` after the user explicitly
-confirms the change has been tested and works on `stage`.
+`main` is the only branch — commit and push directly to `origin main`.
+The former `stage` branch was retired in July 2026 to avoid branch mix-ups;
+do not recreate it or any other long-lived branch unless the user asks.
 
 ## Test builder UI
 
