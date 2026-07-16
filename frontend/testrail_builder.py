@@ -40,6 +40,7 @@ except ImportError:
     pass
 
 import httpx
+import requests
 import yaml
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -1235,6 +1236,10 @@ def _tr_call(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     except TestRailError as exc:
         raise HTTPException(status_code=502, detail=f"TestRail error: {exc}")
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"TestRail request failed: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected TestRail client error: {exc}")
 
 
 def _allowed_project_ids() -> Optional[set]:
@@ -1260,7 +1265,16 @@ def _run_link(run_id: int) -> str:
 
 @app.get("/")
 async def index():
-    return FileResponse(STATIC_DIR / "testrail_builder.html")
+    page = STATIC_DIR / "testrail_builder.html"
+    if not page.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Builder UI file is missing: {page}. "
+                "Ensure frontend/static/testrail_builder.html is deployed on the host."
+            ),
+        )
+    return FileResponse(page)
 
 
 @app.get("/api/catalog")
@@ -1534,6 +1548,8 @@ async def chat_status():
             resp = await client.get(f"{base}/api/tags")
             resp.raise_for_status()
     except httpx.HTTPError:
+        return {"configured": False, "model": _chat_model()}
+    except Exception:
         return {"configured": False, "model": _chat_model()}
     return {"configured": True, "model": _chat_model()}
 
