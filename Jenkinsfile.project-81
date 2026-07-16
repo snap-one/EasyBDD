@@ -21,42 +21,24 @@ pipeline {
         stage('Check for Test Runs') {
             steps {
                 script {
-                    currentBuild.displayName = "#${BUILD_NUMBER} — Project 81"
+                    currentBuild.displayName = "#${BUILD_NUMBER} — Media Distribution"
                     currentBuild.description = "Checking for active test runs..."
 
-                    // Run the command and capture output
-                    def output = sh(
-                        script: '''#!/bin/bash
-                            set -a && . /home/jenkins/EasyBDD/.env && set +a
-                            . /home/jenkins/EasyBDD/env/bin/activate
-                            cd /home/jenkins/EasyBDD
-                            python -m easybdd testrail-run 81 --prefix 'EASYBDD:' 2>&1 || true
-                        ''',
-                        returnStdout: true
-                    ).trim()
-
-                    // Check if any tests were found and executed
-                    if (output.contains('No test run found') || 
-                        output.contains('No tests in run') || 
-                        output.contains('0 test cases') ||
-                        output.isEmpty()) {
-                        
-                        currentBuild.description = "No active test runs found - build deleted"
-                        currentBuild.result = 'ABORTED'
-                        
-                        // Delete this build
-                        sh '''
-                            # Mark as empty
-                            echo "No test runs to execute - skipping build"
-                        '''
-                        
-                        return
-                    }
-
-                    // Tests were found and executed
-                    currentBuild.description = "Test execution completed"
+                    echo "[DEBUG] Starting test run check for project 81"
                     
-                    echo output
+                    sh '''#!/bin/bash
+                        set -e
+                        echo "[DEBUG] Sourcing environment..."
+                        set -a && . /home/jenkins/EasyBDD/.env && set +a
+                        echo "[DEBUG] Activating venv..."
+                        . /home/jenkins/EasyBDD/env/bin/activate
+                        echo "[DEBUG] Changing to project directory..."
+                        cd /home/jenkins/EasyBDD
+                        echo "[DEBUG] Running testrail-run for project 81..."
+                        python -m easybdd testrail-run 81 --prefix 'EASYBDD:'
+                    '''
+                    
+                    currentBuild.description = "Test execution completed"
                 }
             }
         }
