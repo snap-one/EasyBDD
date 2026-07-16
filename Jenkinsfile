@@ -3,7 +3,6 @@ pipeline {
 
     options {
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        timeout(time: 10, unit: 'MINUTES')
         disableConcurrentBuilds()
         timestamps()
     }
@@ -32,10 +31,17 @@ pipeline {
 
         stage('Pull latest code') {
             steps {
+                sh '''
+                    if [ ! -d "${PROJECT_DIR}/.git" ]; then
+                        echo "No git repo at ${PROJECT_DIR} — cloning..."
+                        rm -rf "${PROJECT_DIR}"
+                        git clone https://github.com/snap-one/EasyBDD.git "${PROJECT_DIR}"
+                    fi
+                '''
                 dir("${PROJECT_DIR}") {
                     sh '''
                         git fetch origin
-                        git reset --hard origin/$(git rev-parse --abbrev-ref HEAD)
+                        git reset --hard origin/main
                     '''
                 }
             }
