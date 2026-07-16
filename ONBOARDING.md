@@ -146,6 +146,25 @@ sudo systemctl status easybdd-testrail-builder
 journalctl -u easybdd-testrail-builder -f
 ```
 
+### Floci Browser (web UI, port 8092)
+
+A second web app in the same style: an S3-console-like browser for the local
+[Floci](docs/floci-integration.md) S3 emulator — browse buckets and folders,
+preview/download objects, upload, and delete (with confirmation).
+
+```bash
+python frontend/start_floci_browser.py    # http://localhost:8092
+```
+
+Endpoint comes from `FLOCI_ENDPOINT_URL` (env or `.env`), default
+`http://localhost:4566`. It also runs persistently on the Floci host as the
+`easybdd-floci-browser` systemd service — open **http://192.168.100.100:8092**.
+Install/refresh it on the server with
+`sudo bash scripts/install_floci_browser_service.sh`; manage it with the same
+`systemctl`/`journalctl` commands as above (unit name
+`easybdd-floci-browser`). Full details:
+[docs/floci-integration.md](docs/floci-integration.md#web-ui-floci-browser).
+
 ---
 
 ## 4. MCP server — let an AI assistant drive the framework

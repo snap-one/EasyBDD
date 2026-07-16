@@ -910,6 +910,20 @@ What it does:
 
 ---
 
+## Floci Browser UI
+
+An S3-console-style web interface for the local [Floci](docs/floci-integration.md) S3 emulator: browse buckets and folder trees, preview text/image objects with full metadata, download, upload, and delete objects or folders (behind a confirmation dialog).
+
+```bash
+python frontend/start_floci_browser.py             # http://localhost:8092
+```
+
+The Floci endpoint is resolved the same way `FlociService` resolves it (`FLOCI_ENDPOINT_URL` in `.env`/environment, default `http://localhost:4566`).
+
+**Production instance:** runs persistently on the Floci host as the `easybdd-floci-browser` systemd service — open **http://192.168.100.100:8092**. See [docs/floci-integration.md](docs/floci-integration.md#web-ui-floci-browser) for setup and service management.
+
+---
+
 ## AI Assistant Integration (MCP)
 
 Easy BDD exposes the framework to AI assistants (Claude, Cursor, GitHub Copilot Chat) via the **Model Context Protocol (MCP)**.
@@ -1068,6 +1082,9 @@ Easy_BDD/
 │   ├── testrail_builder.py        # Test Builder UI backend (publish to TestRail)
 │   ├── start_testrail_builder.py  # Test Builder UI launcher (port 8091)
 │   ├── static/testrail_builder.html  # Test Builder UI frontend
+│   ├── floci_browser.py           # Floci Browser backend (S3-console-style UI)
+│   ├── start_floci_browser.py     # Floci Browser launcher (port 8092)
+│   ├── static/floci_browser.html  # Floci Browser frontend
 │   ├── action_definitions.py      # Action catalog (used by Test Builder UI)
 │   └── test_builder_app.py        # [DEPRECATED] old local web builder
 ├── tests/                         # Local YAML test files (supplemental)

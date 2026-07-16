@@ -12,9 +12,10 @@
 4. [Available Actions](#available-actions)
 5. [Configuration](#configuration)
 6. [CLI: `floci-upload`](#cli-floci-upload)
-7. [CI/CD: Mirroring Firmware into Floci](#cicd-mirroring-firmware-into-floci)
-8. [Relationship to the AWS/S3 Actions](#relationship-to-the-awss3-actions)
-9. [Troubleshooting](#troubleshooting)
+7. [Web UI: Floci Browser](#web-ui-floci-browser)
+8. [CI/CD: Mirroring Firmware into Floci](#cicd-mirroring-firmware-into-floci)
+9. [Relationship to the AWS/S3 Actions](#relationship-to-the-awss3-actions)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -179,6 +180,61 @@ python -m easybdd floci-delete wattbox wattbox/upgrade_moip_4.7.0.bin
 Deleting a key that isn't present in the bucket is not an error (matches S3
 delete semantics). Run `python -m easybdd floci-delete ?` for full contextual
 help.
+
+---
+
+## Web UI: Floci Browser
+
+An S3-console-style web UI for browsing Floci bucket contents —
+`frontend/floci_browser.py`, served as a single self-contained page (same
+FastAPI + vanilla-JS pattern as the TestRail Test Builder).
+
+What it does:
+
+- **Bucket sidebar** — every bucket on the endpoint, with creation dates.
+- **Folder navigation** — breadcrumb + one-level prefix listing
+  (`Delimiter='/'`), sortable by name / size / last-modified, with a filter
+  box and paged "Load more" for large folders.
+- **Object preview** — click any object for metadata (size, last modified,
+  content type, ETag, direct Floci object URL) plus inline previews of text
+  files and images.
+- **Download / upload** — stream any object down, or upload files into the
+  current folder.
+- **Delete** — single objects or whole folders (recursive), always behind a
+  confirmation dialog.
+
+Run it locally:
+
+```bash
+python frontend/start_floci_browser.py            # http://localhost:8092
+python frontend/start_floci_browser.py --port 9000
+```
+
+The endpoint is resolved exactly like `FlociService` resolves it:
+`FLOCI_ENDPOINT_URL` in the environment or project `.env`, defaulting to
+`http://localhost:4566`. Point it at a remote Floci with e.g.
+`FLOCI_ENDPOINT_URL=http://192.168.100.100:4566`. Port default is `8092`
+(`FLOCI_BROWSER_PORT` env var) — 8090 is the MCP server, 8091 the TestRail
+builder.
+
+### Production instance
+
+The browser runs persistently on the Floci host as the
+`easybdd-floci-browser` systemd service — open **http://192.168.100.100:8092**.
+To install (or refresh) the service on the server:
+
+```bash
+sudo bash scripts/install_floci_browser_service.sh
+```
+
+The script writes `/etc/systemd/system/easybdd-floci-browser.service`
+(runs as `jenkins` from the repo checkout, after `floci.service`, enabled at
+boot, auto-restarts), reusing the same python interpreter as the
+`easybdd-testrail-builder` service. After pulling new code:
+
+```bash
+sudo systemctl restart easybdd-floci-browser
+```
 
 ---
 
