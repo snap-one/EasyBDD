@@ -1,34 +1,39 @@
-// ── Same project list as the retired Jenkinsfile.testrail-all, used only to
-// ── look up a display name when PROJECT_ID is derived from the job name. ───
-def TESTRAIL_PROJECTS = [
-    59: 'JDM Automation',
-    74: 'Audio',
-    76: 'Routers',
-    77: 'Power',
-    78: 'Surveillance',
-    79: 'Switches',
-    80: 'Access Points',
-    81: 'Media Distribution',
-]
-
-def SHARED_DIR = '/home/jenkins/EasyBDD'
-
 pipeline {
     agent any
 
     parameters {
-        string(name: 'PROJECT_ID',   defaultValue: '', description: 'TestRail project ID (leave blank to derive from a job name ending in the id, e.g. EASYBDD_PROJECT_77)')
-        string(name: 'PROJECT_NAME', defaultValue: '', description: 'TestRail project name (leave blank to look it up from PROJECT_ID)')
-    }
-
-    // Each per-project job instance runs this same script from SCM; Jenkins'
-    // per-job hashing on 'H' staggers the 8 jobs within the 5-minute window.
-    triggers {
-        cron('H/5 * * * *')
+        choice(
+            name: 'PROJECT_ID',
+            choices: [
+                '59 - JDM Automation',
+                '74 - Audio',
+                '76 - Routers',
+                '77 - Power',
+                '78 - Surveillance',
+                '79 - Switches',
+                '80 - Access Points',
+                '81 - Media Distribution',
+            ],
+            description: 'TestRail project to run tests for'
+        )
+        string(
+            name: 'RUN_ID',
+            defaultValue: '',
+            description: 'Optional: specific TestRail run ID (leave blank to auto-discover active EASYBDD: run)'
+        )
+        string(
+            name: 'RUN_PREFIX',
+            defaultValue: 'EASYBDD:',
+            description: 'Run name prefix to match (ignored if RUN_ID is specified)'
+        )
+        booleanParam(
+            name: 'FIND_ONLY',
+            defaultValue: false,
+            description: 'Check if run exists without executing tests'
+        )
     }
 
     options {
-        // Keep successful/unstable builds for 30 days, discard NOT_BUILT (no test run found) immediately
         buildDiscarder(logRotator(
             daysToKeepStr: '30',
             numToKeepStr: '500',
@@ -41,63 +46,35 @@ pipeline {
     }
 
     stages {
-        stage('Resolve Project') {
+        stage('Run TestRail Tests') {
             steps {
                 script {
-                    def id = params.PROJECT_ID?.trim()
-                    if (!id) {
-                        def jobName = env.JOB_BASE_NAME ?: env.JOB_NAME
-                        def m = (jobName =~ /(\d+)$/)
-                        if (m.find()) {
-                            id = m.group(1)
-                        }
-                    }
-                    env.RESOLVED_PROJECT_ID = id ?: ''
-                    env.RESOLVED_PROJECT_NAME = params.PROJECT_NAME?.trim() ?: (TESTRAIL_PROJECTS[id as Integer] ?: id ?: '')
-                }
-            }
-        }
-        stage('Run TestRail Project') {
-            when {
-                expression { env.RESOLVED_PROJECT_ID?.trim() }
-            }
-            steps {
-                sh """#!/bin/bash
-                    set -a && . ${SHARED_DIR}/.env && set +a
-                    . ${SHARED_DIR}/env/bin/activate
-                    mkdir -p ${SHARED_DIR}/reports
-                    rm -f ${SHARED_DIR}/reports/run_${env.RESOLVED_PROJECT_ID}.properties
-                    cd ${SHARED_DIR}
-                    python -m easybdd testrail-run ${env.RESOLVED_PROJECT_ID}
-                """.stripMargin()
-            }
-        }
-    }
+                    def projectId = params.PROJECT_ID.split(' - ')[0].trim()
+                    def projectName = params.PROJECT_ID.split(' - ')[1].trim()
+                    def runId = params.RUN_ID?.trim()
+                    def runPrefix = params.RUN_PREFIX?.trim() ?: 'EASYBDD:'
+                    def findOnly = params.FIND_ONLY ? '--find-only' : ''
 
-    post {
-        always {
-            script {
-                if (!env.RESOLVED_PROJECT_ID?.trim()) {
-                    currentBuild.displayName = "#${BUILD_NUMBER} — No PROJECT_ID supplied"
-                    currentBuild.description = ''
-                    currentBuild.result = 'NOT_BUILT'
-                    return
-                }
-                def propsFile = "/home/jenkins/EasyBDD/reports/run_${env.RESOLVED_PROJECT_ID}.properties"
-                if (fileExists(propsFile)) {
-                    def props = readProperties file: propsFile
-                    def runName = props['RUN_NAME'] ?: ''
-                    def runUrl  = props['RUN_URL']  ?: ''
-                    if (runName) {
-                        currentBuild.displayName = "#${BUILD_NUMBER} — ${env.RESOLVED_PROJECT_NAME}: ${runName}"
-                        currentBuild.description = "<a href=\"${runUrl}\">${runName}</a>"
-                        return
+                    currentBuild.displayName = "#${BUILD_NUMBER} — ${projectName}"
+                    currentBuild.description = "Project: ${projectId} | Prefix: ${runPrefix}${runId ? ' | Run ID: ' + runId : ''}"
+
+                    def cmd = "python -m easybdd testrail-run ${projectId}"
+                    if (runId) {
+                        cmd += " --run-id ${runId}"
+                    } else {
+                        cmd += " --prefix '${runPrefix}'"
                     }
+                    if (findOnly) {
+                        cmd += " --find-only"
+                    }
+
+                    sh '''#!/bin/bash
+                        set -a && . /home/jenkins/EasyBDD/.env && set +a
+                        . /home/jenkins/EasyBDD/env/bin/activate
+                        cd /home/jenkins/EasyBDD
+                        ''' + cmd + '''
+                    '''
                 }
-                currentBuild.displayName = "#${BUILD_NUMBER} — No runs found"
-                currentBuild.description = ''
-                // Mark as NOT_BUILT so Jenkins discards this build after backlog cleanup
-                currentBuild.result = 'NOT_BUILT'
             }
         }
     }
