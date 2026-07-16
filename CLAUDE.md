@@ -58,3 +58,9 @@ or reference it.
   `http://192.168.100.100:8092/onboard` (instructions page), `/setup`
   (macOS/Linux bash installer), `/setup.ps1` (Windows PowerShell installer).
   Script sources: `onboarding/` in this repo.
+- MCP auth: `/mcp` requires `Authorization: Bearer $EASYBDD_MCP_TOKEN`
+  (token lives in the production `.env`, never in git; the three setup
+  routes above stay public). Tool file access is confined to the project
+  root, excluding `.env*`, `env/`, `.git/` (`_abs()` in
+  `easybdd/mcp_server.py`). Engineers get the token from Mark Fomin and
+  pass it as `EASYBDD_TOKEN` when running the setup one-liner.

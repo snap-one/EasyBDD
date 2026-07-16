@@ -167,22 +167,28 @@ tests from chat. Full reference: [docs/mcp-setup.md](docs/mcp-setup.md).
 
 The production MCP server on `192.168.100.100:8092` serves its own installers.
 Open <http://192.168.100.100:8092/onboard> in a browser for instructions, or run
-the one-liner directly (must be on the office network / VPN):
+the one-liner directly (must be on the office network / VPN; get the access
+token from Mark Fomin):
 
 ```powershell
 # Windows (PowerShell)
-irm http://192.168.100.100:8092/setup.ps1 | iex
+$env:EASYBDD_TOKEN="<token>"; irm http://192.168.100.100:8092/setup.ps1 | iex
 ```
 
 ```bash
 # macOS / Linux (Terminal)
-curl -fsSL http://192.168.100.100:8092/setup | bash
+curl -fsSL http://192.168.100.100:8092/setup | EASYBDD_TOKEN=<token> bash
 ```
 
 The script configures Claude Desktop (via the `mcp-remote` bridge, installing
 Node.js if needed) and/or Claude Code, backing up any existing config. Then fully
 quit and reopen Claude Desktop and ask: *"Using the easybdd tools, list the
 available tests."* Script sources live in [onboarding/](onboarding/).
+
+Server-side, auth is a shared bearer token in `EASYBDD_MCP_TOKEN` (set in the
+production `.env`, loaded by the systemd unit). If unset, the server runs
+unauthenticated and logs a warning. MCP tools are confined to the project root
+and refuse `.env*`, `env/`, `.git/` and anything outside the repo.
 
 Everything below is for developers working on the framework itself.
 

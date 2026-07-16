@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Easy BDD MCP — one-command setup for macOS and Linux.
 #
-# Engineers run:
-#   curl -fsSL http://192.168.100.100:8092/setup | bash
+# Engineers run (token comes from Mark Fomin):
+#   curl -fsSL http://192.168.100.100:8092/setup | EASYBDD_TOKEN=<token> bash
+# If EASYBDD_TOKEN is not set, the script asks for it interactively.
 #
 # What it does:
-#   1. Checks the Easy BDD MCP server is reachable.
+#   1. Checks the Easy BDD MCP server is reachable and the token is valid.
 #   2. Configures Claude Code (if installed) — native HTTP, no extras needed.
 #   3. Configures Claude Desktop (if installed) via the mcp-remote bridge,
 #      installing Node.js first when possible.
@@ -15,6 +16,7 @@
 set -u
 
 MCP_URL="${EASYBDD_MCP_URL:-http://192.168.100.100:8092/mcp}"
+TOKEN="${EASYBDD_TOKEN:-}"
 OS="$(uname -s)"
 CONFIGURED=""
 
@@ -25,7 +27,7 @@ fail() { printf '\033[1;31m ✗ %s\033[0m\n' "$*"; }
 
 say "Easy BDD MCP setup (server: $MCP_URL)"
 
-# --- 1. Reachability -------------------------------------------------------
+# --- 1. Reachability ---------------------------------------------------------
 if curl -s -o /dev/null -m 8 "$MCP_URL"; then
   ok "Server is reachable."
 else
@@ -34,10 +36,34 @@ else
   exit 1
 fi
 
-# --- 2. Claude Code (CLI / IDE) --------------------------------------------
+# --- 2. Access token ---------------------------------------------------------
+if [ -z "$TOKEN" ] && [ -r /dev/tty ]; then
+  printf 'Paste the Easy BDD access token (ask Mark Fomin), then press Enter: ' > /dev/tty
+  read -r TOKEN < /dev/tty || TOKEN=""
+fi
+if [ -z "$TOKEN" ]; then
+  fail "No access token provided."
+  echo "   Ask Mark Fomin for the token, then run:"
+  echo "   curl -fsSL ${MCP_URL%/mcp}/setup | EASYBDD_TOKEN=<token> bash"
+  exit 1
+fi
+
+STATUS=$(curl -s -o /dev/null -m 8 -w '%{http_code}' "$MCP_URL" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Accept: application/json, text/event-stream' -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"setup-check","version":"0"}}}')
+if [ "$STATUS" = "401" ]; then
+  fail "The access token was rejected by the server."
+  echo "   Double-check it with Mark Fomin and run this again."
+  exit 1
+fi
+ok "Access token accepted."
+
+# --- 3. Claude Code (CLI / IDE) ----------------------------------------------
 if command -v claude >/dev/null 2>&1; then
   claude mcp remove --scope user easybdd >/dev/null 2>&1 || true
-  if claude mcp add --scope user --transport http easybdd "$MCP_URL" >/dev/null 2>&1; then
+  if claude mcp add --scope user --transport http easybdd "$MCP_URL" \
+       --header "Authorization: Bearer $TOKEN" >/dev/null 2>&1; then
     ok "Claude Code configured (user scope)."
     CONFIGURED="Claude Code"
   else
@@ -45,7 +71,7 @@ if command -v claude >/dev/null 2>&1; then
   fi
 fi
 
-# --- 3. Claude Desktop ------------------------------------------------------
+# --- 4. Claude Desktop ---------------------------------------------------------
 case "$OS" in
   Darwin) DESKTOP_DIR="$HOME/Library/Application Support/Claude" ;;
   Linux)  DESKTOP_DIR="$HOME/.config/Claude" ;;
@@ -96,16 +122,20 @@ else
     ok "Backed up existing Claude Desktop config."
   fi
 
-  node - "$CONFIG" "$MCP_URL" <<'EOF'
+  node - "$CONFIG" "$MCP_URL" "$TOKEN" <<'EOF'
 const fs = require("fs");
-const [config, url] = process.argv.slice(2);
+const [config, url, token] = process.argv.slice(2);
 let cfg = {};
 try { cfg = JSON.parse(fs.readFileSync(config, "utf8")); } catch (e) {}
 if (typeof cfg !== "object" || cfg === null || Array.isArray(cfg)) cfg = {};
 cfg.mcpServers = cfg.mcpServers || {};
+// Token is passed via env and expanded by mcp-remote itself; keeping the
+// header value free of spaces also avoids a Claude Desktop arg-parsing bug.
 cfg.mcpServers.easybdd = {
   command: "npx",
-  args: ["-y", "mcp-remote", url, "--allow-http", "--transport", "http-only"],
+  args: ["-y", "mcp-remote", url, "--allow-http", "--transport", "http-only",
+         "--header", "Authorization:${EASYBDD_AUTH}"],
+  env: { EASYBDD_AUTH: "Bearer " + token },
 };
 fs.writeFileSync(config, JSON.stringify(cfg, null, 2) + "\n");
 EOF
@@ -117,7 +147,7 @@ EOF
   npx -y mcp-remote --help >/dev/null 2>&1 || true
 fi
 
-# --- Done -------------------------------------------------------------------
+# --- Done ----------------------------------------------------------------------
 echo
 ok "Setup complete — configured: $CONFIGURED"
 echo

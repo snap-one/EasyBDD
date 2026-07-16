@@ -63,13 +63,34 @@ mcp = FastMCP(
 # Helpers
 # ---------------------------------------------------------------------------
 
-_PROJECT_ROOT = Path(__file__).parent.parent
+_PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+
+# Path components MCP clients may never touch, even inside the project root:
+# secrets, virtualenvs and VCS internals. Anything *outside* the project root
+# is always refused.
+_FORBIDDEN_PARTS = frozenset({".git", "env", "venv", ".venv", ".claude", "node_modules"})
 
 
 def _abs(p: str | Path) -> Path:
-    """Resolve path relative to project root if not absolute."""
+    """Resolve a client-supplied path, confined to the project root.
+
+    Relative paths resolve against the project root. Absolute paths are
+    allowed only if they land inside the project root after resolving
+    symlinks. Raises ValueError for anything outside the root or touching
+    secrets (.env*), virtualenvs or VCS internals.
+    """
     path = Path(p)
-    return path if path.is_absolute() else (_PROJECT_ROOT / path).resolve()
+    resolved = (path if path.is_absolute() else _PROJECT_ROOT / path).resolve()
+    try:
+        rel = resolved.relative_to(_PROJECT_ROOT)
+    except ValueError:
+        raise ValueError(
+            f"Access denied: '{p}' resolves outside the Easy BDD project root."
+        ) from None
+    for part in rel.parts:
+        if part in _FORBIDDEN_PARTS or part.startswith(".env"):
+            raise ValueError(f"Access denied: '{p}' touches a restricted path ('{part}').")
+    return resolved
 
 
 def _load_config() -> Dict[str, Any]:
@@ -188,7 +209,7 @@ def validate_test(
     from .core.validator import EasyBDDValidator
 
     validator = EasyBDDValidator()
-    ss_dir = Path(shared_steps_dir) if shared_steps_dir else None
+    ss_dir = _abs(shared_steps_dir) if shared_steps_dir else None
 
     if snippet is not None:
         issues = validator.validate_snippet(snippet, ss_dir)
@@ -1635,7 +1656,7 @@ Return ONLY valid YAML — a list of test case objects:
 
                 if output_dir:
                     from easybdd.crawler.yaml_writer import write_test_case
-                    out = _Path(_PROJECT_ROOT / output_dir)
+                    out = _abs(output_dir)
                     out.mkdir(parents=True, exist_ok=True)
                     for case in cases:
                         write_test_case(case, out)
@@ -2321,16 +2342,20 @@ async def route_onboard(request):
         </style></head><body>
         <h1>Connect Claude to Easy BDD</h1>
         <p>One-time setup. You need Claude Desktop (<a href="https://claude.ai/download">claude.ai/download</a>)
-        or Claude Code installed, and to be on the office network / VPN. No other tools,
-        no repository checkout, no coding.</p>
+        or Claude Code installed, to be on the office network / VPN, and the
+        <strong>access token</strong> (ask Mark Fomin). No other tools, no repository
+        checkout, no coding.</p>
 
         <h2>Windows</h2>
-        <p>Open <strong>PowerShell</strong> (Start menu &rarr; type "PowerShell") and paste:</p>
-        <pre>irm {base}/setup.ps1 | iex</pre>
+        <p>Open <strong>PowerShell</strong> (Start menu &rarr; type "PowerShell") and paste
+        (replace <code>PASTE-TOKEN-HERE</code> with the token):</p>
+        <pre>$env:EASYBDD_TOKEN="PASTE-TOKEN-HERE"; irm {base}/setup.ps1 | iex</pre>
 
         <h2>macOS / Linux</h2>
-        <p>Open <strong>Terminal</strong> and paste:</p>
-        <pre>curl -fsSL {base}/setup | bash</pre>
+        <p>Open <strong>Terminal</strong> and paste (replace <code>PASTE-TOKEN-HERE</code>
+        with the token):</p>
+        <pre>curl -fsSL {base}/setup | EASYBDD_TOKEN=PASTE-TOKEN-HERE bash</pre>
+        <p>If you leave the token out, the script simply asks you for it.</p>
 
         <h2>Then</h2>
         <ol>
@@ -2349,6 +2374,48 @@ async def route_onboard(request):
 # ---------------------------------------------------------------------------
 
 
+# Routes that stay public even when EASYBDD_MCP_TOKEN is set — engineers must
+# be able to fetch the setup scripts before they have anything configured.
+_PUBLIC_PATHS = frozenset({"/onboard", "/setup", "/setup.ps1"})
+
+
+class _BearerAuthMiddleware:
+    """Require 'Authorization: Bearer <token>' on all HTTP routes except _PUBLIC_PATHS."""
+
+    def __init__(self, app, token: str):
+        self.app = app
+        self.token = token
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"] not in _PUBLIC_PATHS:
+            import hmac
+
+            auth = ""
+            for name, value in scope.get("headers", []):
+                if name == b"authorization":
+                    auth = value.decode("latin-1")
+                    break
+            supplied = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+            if not hmac.compare_digest(supplied, self.token):
+                body = json.dumps({
+                    "error": "unauthorized",
+                    "detail": "Missing or invalid bearer token. "
+                              "Re-run setup from http://192.168.100.100:8092/onboard "
+                              "or ask Mark Fomin for the access token.",
+                }).encode()
+                await send({
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"www-authenticate", b"Bearer"),
+                    ],
+                })
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
+
+
 def serve(transport: str = "stdio", host: str = "0.0.0.0", port: int = 8080) -> None:
     """Start the MCP server."""
     if transport in ("sse", "streamable-http"):
@@ -2359,6 +2426,28 @@ def serve(transport: str = "stdio", host: str = "0.0.0.0", port: int = 8080) -> 
         mcp.settings.transport_security = TransportSecuritySettings(
             enable_dns_rebinding_protection=False
         )
-        mcp.run(transport=transport)
+
+        token = os.environ.get("EASYBDD_MCP_TOKEN", "").strip()
+        if token:
+            import uvicorn
+
+            app = (
+                mcp.streamable_http_app()
+                if transport == "streamable-http"
+                else mcp.sse_app()
+            )
+            logger.info("Bearer-token auth ENABLED (EASYBDD_MCP_TOKEN is set).")
+            uvicorn.run(
+                _BearerAuthMiddleware(app, token),
+                host=host,
+                port=port,
+                log_level=mcp.settings.log_level.lower(),
+            )
+        else:
+            logger.warning(
+                "EASYBDD_MCP_TOKEN is not set — the MCP server is UNAUTHENTICATED. "
+                "Anyone who can reach this port has full tool access."
+            )
+            mcp.run(transport=transport)
     else:
         mcp.run(transport="stdio")

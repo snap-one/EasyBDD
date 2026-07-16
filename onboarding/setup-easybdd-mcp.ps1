@@ -1,10 +1,11 @@
 # Easy BDD MCP — one-command setup for Windows.
 #
-# Engineers run this in PowerShell (no admin needed in most cases):
-#   irm http://192.168.100.100:8092/setup.ps1 | iex
+# Engineers run this in PowerShell (token comes from Mark Fomin):
+#   $env:EASYBDD_TOKEN="<token>"; irm http://192.168.100.100:8092/setup.ps1 | iex
+# If EASYBDD_TOKEN is not set, the script asks for it interactively.
 #
 # What it does:
-#   1. Checks the Easy BDD MCP server is reachable.
+#   1. Checks the Easy BDD MCP server is reachable and the token is valid.
 #   2. Configures Claude Code (if installed).
 #   3. Configures Claude Desktop via the mcp-remote bridge, installing
 #      Node.js with winget if it's missing.
@@ -13,6 +14,7 @@
 
 $ErrorActionPreference = "Stop"
 $McpUrl = if ($env:EASYBDD_MCP_URL) { $env:EASYBDD_MCP_URL } else { "http://192.168.100.100:8092/mcp" }
+$Token  = $env:EASYBDD_TOKEN
 $Configured = @()
 
 function Say($m)  { Write-Host "==> $m" -ForegroundColor Blue }
@@ -28,7 +30,7 @@ try {
     Ok "Server is reachable."
 } catch {
     if ($_.Exception.Response) {
-        # Any HTTP response (even 4xx/5xx) means the server is reachable.
+        # Any HTTP response (even 401/4xx/5xx) means the server is reachable.
         Ok "Server is reachable."
     } else {
         Fail "Cannot reach $McpUrl"
@@ -37,13 +39,41 @@ try {
     }
 }
 
-# --- 2. Claude Code (CLI / IDE) ----------------------------------------------
+# --- 2. Access token ---------------------------------------------------------
+if (-not $Token) {
+    $Token = Read-Host "Paste the Easy BDD access token (ask Mark Fomin)"
+}
+if (-not $Token) {
+    Fail "No access token provided."
+    Write-Host "   Ask Mark Fomin for the token, then run this again."
+    return
+}
+
+$initBody = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"setup-check","version":"0"}}}'
+$tokenOk = $true
+try {
+    Invoke-WebRequest -Uri $McpUrl -Method Post -TimeoutSec 8 -UseBasicParsing `
+        -Headers @{ Authorization = "Bearer $Token"; Accept = "application/json, text/event-stream" } `
+        -ContentType "application/json" -Body $initBody | Out-Null
+} catch {
+    $resp = $_.Exception.Response
+    if ($resp -and [int]$resp.StatusCode -eq 401) { $tokenOk = $false }
+    # Any other HTTP error still means the token itself was accepted.
+}
+if (-not $tokenOk) {
+    Fail "The access token was rejected by the server."
+    Write-Host "   Double-check it with Mark Fomin and run this again."
+    return
+}
+Ok "Access token accepted."
+
+# --- 3. Claude Code (CLI / IDE) ----------------------------------------------
 if (Get-Command claude -ErrorAction SilentlyContinue) {
     try {
         claude mcp remove --scope user easybdd 2>$null | Out-Null
     } catch {}
     try {
-        claude mcp add --scope user --transport http easybdd $McpUrl | Out-Null
+        claude mcp add --scope user --transport http easybdd $McpUrl --header "Authorization: Bearer $Token" | Out-Null
         Ok "Claude Code configured (user scope)."
         $Configured += "Claude Code"
     } catch {
@@ -51,7 +81,7 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     }
 }
 
-# --- 3. Node.js (needed for the Claude Desktop bridge) ------------------------
+# --- 4. Node.js (needed for the Claude Desktop bridge) ------------------------
 function Refresh-Path {
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                 [Environment]::GetEnvironmentVariable("Path", "User")
@@ -73,7 +103,7 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 }
 Ok "Node.js found: $(node --version)"
 
-# --- 4. Claude Desktop config -------------------------------------------------
+# --- 5. Claude Desktop config -------------------------------------------------
 $DesktopDir = Join-Path $env:APPDATA "Claude"
 New-Item -ItemType Directory -Force -Path $DesktopDir | Out-Null
 $ConfigPath = Join-Path $DesktopDir "claude_desktop_config.json"
@@ -89,9 +119,13 @@ if (-not $cfg.PSObject.Properties["mcpServers"]) {
     $cfg | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{})
 }
 
+# Token is passed via env and expanded by mcp-remote itself; keeping the header
+# argument free of spaces avoids a Claude Desktop arg-parsing bug on Windows.
 $serverEntry = [pscustomobject]@{
     command = "npx"
-    args    = @("-y", "mcp-remote", $McpUrl, "--allow-http", "--transport", "http-only")
+    args    = @("-y", "mcp-remote", $McpUrl, "--allow-http", "--transport", "http-only",
+                "--header", 'Authorization:${EASYBDD_AUTH}')
+    env     = [pscustomobject]@{ EASYBDD_AUTH = "Bearer $Token" }
 }
 if ($cfg.mcpServers.PSObject.Properties["easybdd"]) {
     $cfg.mcpServers.easybdd = $serverEntry
