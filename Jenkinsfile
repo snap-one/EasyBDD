@@ -75,14 +75,6 @@ pipeline {
             }
         }
 
-        stage('Validate test suite') {
-            steps {
-                dir("${PROJECT_DIR}") {
-                    sh '${PYTHON} -m easybdd validate --testrail-suite ${SUITE_ID} --project ${PROJECT_ID}'
-                }
-            }
-        }
-
         stage('Restart services') {
             steps {
                 sh '''
@@ -90,6 +82,21 @@ pipeline {
                     sudo systemctl restart easybdd-testrail-builder || true
                     sudo systemctl restart easy-bdd-mcp || true
                 '''
+            }
+        }
+
+        stage('Validate test suite') {
+            steps {
+                dir("${PROJECT_DIR}") {
+                    sh '''
+                        if [ ! -f .env ]; then
+                            echo "WARNING: .env not found — skipping TestRail validation."
+                            echo "Copy credentials to ${PROJECT_DIR}/.env to enable this step."
+                            exit 0
+                        fi
+                        ${PYTHON} -m easybdd validate --testrail-suite ${SUITE_ID} --project ${PROJECT_ID}
+                    '''
+                }
             }
         }
     }
