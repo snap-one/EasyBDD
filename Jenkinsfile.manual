@@ -1,0 +1,103 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(
+            name: 'PROJECT_ID',
+            choices: [
+                '59 - JDM Automation',
+                '74 - Audio',
+                '76 - Routers',
+                '77 - Power',
+                '78 - Surveillance',
+                '79 - Switches',
+                '80 - Access Points',
+                '81 - Media Distribution',
+            ],
+            description: 'TestRail project to run tests for'
+        )
+        string(
+            name: 'RUN_ID',
+            defaultValue: '',
+            description: 'Optional: specific TestRail run ID (leave blank to auto-discover active EASYBDD: run)'
+        )
+        string(
+            name: 'RUN_PREFIX',
+            defaultValue: 'EASYBDD:',
+            description: 'Run name prefix to match (ignored if RUN_ID is specified)'
+        )
+        booleanParam(
+            name: 'FIND_ONLY',
+            defaultValue: false,
+            description: 'Check if run exists without executing tests'
+        )
+    }
+
+    options {
+        buildDiscarder(logRotator(
+            daysToKeepStr: '30',
+            numToKeepStr: '500',
+            artifactDaysToKeepStr: '7',
+            artifactNumToKeepStr: '50'
+        ))
+        timestamps()
+        timeout(time: 60, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('Run TestRail Tests') {
+            steps {
+                script {
+                    // Map job names to project IDs for auto-detection override
+                    def PROJECT_MAP = [
+                        'JDM Automation': '59',
+                        'Audio': '74',
+                        'Routers': '76',
+                        'Power': '77',
+                        'Surveillance': '78',
+                        'Switches': '79',
+                        'Access Points': '80',
+                        'Media Distribution': '81',
+                    ]
+
+                    // Auto-detect project from job name if not explicitly overridden
+                    def jobName = env.JOB_NAME ?: ''
+                    def projectId = params.PROJECT_ID.split(' - ')[0].trim()
+                    def projectName = params.PROJECT_ID.split(' - ')[1].trim()
+                    
+                    // Allow job name to override selection
+                    PROJECT_MAP.each { name, id ->
+                        if (jobName.contains(name)) {
+                            projectId = id
+                            projectName = name
+                        }
+                    }
+
+                    def runId = params.RUN_ID?.trim()
+                    def runPrefix = params.RUN_PREFIX?.trim() ?: 'EASYBDD:'
+                    def findOnly = params.FIND_ONLY ? '--find-only' : ''
+
+                    currentBuild.displayName = "#${BUILD_NUMBER} — ${projectName}"
+                    currentBuild.description = "Project: ${projectId} | Prefix: ${runPrefix}${runId ? ' | Run ID: ' + runId : ''}"
+
+                    def cmd = "python -m easybdd testrail-run ${projectId}"
+                    if (runId) {
+                        cmd += " --run-id ${runId}"
+                    } else {
+                        cmd += " --prefix '${runPrefix}'"
+                    }
+                    if (findOnly) {
+                        cmd += " --find-only"
+                    }
+
+                    sh '''#!/bin/bash
+                        set -a && . /home/jenkins/EasyBDD/.env && set +a
+                        . /home/jenkins/EasyBDD/env/bin/activate
+                        cd /home/jenkins/EasyBDD
+                        ''' + cmd + '''
+                    '''
+                }
+            }
+        }
+    }
+}
