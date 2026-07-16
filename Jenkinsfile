@@ -2,16 +2,15 @@ pipeline {
     agent any
 
     options {
-        buildDiscarder(logRotator(numToKeepStr: '10'))
+        buildDiscarder(logRotator(numToKeepStr: '20'))
         disableConcurrentBuilds()
         timestamps()
     }
 
-    // This Jenkins server has no public endpoint for GitHub to webhook
-    // into, so githubPush() never fires — poll instead. Same workaround
-    // used by Wattbox-Firmware's Jenkinsfile.easybdd.
+    // Poll every minute for changes on origin/main.
+    // Switch to a GitHub webhook trigger once the server has a public endpoint.
     triggers {
-        pollSCM('H/5 * * * *')
+        pollSCM('* * * * *')
     }
 
     environment {
@@ -19,10 +18,6 @@ pipeline {
         VENV        = '/home/jenkins/EasyBDD/env'
         PYTHON      = '/home/jenkins/EasyBDD/env/bin/python'
         PIP         = '/home/jenkins/EasyBDD/env/bin/pip'
-        // TestRail smoke suite — same project/suite used by
-        // Jenkinsfile.create-smoke-run and the GitHub Action in
-        // docs/ci-cd-integration.md. Cases here are authored via the
-        // web UI test builder / directly in TestRail, not as local YAML.
         PROJECT_ID  = '59'
         SUITE_ID    = '106662'
     }
@@ -47,6 +42,19 @@ pipeline {
             }
         }
 
+        stage('Bootstrap virtual environment') {
+            steps {
+                dir("${PROJECT_DIR}") {
+                    sh '''
+                        if [ ! -f "${VENV}/bin/pip" ]; then
+                            echo "Creating virtual environment..."
+                            python3 -m venv "${VENV}"
+                        fi
+                    '''
+                }
+            }
+        }
+
         stage('Install / update dependencies') {
             steps {
                 dir("${PROJECT_DIR}") {
@@ -59,13 +67,29 @@ pipeline {
             }
         }
 
+        stage('Install Playwright browsers') {
+            steps {
+                dir("${PROJECT_DIR}") {
+                    sh '${PYTHON} -m playwright install chromium --with-deps'
+                }
+            }
+        }
+
         stage('Validate test suite') {
             steps {
                 dir("${PROJECT_DIR}") {
-                    sh '''
-                        ${PYTHON} -m easybdd validate --testrail-suite ${SUITE_ID} --project ${PROJECT_ID}
-                    '''
+                    sh '${PYTHON} -m easybdd validate --testrail-suite ${SUITE_ID} --project ${PROJECT_ID}'
                 }
+            }
+        }
+
+        stage('Restart services') {
+            steps {
+                sh '''
+                    echo "Restarting dependent services with updated code..."
+                    sudo systemctl restart easybdd-testrail-builder || true
+                    sudo systemctl restart easy-bdd-mcp || true
+                '''
             }
         }
     }
@@ -82,10 +106,10 @@ pipeline {
             ])
         }
         success {
-            echo "Deployment complete — codebase is up to date and validates cleanly."
+            echo "Deployment complete — codebase is up to date."
         }
         failure {
-            echo "Update FAILED. Check the logs above. The previous codebase is still in place."
+            echo "Deployment FAILED. Check the logs above."
         }
     }
 }
