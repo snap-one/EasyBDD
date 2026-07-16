@@ -11,7 +11,7 @@ def TESTRAIL_PROJECTS = [
     81: 'Media Distribution',
 ]
 
-def WORKSPACE = '/var/lib/jenkins/workspace/EASYBDD'
+def SHARED_DIR = '/home/jenkins/EasyBDD'
 
 pipeline {
     agent any
@@ -57,12 +57,13 @@ pipeline {
             }
             steps {
                 sh """#!/bin/bash
-                    cd ${WORKSPACE}
-                    rm -f reports/run_${env.RESOLVED_PROJECT_ID}.properties
-                    set -a && . .env && set +a
-                    . env/bin/activate
+                    set -a && . ${SHARED_DIR}/.env && set +a
+                    . ${SHARED_DIR}/env/bin/activate
+                    mkdir -p ${SHARED_DIR}/reports
+                    rm -f ${SHARED_DIR}/reports/run_${env.RESOLVED_PROJECT_ID}.properties
+                    cd ${SHARED_DIR}
                     python -m easybdd testrail-run ${env.RESOLVED_PROJECT_ID}
-                """
+                """.stripMargin()
             }
         }
     }
@@ -75,7 +76,7 @@ pipeline {
                     currentBuild.description = ''
                     return
                 }
-                def propsFile = "${WORKSPACE}/reports/run_${env.RESOLVED_PROJECT_ID}.properties"
+                def propsFile = "/home/jenkins/EasyBDD/reports/run_${env.RESOLVED_PROJECT_ID}.properties"
                 if (fileExists(propsFile)) {
                     def props = readProperties file: propsFile
                     def runName = props['RUN_NAME'] ?: ''
