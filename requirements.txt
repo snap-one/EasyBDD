@@ -42,7 +42,7 @@ loguru==0.7.3
 Mako==1.3.12
 Markdown==3.10.2
 MarkupSafe==3.0.3
-mcp==1.27.2
+mcp==1.28.1
 multidict==6.7.1
 numpy==2.3.3
 openai==2.41.1
