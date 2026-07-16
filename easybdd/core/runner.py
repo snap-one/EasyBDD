@@ -1478,6 +1478,7 @@ class TestRunner:
             )
         seconds = float(raw)
         print(f"      ⏳ Sleeping {seconds}s...")
+        sys.stdout.flush()  # visible immediately, not after the sleep completes
         time.sleep(seconds)
         return True
 
@@ -4701,27 +4702,35 @@ class TestRunner:
         step_number: int = 0,
     ) -> bool:
         """Execute a single step using the appropriate service"""
-        # Check if retry configuration is present
-        if hasattr(step, "retry_config") and step.retry_config:
-            retry_config = RetryConfig(
-                max_attempts=step.retry_config.get("max_attempts", 3),
-                delay=step.retry_config.get("delay", 1.0),
-                backoff_multiplier=step.retry_config.get("backoff_multiplier", 2.0),
-                max_delay=step.retry_config.get("max_delay", 30.0),
-            )
+        try:
+            # Check if retry configuration is present
+            if hasattr(step, "retry_config") and step.retry_config:
+                retry_config = RetryConfig(
+                    max_attempts=step.retry_config.get("max_attempts", 3),
+                    delay=step.retry_config.get("delay", 1.0),
+                    backoff_multiplier=step.retry_config.get("backoff_multiplier", 2.0),
+                    max_delay=step.retry_config.get("max_delay", 30.0),
+                )
 
-            # Wrap the execution in retry logic
-            return retry_action(
-                lambda: self._execute_step_internal(
+                # Wrap the execution in retry logic
+                return retry_action(
+                    lambda: self._execute_step_internal(
+                        service, step, variables, soft_assert_manager, step_number
+                    ),
+                    retry_config,
+                )
+            else:
+                # Execute without retry
+                return self._execute_step_internal(
                     service, step, variables, soft_assert_manager, step_number
-                ),
-                retry_config,
-            )
-        else:
-            # Execute without retry
-            return self._execute_step_internal(
-                service, step, variables, soft_assert_manager, step_number
-            )
+                )
+        finally:
+            # stdout is block-buffered when not a tty (e.g. Jenkins' piped log
+            # capture), so without this, prints from a fast step can sit
+            # unflushed until a much later step's output forces a flush —
+            # making the fast step look like it hung for as long as whatever
+            # ran after it (e.g. a long test.sleep).
+            sys.stdout.flush()
 
     def _resolve_step_params(self, step, variables: dict) -> dict:
         """Resolve step variables for display and execution using the same rules."""
