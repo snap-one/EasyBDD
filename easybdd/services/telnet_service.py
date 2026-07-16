@@ -272,7 +272,7 @@ class _TelnetConn:
         prompt: str,
         timeout: float = 45.0,
         encoding: str = "utf-8",
-        idle_timeout: float = 5.0,
+        idle_timeout: float = 1.0,
         stream: bool = False,
     ) -> str:
         prompt_bytes = prompt.encode(encoding)
@@ -496,6 +496,7 @@ class TelnetService:
             command = ""
         prompt = params.get("prompt", "#")
         timeout = float(params.get("timeout", 15.0))
+        idle_timeout = float(params.get("idle_timeout", 1.0))
         encoding = params.get("encoding", "utf-8")
         username = params.get("username", "")
         password = params.get("password", "")
@@ -559,7 +560,7 @@ class TelnetService:
                 data = cmd.rstrip("\r\n") + "\r\n"
                 print(f"         📤 Sending: {cmd!r}")
                 conn.send(data, encoding)
-                result = conn.read_until(prompt, timeout, encoding, stream=True)
+                result = conn.read_until(prompt, timeout, encoding, idle_timeout=idle_timeout, stream=True)
 
                 # Normalize line endings: \r\n → \n, then drop orphaned \r.
                 # Devices often send \r\n\r (CR LF CR) per line; without this the
@@ -602,7 +603,7 @@ class TelnetService:
                 data = last_cmd.rstrip("\r\n") + "\r\n"
                 print(f"         📤 Resending: {last_cmd!r}")
                 new_conn.send(data, encoding)
-                result = new_conn.read_until(prompt, timeout, encoding, stream=True)
+                result = new_conn.read_until(prompt, timeout, encoding, idle_timeout=idle_timeout, stream=True)
                 result = result.rstrip()
                 print(f"         📥 Done ({len(result)} chars)")
                 return result
@@ -618,6 +619,7 @@ class TelnetService:
         port = int(params.get("port", 23))
         prompt = params.get("prompt", "")
         timeout = float(params.get("timeout", 45.0))
+        idle_timeout = float(params.get("idle_timeout", 1.0))
         encoding = params.get("encoding", "utf-8")
         if not host:
             raise ValueError("telnet.receive requires 'host'")
@@ -628,7 +630,7 @@ class TelnetService:
         )
         try:
             if prompt:
-                result = conn.read_until(prompt, timeout, encoding)
+                result = conn.read_until(prompt, timeout, encoding, idle_timeout=idle_timeout)
             else:
                 result = conn.read_available(timeout, encoding)
             preview = result.strip()[:120].replace("\n", "\\n").replace("\r", "")
