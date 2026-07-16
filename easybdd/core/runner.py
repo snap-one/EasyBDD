@@ -3592,15 +3592,19 @@ class TestRunner:
             variables["last_response"] = result
             if hasattr(self.config, "set_variable"):
                 self.config.set_variable("last_response", result, "runtime_data")
-            # Print response so authors can see the actual device output immediately
-            _resp_clean = result.strip()
-            if _resp_clean:
-                _lines = _resp_clean.splitlines()
-                _preview_lines = _lines[:20]
-                indented = "\n".join("         " + ln for ln in _preview_lines)
-                print(f"      📥 response:\n{indented}")
-                if len(_lines) > 20:
-                    print(f"         ... ({len(_lines) - 20} more lines)")
+            # telnet.send already streams each line live as it arrives
+            # (TelnetService._send reads with stream=True), so printing the
+            # full response again here would just duplicate that output.
+            # telnet.receive doesn't stream, so it still needs this block.
+            if "send" not in action.lower():
+                _resp_clean = result.strip()
+                if _resp_clean:
+                    _lines = _resp_clean.splitlines()
+                    _preview_lines = _lines[:20]
+                    indented = "\n".join("         " + ln for ln in _preview_lines)
+                    print(f"      📥 response:\n{indented}")
+                    if len(_lines) > 20:
+                        print(f"         ... ({len(_lines) - 20} more lines)")
         store_as = params.get("store_as", "")
         if store_as and result is not None:
             variables[store_as] = result
