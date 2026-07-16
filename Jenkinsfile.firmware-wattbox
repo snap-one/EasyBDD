@@ -16,8 +16,8 @@ pipeline {
     environment {
         PROJECT_ID    = '77'
         SUITE_ID      = '106658'
-        EASY_BDD_DIR  = '/var/lib/jenkins/workspace/EASY_BDD'
-        PYTHON        = '/var/lib/jenkins/workspace/EASY_BDD/env/bin/python'
+        EASY_BDD_DIR  = '/var/lib/jenkins/workspace/EASYBDD'
+        PYTHON        = '/var/lib/jenkins/workspace/EASYBDD/env/bin/python'
         // Bucket name to mirror changed firmware into on the local Floci
         // instance (http://localhost:4566 by default — see FLOCI_ENDPOINT_URL
         // below). Set this to the same name as the real S3 bucket so existing
