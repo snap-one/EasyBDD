@@ -28,7 +28,13 @@ pipeline {
     }
 
     options {
-        buildDiscarder(logRotator(daysToKeepStr: '7', numToKeepStr: '500'))
+        // Keep successful/unstable builds for 30 days, discard NOT_BUILT (no test run found) immediately
+        buildDiscarder(logRotator(
+            daysToKeepStr: '30',
+            numToKeepStr: '500',
+            artifactDaysToKeepStr: '7',
+            artifactNumToKeepStr: '50'
+        ))
         timestamps()
         timeout(time: 60, unit: 'MINUTES')
         disableConcurrentBuilds()
@@ -74,6 +80,7 @@ pipeline {
                 if (!env.RESOLVED_PROJECT_ID?.trim()) {
                     currentBuild.displayName = "#${BUILD_NUMBER} — No PROJECT_ID supplied"
                     currentBuild.description = ''
+                    currentBuild.result = 'NOT_BUILT'
                     return
                 }
                 def propsFile = "/home/jenkins/EasyBDD/reports/run_${env.RESOLVED_PROJECT_ID}.properties"
@@ -89,6 +96,8 @@ pipeline {
                 }
                 currentBuild.displayName = "#${BUILD_NUMBER} — No runs found"
                 currentBuild.description = ''
+                // Mark as NOT_BUILT so Jenkins discards this build after backlog cleanup
+                currentBuild.result = 'NOT_BUILT'
             }
         }
     }
