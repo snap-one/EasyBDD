@@ -33,6 +33,11 @@ pipeline {
         )
     }
 
+    triggers {
+        // Poll every 5 minutes, staggered by job with 'H'
+        cron('H/5 * * * *')
+    }
+
     options {
         buildDiscarder(logRotator(
             daysToKeepStr: '30',
@@ -42,7 +47,6 @@ pipeline {
         ))
         timestamps()
         timeout(time: 60, unit: 'MINUTES')
-        disableConcurrentBuilds()
     }
 
     stages {
