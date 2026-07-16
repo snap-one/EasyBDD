@@ -553,7 +553,7 @@ class TestRailRunner:
 
         while True:
             passed, failed, skipped = self._execute_cases(
-                classified, static_extra, run_id, verbose, run_title=run["name"]
+                classified, static_extra, run_id, verbose
             )
             total_passed += passed
             total_failed += failed
@@ -866,7 +866,6 @@ class TestRailRunner:
         static_extra: Dict[str, Any],
         run_id: int,
         verbose: bool,
-        run_title: str = "",
     ) -> Tuple[int, int, int]:
         """Run Setup → Test → Teardown cases in order, posting results to TR in real-time.
 
@@ -876,7 +875,6 @@ class TestRailRunner:
         when the Var: case status is already Passed from a previous run.
         """
         passed = failed = skipped = 0
-        run_test_details: List[Dict] = []  # accumulates across all cases for one run-level report
 
         # Re-extract Var: variables every execution so they are always current,
         # regardless of the Var: case's current TestRail status.  Mirrors how
@@ -1014,9 +1012,6 @@ class TestRailRunner:
                         yaml_files, injected_vars, verbose
                     )
 
-                # Accumulate test details for the run-level report
-                run_test_details.extend(case_test_details)
-
                 elapsed = _format_elapsed(time.time() - start_time)
                 comment = "\n".join(comment_lines) or ("Passed" if test_passed else "Failed")
                 status_id = (
@@ -1041,36 +1036,6 @@ class TestRailRunner:
             signal.signal(signal.SIGTERM, _prev_sigterm)
             signal.signal(signal.SIGINT, _prev_sigint)
             self._inflight_test_id = None
-
-        # Generate one HTML report for the entire run and attach it to the TestRail run
-        if run_test_details:
-            try:
-                import os as _os, re as _re
-                from ..core.html_reporter import HTMLReporter
-                _build_num = _os.getenv("BUILD_NUMBER", "")
-                _name_parts = [p for p in [run_title, f"build{_build_num}" if _build_num else ""] if p]
-                _report_name = _re.sub(r"[^\w\-]", "_", "_".join(_name_parts)) if _name_parts else "run"
-                _reporter = HTMLReporter(Path("reports"))
-                _run_report_path = _reporter.generate_report(
-                    test_details=run_test_details,
-                    total_tests=passed + failed + skipped,
-                    passed=passed,
-                    failed=failed,
-                    execution_time=0.0,
-                    test_file_name="run",
-                    report_name=_report_name,
-                )
-                print(f"\n📊 Run report: {_run_report_path}")
-                try:
-                    self._tr.add_attachment_to_run(run_id, str(_run_report_path))
-                    if verbose:
-                        print(f"   📎 Attached to TestRail run {run_id}")
-                except Exception as _att_err:
-                    if verbose:
-                        print(f"   ⚠  Could not attach run report: {_att_err}")
-            except Exception as _rep_err:
-                if verbose:
-                    print(f"   ⚠  Could not generate run report: {_rep_err}")
 
         # Mark definition cases (Shared: / Var:) as passed so they don't
         # remain "untested" in the run. They are not executable directly.
