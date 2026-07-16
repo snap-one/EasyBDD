@@ -34,7 +34,6 @@ pipeline {
                         echo "[DEBUG] Changing to project directory..."
                         cd /home/jenkins/EasyBDD
                         echo "[DEBUG] Running testrail-run for project 79..."
-                        export PLAYWRIGHT_HEADLESS=1
                         /home/jenkins/EasyBDD/run-with-display.sh python -m easybdd testrail-run 79 --prefix 'EASYBDD:'
                     '''
                     
