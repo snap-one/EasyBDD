@@ -958,7 +958,7 @@ class TestRailRunner:
                     self._tr.add_result(
                         test_id,
                         status_id=self._running_status_id,
-                        comment="Running...",
+                        comment="Running..." + jenkins_footer,
                     )
                 except Exception:
                     pass
