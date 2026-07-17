@@ -2054,13 +2054,26 @@ function renderRunDetail() {
   body.innerHTML = "";
   $("#runsview-title").textContent = d.run.name;
 
-  // header: back + TestRail link
+  // header: back + TestRail link + Jenkins trigger
   body.appendChild(el("div", { style: "display:flex; align-items:center; gap:10px" },
     el("button", { class: "add-link", onclick: renderRunsList }, "← All runs"),
     el("span", { class: "dim", style: "font-size:12px" }, runDate(d.run.created_on)),
     d.run.is_completed ? el("span", { class: "dim", style: "font-size:11.5px; border:1px solid var(--border); border-radius:4px; padding:1px 6px" }, "completed — read only") : null,
-    el("a", { href: d.run.url, target: "_blank", class: "add-link", style: "margin-left:auto" }, "Open in TestRail ↗"),
+    d.run.jenkins_available ? el("button", {
+      id: "btn-runsview-jenkins", class: "btn ghost", style: "margin-left:auto; padding:3px 10px; font-size:12px",
+      title: "Trigger the Jenkins job for this run's project right now instead of waiting for its next poll",
+      onclick: () => triggerJenkinsRun(d.run.id),
+    }, "▶ Run on Jenkins") : null,
+    el("a", { href: d.run.url, target: "_blank", class: "add-link", style: d.run.jenkins_available ? "" : "margin-left:auto" }, "Open in TestRail ↗"),
   ));
+
+  if (d.run.jenkins_build_url) {
+    body.appendChild(el("div", { class: "dim", style: "font-size:11.5px" },
+      "Last Jenkins build: ",
+      el("a", { href: d.run.jenkins_build_url, target: "_blank", class: "add-link" },
+        d.run.jenkins_build_number ? `#${d.run.jenkins_build_number} ↗` : "queued ↗"),
+    ));
+  }
 
   // status filter chips
   const byStatus = {};
@@ -2155,6 +2168,22 @@ $("#btn-runsview-apply").addEventListener("click", async () => {
     btn.disabled = false;
   }
 });
+
+async function triggerJenkinsRun(runId) {
+  const btn = $("#btn-runsview-jenkins");
+  if (btn) { btn.disabled = true; btn.textContent = "Starting…"; }
+  try {
+    const r = await api(`/api/jenkins/run/${runId}/trigger`, { method: "POST", body: {} });
+    const link = r.build_url
+      ? `<a href="${r.build_url}" target="_blank">${r.build_number ? `Build #${r.build_number}` : "Build"}</a>`
+      : `<a href="${r.queue_url}" target="_blank">queue item</a>`;
+    toast(r.queued ? `Queued on Jenkins (${r.job}) — see ${link}.` : `Started on Jenkins (${r.job}) — ${link}.`, "ok", true);
+    if (RV.detail && RV.detail.run.id === runId) await openRunDetail(runId);
+  } catch (e) {
+    toast(e.message, "err");
+    if (btn) { btn.disabled = false; btn.textContent = "▶ Run on Jenkins"; }
+  }
+}
 
 $("#btn-runs-view").addEventListener("click", openRunsView);
 

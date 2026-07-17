@@ -56,6 +56,7 @@ from easybdd.core.parser import (  # noqa: E402
 )
 from easybdd.core.testrail_utils import _needs_quoting  # noqa: E402
 from easybdd.core.validator import ACTION_SCHEMA  # noqa: E402
+from easybdd.services.jenkins_service import JenkinsError, JenkinsService  # noqa: E402
 from easybdd.services.testrail_service import (  # noqa: E402
     TestRailError,
     TestRailService,
@@ -1242,6 +1243,45 @@ def _tr_call(fn, *args, **kwargs):
         raise HTTPException(status_code=500, detail=f"Unexpected TestRail client error: {exc}")
 
 
+_jenkins_service: Optional[JenkinsService] = None
+
+# TestRail project id -> the exact PROJECT_ID choice string declared in
+# Jenkinsfile.manual's `choice(name: 'PROJECT_ID', choices: [...])` block.
+# Jenkins rejects any value that isn't a verbatim match for one of those
+# choices, so these two lists must be kept in sync.
+_JENKINS_PROJECT_CHOICES: Dict[int, str] = {
+    59: "59 - JDM Automation",
+    74: "74 - Audio",
+    76: "76 - Routers",
+    77: "77 - Power",
+    78: "78 - Surveillance",
+    79: "79 - Switches",
+    80: "80 - Access Points",
+    81: "81 - Media Distribution",
+}
+
+
+def _jenkins() -> JenkinsService:
+    global _jenkins_service
+    if _jenkins_service is None:
+        try:
+            _jenkins_service = JenkinsService()
+        except JenkinsError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+    return _jenkins_service
+
+
+def _jenkins_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except JenkinsError as exc:
+        raise HTTPException(status_code=502, detail=f"Jenkins error: {exc}")
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Jenkins request failed: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Jenkins client error: {exc}")
+
+
 def _allowed_project_ids() -> Optional[set]:
     raw = os.getenv("TESTRAIL_ALLOWED_PROJECT_IDS", "").strip()
     if not raw:
@@ -2216,15 +2256,21 @@ def _run_summary(r: Dict[str, Any]) -> Dict[str, Any]:
         k: int(r.get(f"{k}_count") or 0)
         for k in ("passed", "blocked", "untested", "retest", "failed")
     }
+    run_vars = TestRailService.parse_run_vars(r.get("description"))
     return {
         "id": r["id"],
         "name": r.get("name", ""),
+        "project_id": r.get("project_id"),
         "is_completed": bool(r.get("is_completed")),
         "created_on": r.get("created_on"),
         "completed_on": r.get("completed_on"),
         "counts": counts,
         "total": sum(counts.values()),
         "url": _run_link(r["id"]),
+        "jenkins_job": run_vars.jenkins_job,
+        "jenkins_build_url": run_vars.jenkins_build_url,
+        "jenkins_build_number": run_vars.jenkins_build_number,
+        "jenkins_available": r.get("project_id") in _JENKINS_PROJECT_CHOICES,
     }
 
 
@@ -2282,6 +2328,50 @@ async def testrail_run_results(run_id: int, req: RunResultsRequest):
         "updated": len(results),
         "status_id": req.status_id,
         "status": _status_map().get(req.status_id, ""),
+        "run_url": _run_link(run_id),
+    }
+
+
+class JenkinsTriggerRequest(BaseModel):
+    find_only: bool = False
+
+
+@app.post("/api/jenkins/run/{run_id}/trigger")
+async def jenkins_trigger_run(run_id: int, req: JenkinsTriggerRequest):
+    """Kick off the Jenkins job that executes this TestRail run right now,
+    instead of waiting for the next cron poll, and link the resulting build
+    back onto the run."""
+    run = _tr_call(_tr().get_run, run_id)
+    project_id = run.get("project_id")
+    project_choice = _JENKINS_PROJECT_CHOICES.get(project_id)
+    if not project_choice:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No Jenkins job is mapped to TestRail project {project_id}.",
+        )
+
+    job_name = os.getenv("JENKINS_MANUAL_JOB", "EasyBDD - Manual Run")
+    params = {
+        "PROJECT_ID": project_choice,
+        "RUN_ID": str(run_id),
+        "RUN_PREFIX": os.getenv("TESTRAIL_RUN_PREFIX", "EASYBDD:"),
+        "FIND_ONLY": "true" if req.find_only else "false",
+    }
+    queue_url = _jenkins_call(_jenkins().trigger_build, job_name, params)
+    build = _jenkins_call(_jenkins().resolve_queue_item, queue_url)
+
+    run_vars = TestRailService.parse_run_vars(run.get("description"))
+    run_vars.jenkins_job = job_name
+    run_vars.jenkins_build_url = build["url"] if build else None
+    run_vars.jenkins_build_number = build["number"] if build else None
+    _tr_call(_tr().update_run, run_id, description=json.dumps(run_vars.to_dict()))
+
+    return {
+        "job": job_name,
+        "queue_url": queue_url,
+        "queued": build is None,
+        "build_url": build["url"] if build else None,
+        "build_number": build["number"] if build else None,
         "run_url": _run_link(run_id),
     }
 

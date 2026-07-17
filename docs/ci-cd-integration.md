@@ -94,6 +94,42 @@ To generate a TestRail API key: **My Settings → API Keys → Add Key**.
 
 ---
 
+## "Run on Jenkins" — manually triggering a run from the test builder
+
+The test builder's Runs view (`frontend/testrail_builder.py` /
+`frontend/static/testrail_builder.html`) has a **▶ Run on Jenkins** button on
+each run's detail page. It calls `POST /api/jenkins/run/{run_id}/trigger`,
+which triggers a Jenkins build with that run's `RUN_ID` so it executes
+immediately instead of waiting for the next cron poll, then saves the
+resulting build URL back onto the TestRail run (in the run description's
+JSON, alongside `cron`/`retry` — see `RunVariables` in
+`easybdd/services/testrail_service.py`) so the link persists across reloads.
+
+This targets a **parameterized** Jenkins job built from `Jenkinsfile.manual`
+(`PROJECT_ID` / `RUN_ID` / `RUN_PREFIX` / `FIND_ONLY` params) — separate from
+the per-project cron-only jobs (`EasyBDD - Audio`, etc.) described above,
+which don't accept a `RUN_ID` and can't target one specific run. One-time
+setup, since Jenkins job creation isn't something the app can do via its
+read-only API access:
+
+1. **Manage Jenkins → New Item**, name it exactly `EasyBDD - Manual Run`
+   (or pick your own name and set `JENKINS_MANUAL_JOB` in `.env` to match),
+   type **Pipeline**.
+2. Under **Pipeline**, set **Definition** to "Pipeline script from SCM", SCM
+   to this repo, and **Script Path** to `Jenkinsfile.manual`.
+3. Save. The job will show the `PROJECT_ID`/`RUN_ID`/`RUN_PREFIX`/`FIND_ONLY`
+   parameters declared in that Jenkinsfile — no further config needed.
+4. In `.env` on the builder host, set `JENKINS_URL`, `JENKINS_USERNAME`, and
+   `JENKINS_API_TOKEN` (see `.env.example`) so `JenkinsService`
+   (`easybdd/services/jenkins_service.py`) can authenticate and trigger it.
+
+The `PROJECT_ID` choice values are matched against a project-id → choice-string
+map hardcoded in `frontend/testrail_builder.py` (`_JENKINS_PROJECT_CHOICES`) —
+if `Jenkinsfile.manual`'s `choices` list changes (new project added/renamed),
+update that dict to match.
+
+---
+
 ## Jenkinsfile.firmware-wattbox
 
 This Jenkinsfile detects changed firmware `.bin` files and creates targeted TestRail runs for each firmware type found.
