@@ -34,7 +34,7 @@ pipeline {
                         echo "[DEBUG] Changing to project directory..."
                         cd /home/jenkins/EasyBDD
                         echo "[DEBUG] Running testrail-run for project 80..."
-                        /home/jenkins/EasyBDD/run-with-display.sh python -m easybdd testrail-run 80 --prefix 'EASYBDD:'
+                        python -m easybdd testrail-run 80 --prefix 'EASYBDD:'
                     '''
                     
                     currentBuild.description = "Test execution completed"
