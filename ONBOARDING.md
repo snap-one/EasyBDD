@@ -195,6 +195,22 @@ a ready-made `Authorization` header from the token-gated
 `/jenkins-mcp-config` endpoint. If Jenkins isn't configured server-side, the
 script says so and skips it.
 
+It also configures a **`jira` MCP server** the same way (a self-hosted
+[mcp-atlassian](https://github.com/sooperset/mcp-atlassian) instance, so
+Claude can look up and update Jira issues) — gated on `JIRA_MCP_URL` /
+`JIRA_USERNAME` / `JIRA_API_TOKEN` in the production `.env` and fetched from
+the token-gated `/jira-mcp-config` endpoint. Note this is separate from
+TestRail: TestRail integration doesn't need a standalone MCP server — it's
+already exposed as tools directly on the `easybdd` server (see
+[docs/mcp-setup.md](docs/mcp-setup.md)).
+
+And a **`confluence` MCP server**, same pattern again but its own endpoint —
+`CONFLUENCE_MCP_URL` / `CONFLUENCE_USERNAME` / `CONFLUENCE_API_TOKEN` in the
+production `.env`, fetched from `/confluence-mcp-config`. It's deliberately a
+separate deployment/entry from `jira` (even though mcp-atlassian can serve
+both from one process) so each can be enabled, disabled, or pointed at a
+different host independently.
+
 Server-side, auth is a shared bearer token in `EASYBDD_MCP_TOKEN` (set in the
 production `.env`, loaded by the systemd unit). If unset, the server runs
 unauthenticated and logs a warning. MCP tools are confined to the project root

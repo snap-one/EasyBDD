@@ -85,6 +85,41 @@ try {
     Warn "Jenkins MCP not enabled on the server - skipping that part."
 }
 
+# --- 2.6 Jira MCP (optional; credentials stay on the server) ------------------
+# Same idea as Jenkins: the server hands out the self-hosted Jira MCP endpoint
+# and a ready-made Authorization header. 404s and is skipped if not configured.
+$JiraUrl = ""
+$JiraAuth = ""
+try {
+    $jiraConf = Invoke-RestMethod -Uri "$($McpUrl -replace '/mcp$','')/jira-mcp-config" `
+        -Headers @{ Authorization = "Bearer $Token" } -TimeoutSec 8 -UseBasicParsing
+    if ($jiraConf.url -and $jiraConf.authorization) {
+        $JiraUrl  = $jiraConf.url
+        $JiraAuth = $jiraConf.authorization
+        Ok "Jira MCP is enabled on the server - will configure it too."
+    }
+} catch {
+    Warn "Jira MCP not enabled on the server - skipping that part."
+}
+
+# --- 2.7 Confluence MCP (optional; credentials stay on the server) -----------
+# Same idea as Jenkins/Jira: the server hands out the self-hosted Confluence
+# MCP endpoint and a ready-made Authorization header. 404s and is skipped if
+# not configured.
+$ConfluenceUrl = ""
+$ConfluenceAuth = ""
+try {
+    $confConf = Invoke-RestMethod -Uri "$($McpUrl -replace '/mcp$','')/confluence-mcp-config" `
+        -Headers @{ Authorization = "Bearer $Token" } -TimeoutSec 8 -UseBasicParsing
+    if ($confConf.url -and $confConf.authorization) {
+        $ConfluenceUrl  = $confConf.url
+        $ConfluenceAuth = $confConf.authorization
+        Ok "Confluence MCP is enabled on the server - will configure it too."
+    }
+} catch {
+    Warn "Confluence MCP not enabled on the server - skipping that part."
+}
+
 # --- 3. Claude Code (CLI / IDE) ----------------------------------------------
 if (Get-Command claude -ErrorAction SilentlyContinue) {
     try {
@@ -106,6 +141,28 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
             Ok "Claude Code: jenkins MCP configured."
         } catch {
             Warn "Could not add the jenkins MCP server to Claude Code."
+        }
+    }
+    if ($JiraUrl) {
+        try {
+            claude mcp remove --scope user jira 2>$null | Out-Null
+        } catch {}
+        try {
+            claude mcp add --scope user --transport http jira $JiraUrl --header "Authorization: $JiraAuth" | Out-Null
+            Ok "Claude Code: jira MCP configured."
+        } catch {
+            Warn "Could not add the jira MCP server to Claude Code."
+        }
+    }
+    if ($ConfluenceUrl) {
+        try {
+            claude mcp remove --scope user confluence 2>$null | Out-Null
+        } catch {}
+        try {
+            claude mcp add --scope user --transport http confluence $ConfluenceUrl --header "Authorization: $ConfluenceAuth" | Out-Null
+            Ok "Claude Code: confluence MCP configured."
+        } catch {
+            Warn "Could not add the confluence MCP server to Claude Code."
         }
     }
 }
@@ -173,6 +230,34 @@ if ($JenkinsUrl) {
         $cfg.mcpServers.jenkins = $jenkinsEntry
     } else {
         $cfg.mcpServers | Add-Member -NotePropertyName jenkins -NotePropertyValue $jenkinsEntry
+    }
+}
+
+if ($JiraUrl) {
+    $jiraEntry = [pscustomobject]@{
+        command = "npx"
+        args    = @("-y", "mcp-remote", $JiraUrl, "--allow-http", "--transport", "http-only",
+                    "--header", 'Authorization:${JIRA_AUTH}')
+        env     = [pscustomobject]@{ JIRA_AUTH = $JiraAuth }
+    }
+    if ($cfg.mcpServers.PSObject.Properties["jira"]) {
+        $cfg.mcpServers.jira = $jiraEntry
+    } else {
+        $cfg.mcpServers | Add-Member -NotePropertyName jira -NotePropertyValue $jiraEntry
+    }
+}
+
+if ($ConfluenceUrl) {
+    $confluenceEntry = [pscustomobject]@{
+        command = "npx"
+        args    = @("-y", "mcp-remote", $ConfluenceUrl, "--allow-http", "--transport", "http-only",
+                    "--header", 'Authorization:${CONFLUENCE_AUTH}')
+        env     = [pscustomobject]@{ CONFLUENCE_AUTH = $ConfluenceAuth }
+    }
+    if ($cfg.mcpServers.PSObject.Properties["confluence"]) {
+        $cfg.mcpServers.confluence = $confluenceEntry
+    } else {
+        $cfg.mcpServers | Add-Member -NotePropertyName confluence -NotePropertyValue $confluenceEntry
     }
 }
 

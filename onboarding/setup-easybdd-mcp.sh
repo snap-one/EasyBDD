@@ -79,6 +79,45 @@ else
   warn "Jenkins MCP not enabled on the server — skipping that part."
 fi
 
+# --- 2.6 Jira MCP (optional; credentials stay on the server) ------------------
+# Same idea as Jenkins: the server hands out the self-hosted Jira MCP endpoint
+# and a ready-made Authorization header. 404s and is skipped if not configured.
+JIRA_MCP_URL=""
+JIRA_MCP_AUTH=""
+JIRACONF=$(curl -s -m 8 "${MCP_URL%/mcp}/jira-mcp-config" -H "Authorization: Bearer $TOKEN" || true)
+case "$JIRACONF" in
+  *'"url"'*)
+    JIRA_MCP_URL=$(printf '%s' "$JIRACONF" | sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    JIRA_MCP_AUTH=$(printf '%s' "$JIRACONF" | sed -n 's/.*"authorization"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    ;;
+esac
+if [ -n "$JIRA_MCP_URL" ] && [ -n "$JIRA_MCP_AUTH" ]; then
+  ok "Jira MCP is enabled on the server — will configure it too."
+else
+  JIRA_MCP_URL=""; JIRA_MCP_AUTH=""
+  warn "Jira MCP not enabled on the server — skipping that part."
+fi
+
+# --- 2.7 Confluence MCP (optional; credentials stay on the server) -----------
+# Same idea as Jenkins/Jira: the server hands out the self-hosted Confluence
+# MCP endpoint and a ready-made Authorization header. 404s and is skipped if
+# not configured.
+CONFLUENCE_MCP_URL=""
+CONFLUENCE_MCP_AUTH=""
+CONFCONF=$(curl -s -m 8 "${MCP_URL%/mcp}/confluence-mcp-config" -H "Authorization: Bearer $TOKEN" || true)
+case "$CONFCONF" in
+  *'"url"'*)
+    CONFLUENCE_MCP_URL=$(printf '%s' "$CONFCONF" | sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    CONFLUENCE_MCP_AUTH=$(printf '%s' "$CONFCONF" | sed -n 's/.*"authorization"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    ;;
+esac
+if [ -n "$CONFLUENCE_MCP_URL" ] && [ -n "$CONFLUENCE_MCP_AUTH" ]; then
+  ok "Confluence MCP is enabled on the server — will configure it too."
+else
+  CONFLUENCE_MCP_URL=""; CONFLUENCE_MCP_AUTH=""
+  warn "Confluence MCP not enabled on the server — skipping that part."
+fi
+
 # --- 3. Claude Code (CLI / IDE) ----------------------------------------------
 if command -v claude >/dev/null 2>&1; then
   claude mcp remove --scope user easybdd >/dev/null 2>&1 || true
@@ -96,6 +135,24 @@ if command -v claude >/dev/null 2>&1; then
       ok "Claude Code: jenkins MCP configured."
     else
       warn "Could not add the jenkins MCP server to Claude Code."
+    fi
+  fi
+  if [ -n "$JIRA_MCP_URL" ]; then
+    claude mcp remove --scope user jira >/dev/null 2>&1 || true
+    if claude mcp add --scope user --transport http jira "$JIRA_MCP_URL" \
+         --header "Authorization: $JIRA_MCP_AUTH" >/dev/null 2>&1; then
+      ok "Claude Code: jira MCP configured."
+    else
+      warn "Could not add the jira MCP server to Claude Code."
+    fi
+  fi
+  if [ -n "$CONFLUENCE_MCP_URL" ]; then
+    claude mcp remove --scope user confluence >/dev/null 2>&1 || true
+    if claude mcp add --scope user --transport http confluence "$CONFLUENCE_MCP_URL" \
+         --header "Authorization: $CONFLUENCE_MCP_AUTH" >/dev/null 2>&1; then
+      ok "Claude Code: confluence MCP configured."
+    else
+      warn "Could not add the confluence MCP server to Claude Code."
     fi
   fi
 fi
@@ -151,9 +208,9 @@ else
     ok "Backed up existing Claude Desktop config."
   fi
 
-  node - "$CONFIG" "$MCP_URL" "$TOKEN" "$JENKINS_MCP_URL" "$JENKINS_MCP_AUTH" <<'EOF'
+  node - "$CONFIG" "$MCP_URL" "$TOKEN" "$JENKINS_MCP_URL" "$JENKINS_MCP_AUTH" "$JIRA_MCP_URL" "$JIRA_MCP_AUTH" "$CONFLUENCE_MCP_URL" "$CONFLUENCE_MCP_AUTH" <<'EOF'
 const fs = require("fs");
-const [config, url, token, jenkinsUrl, jenkinsAuth] = process.argv.slice(2);
+const [config, url, token, jenkinsUrl, jenkinsAuth, jiraUrl, jiraAuth, confluenceUrl, confluenceAuth] = process.argv.slice(2);
 let cfg = {};
 try { cfg = JSON.parse(fs.readFileSync(config, "utf8")); } catch (e) {}
 if (typeof cfg !== "object" || cfg === null || Array.isArray(cfg)) cfg = {};
@@ -172,6 +229,22 @@ if (jenkinsUrl && jenkinsAuth) {
     args: ["-y", "mcp-remote", jenkinsUrl, "--allow-http", "--transport", "http-only",
            "--header", "Authorization:${JENKINS_AUTH}"],
     env: { JENKINS_AUTH: jenkinsAuth },
+  };
+}
+if (jiraUrl && jiraAuth) {
+  cfg.mcpServers.jira = {
+    command: "npx",
+    args: ["-y", "mcp-remote", jiraUrl, "--allow-http", "--transport", "http-only",
+           "--header", "Authorization:${JIRA_AUTH}"],
+    env: { JIRA_AUTH: jiraAuth },
+  };
+}
+if (confluenceUrl && confluenceAuth) {
+  cfg.mcpServers.confluence = {
+    command: "npx",
+    args: ["-y", "mcp-remote", confluenceUrl, "--allow-http", "--transport", "http-only",
+           "--header", "Authorization:${CONFLUENCE_AUTH}"],
+    env: { CONFLUENCE_AUTH: confluenceAuth },
   };
 }
 fs.writeFileSync(config, JSON.stringify(cfg, null, 2) + "\n");
