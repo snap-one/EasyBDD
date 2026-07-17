@@ -36,8 +36,6 @@ pipeline {
                         echo "[DEBUG] Running testrail-run for project 76..."
                         xvfb-run --auto-servernum --server-args='-screen 0 1280x1024x24' python -m easybdd testrail-run 76 --prefix 'EASYBDD:'
                     '''
-                    
-                    currentBuild.description = "Test execution completed"
                 }
             }
         }
