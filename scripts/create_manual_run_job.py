@@ -106,20 +106,24 @@ def main() -> int:
         return urllib.request.urlopen(r, timeout=30)
 
     job_url = f"{url}/job/{quote(job, safe='')}"
+    exists = True
     try:
         req(job_url + "/api/json")
-        print(f"Job '{job}' already exists — nothing to do.")
-        return 0
     except urllib.error.HTTPError as e:
         if e.code != 404:
             raise
+        exists = False
 
-    # Copy the SCM block from the deploy job so repo URL/credentials match.
+    # Copy the SCM block from the deploy job so repo URL/credentials match —
+    # but pin the branch to */main: the deploy job's '**' spec breaks
+    # Jenkinsfile.manual's lightweight checkout ("Invalid refspec refs/heads/**").
     src = ET.fromstring(req(f"{url}/job/EasyBDD/config.xml").read().decode())
     scm = src.find("definition/scm")
     if scm is None:
         print("Could not find <scm> in the EasyBDD job config.", file=sys.stderr)
         return 1
+    for branch_name in scm.findall("branches/hudson.plugins.git.BranchSpec/name"):
+        branch_name.text = "*/main"
     scm_xml = ET.tostring(scm, encoding="unicode")
 
     config = CONFIG_TEMPLATE.format(
@@ -130,25 +134,44 @@ def main() -> int:
     crumb = json.loads(req(f"{url}/crumbIssuer/api/json").read().decode())
     crumb_hdr = {crumb["crumbRequestField"]: crumb["crumb"]}
 
-    req(
-        f"{url}/createItem?name=" + quote(job),
-        data=config.encode(),
-        headers={"Content-Type": "application/xml", **crumb_hdr},
-        method="POST",
-    )
-    print(f"Created job '{job}'.")
+    if exists:
+        req(
+            job_url + "/config.xml",
+            data=config.encode(),
+            headers={"Content-Type": "application/xml", **crumb_hdr},
+            method="POST",
+        )
+        print(f"Updated config of existing job '{job}'.")
+    else:
+        req(
+            f"{url}/createItem?name=" + quote(job),
+            data=config.encode(),
+            headers={"Content-Type": "application/xml", **crumb_hdr},
+            method="POST",
+        )
+        print(f"Created job '{job}'.")
 
-    resp = req(
-        job_url
-        + "/buildWithParameters?PROJECT_ID="
-        + quote(PROJECT_CHOICES[0])
-        + "&FIND_ONLY=true&RUN_PREFIX="
-        + quote("EASYBDD:"),
-        data=b"",
-        headers=crumb_hdr,
-        method="POST",
-    )
-    print("Smoke build queued:", resp.headers.get("Location", "(no queue url)"))
+    # Queue a FIND_ONLY smoke build on creation, or while the job has never
+    # had a successful build (keeps re-verifying after config fixes, stays
+    # quiet on ordinary deploys once it has gone green).
+    smoke = not exists
+    if exists:
+        info = json.loads(req(job_url + "/api/json?tree=lastSuccessfulBuild[number]").read().decode())
+        smoke = info.get("lastSuccessfulBuild") is None
+    if smoke:
+        resp = req(
+            job_url
+            + "/buildWithParameters?PROJECT_ID="
+            + quote(PROJECT_CHOICES[0])
+            + "&FIND_ONLY=true&RUN_PREFIX="
+            + quote("EASYBDD:"),
+            data=b"",
+            headers=crumb_hdr,
+            method="POST",
+        )
+        print("Smoke build queued:", resp.headers.get("Location", "(no queue url)"))
+    else:
+        print("Job already has a successful build — no smoke build needed.")
     return 0
 
 
