@@ -31,8 +31,8 @@ pipeline {
                         set -a && . /home/jenkins/EasyBDD/.env && set +a
                         echo "[DEBUG] Activating venv..."
                         . /home/jenkins/EasyBDD/env/bin/activate
-                        echo "[DEBUG] Changing to project directory..."
-                        cd /home/jenkins/EasyBDD
+                        echo "[DEBUG] Changing to per-build workspace: $WORKSPACE"
+                        cd "$WORKSPACE"
                         echo "[DEBUG] Running testrail-run for project 77..."
                         /home/jenkins/EasyBDD/run-with-display.sh python -m easybdd testrail-run 77 --prefix 'EASYBDD:'
                     '''
