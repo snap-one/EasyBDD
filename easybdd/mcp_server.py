@@ -2326,6 +2326,47 @@ async def route_setup_ps1(request):
     return _onboarding_script("setup-easybdd-mcp.ps1")
 
 
+@mcp.custom_route("/jenkins-mcp-config", methods=["GET"])
+async def route_jenkins_mcp_config(request):
+    """Client config for the Jenkins MCP plugin — gated by the bearer token.
+
+    Returns the Jenkins MCP endpoint plus a ready-made Basic Authorization
+    header so the onboarding scripts can add a "jenkins" MCP server to
+    engineers' Claude clients without anyone handling the Jenkins API token
+    directly. The credentials live only in the production .env
+    (JENKINS_URL / JENKINS_USERNAME / JENKINS_API_TOKEN — the same variables
+    JenkinsService uses). 404s when they are not configured, which the
+    setup scripts treat as "skip quietly".
+
+    Not in _PUBLIC_PATHS on purpose: without EASYBDD_MCP_TOKEN set this
+    would hand Jenkins credentials to anyone who can reach the port (the
+    server already logs a loud warning when running unauthenticated).
+    """
+    import base64
+
+    from starlette.responses import JSONResponse
+
+    jenkins_url = os.environ.get("JENKINS_URL", "").strip().rstrip("/")
+    username = os.environ.get("JENKINS_USERNAME", "").strip()
+    api_token = os.environ.get("JENKINS_API_TOKEN", "").strip()
+    if not (jenkins_url and username and api_token):
+        return JSONResponse(
+            {
+                "error": "not_configured",
+                "detail": "JENKINS_URL, JENKINS_USERNAME and JENKINS_API_TOKEN "
+                          "are not all set in the server .env.",
+            },
+            status_code=404,
+        )
+    basic = base64.b64encode(f"{username}:{api_token}".encode()).decode()
+    return JSONResponse(
+        {
+            "url": f"{jenkins_url}/mcp-server/mcp",
+            "authorization": f"Basic {basic}",
+        }
+    )
+
+
 @mcp.custom_route("/onboard", methods=["GET"])
 async def route_onboard(request):
     from starlette.responses import HTMLResponse

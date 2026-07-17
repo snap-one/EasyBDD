@@ -186,6 +186,15 @@ Node.js if needed) and/or Claude Code, backing up any existing config. Then full
 quit and reopen Claude Desktop and ask: *"Using the easybdd tools, list the
 available tests."* Script sources live in [onboarding/](onboarding/).
 
+The same setup also configures a **`jenkins` MCP server** (the Jenkins MCP
+plugin at `http://192.168.100.100:8080/mcp-server/mcp`, so Claude can inspect
+and manage Jenkins jobs) — but only when the production server has
+`JENKINS_URL` / `JENKINS_USERNAME` / `JENKINS_API_TOKEN` set in its `.env`.
+Engineers never handle the Jenkins API token by hand: the setup script fetches
+a ready-made `Authorization` header from the token-gated
+`/jenkins-mcp-config` endpoint. If Jenkins isn't configured server-side, the
+script says so and skips it.
+
 Server-side, auth is a shared bearer token in `EASYBDD_MCP_TOKEN` (set in the
 production `.env`, loaded by the systemd unit). If unset, the server runs
 unauthenticated and logs a warning. MCP tools are confined to the project root

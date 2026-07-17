@@ -67,6 +67,24 @@ if (-not $tokenOk) {
 }
 Ok "Access token accepted."
 
+# --- 2.5 Jenkins MCP (optional; credentials stay on the server) ----------------
+# The server hands out the Jenkins MCP endpoint and a ready-made Authorization
+# header (gated by the same access token). If Jenkins isn't configured
+# server-side, this 404s and we simply skip it.
+$JenkinsUrl = ""
+$JenkinsAuth = ""
+try {
+    $jconf = Invoke-RestMethod -Uri "$($McpUrl -replace '/mcp$','')/jenkins-mcp-config" `
+        -Headers @{ Authorization = "Bearer $Token" } -TimeoutSec 8 -UseBasicParsing
+    if ($jconf.url -and $jconf.authorization) {
+        $JenkinsUrl  = $jconf.url
+        $JenkinsAuth = $jconf.authorization
+        Ok "Jenkins MCP is enabled on the server - will configure it too."
+    }
+} catch {
+    Warn "Jenkins MCP not enabled on the server - skipping that part."
+}
+
 # --- 3. Claude Code (CLI / IDE) ----------------------------------------------
 if (Get-Command claude -ErrorAction SilentlyContinue) {
     try {
@@ -78,6 +96,17 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
         $Configured += "Claude Code"
     } catch {
         Warn "Claude Code is installed but 'claude mcp add' failed - configure it manually later."
+    }
+    if ($JenkinsUrl) {
+        try {
+            claude mcp remove --scope user jenkins 2>$null | Out-Null
+        } catch {}
+        try {
+            claude mcp add --scope user --transport http jenkins $JenkinsUrl --header "Authorization: $JenkinsAuth" | Out-Null
+            Ok "Claude Code: jenkins MCP configured."
+        } catch {
+            Warn "Could not add the jenkins MCP server to Claude Code."
+        }
     }
 }
 
@@ -131,6 +160,20 @@ if ($cfg.mcpServers.PSObject.Properties["easybdd"]) {
     $cfg.mcpServers.easybdd = $serverEntry
 } else {
     $cfg.mcpServers | Add-Member -NotePropertyName easybdd -NotePropertyValue $serverEntry
+}
+
+if ($JenkinsUrl) {
+    $jenkinsEntry = [pscustomobject]@{
+        command = "npx"
+        args    = @("-y", "mcp-remote", $JenkinsUrl, "--allow-http", "--transport", "http-only",
+                    "--header", 'Authorization:${JENKINS_AUTH}')
+        env     = [pscustomobject]@{ JENKINS_AUTH = $JenkinsAuth }
+    }
+    if ($cfg.mcpServers.PSObject.Properties["jenkins"]) {
+        $cfg.mcpServers.jenkins = $jenkinsEntry
+    } else {
+        $cfg.mcpServers | Add-Member -NotePropertyName jenkins -NotePropertyValue $jenkinsEntry
+    }
 }
 
 $cfg | ConvertTo-Json -Depth 20 | Set-Content -Path $ConfigPath -Encoding UTF8

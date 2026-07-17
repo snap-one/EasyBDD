@@ -59,6 +59,26 @@ if [ "$STATUS" = "401" ]; then
 fi
 ok "Access token accepted."
 
+# --- 2.5 Jenkins MCP (optional; credentials stay on the server) ----------------
+# The server hands out the Jenkins MCP endpoint and a ready-made Authorization
+# header (gated by the same access token). If Jenkins isn't configured
+# server-side, this 404s and we simply skip it.
+JENKINS_MCP_URL=""
+JENKINS_MCP_AUTH=""
+JCONF=$(curl -s -m 8 "${MCP_URL%/mcp}/jenkins-mcp-config" -H "Authorization: Bearer $TOKEN" || true)
+case "$JCONF" in
+  *'"url"'*)
+    JENKINS_MCP_URL=$(printf '%s' "$JCONF" | sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    JENKINS_MCP_AUTH=$(printf '%s' "$JCONF" | sed -n 's/.*"authorization"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    ;;
+esac
+if [ -n "$JENKINS_MCP_URL" ] && [ -n "$JENKINS_MCP_AUTH" ]; then
+  ok "Jenkins MCP is enabled on the server — will configure it too."
+else
+  JENKINS_MCP_URL=""; JENKINS_MCP_AUTH=""
+  warn "Jenkins MCP not enabled on the server — skipping that part."
+fi
+
 # --- 3. Claude Code (CLI / IDE) ----------------------------------------------
 if command -v claude >/dev/null 2>&1; then
   claude mcp remove --scope user easybdd >/dev/null 2>&1 || true
@@ -68,6 +88,15 @@ if command -v claude >/dev/null 2>&1; then
     CONFIGURED="Claude Code"
   else
     warn "Claude Code is installed but 'claude mcp add' failed — configure it manually later."
+  fi
+  if [ -n "$JENKINS_MCP_URL" ]; then
+    claude mcp remove --scope user jenkins >/dev/null 2>&1 || true
+    if claude mcp add --scope user --transport http jenkins "$JENKINS_MCP_URL" \
+         --header "Authorization: $JENKINS_MCP_AUTH" >/dev/null 2>&1; then
+      ok "Claude Code: jenkins MCP configured."
+    else
+      warn "Could not add the jenkins MCP server to Claude Code."
+    fi
   fi
 fi
 
@@ -122,9 +151,9 @@ else
     ok "Backed up existing Claude Desktop config."
   fi
 
-  node - "$CONFIG" "$MCP_URL" "$TOKEN" <<'EOF'
+  node - "$CONFIG" "$MCP_URL" "$TOKEN" "$JENKINS_MCP_URL" "$JENKINS_MCP_AUTH" <<'EOF'
 const fs = require("fs");
-const [config, url, token] = process.argv.slice(2);
+const [config, url, token, jenkinsUrl, jenkinsAuth] = process.argv.slice(2);
 let cfg = {};
 try { cfg = JSON.parse(fs.readFileSync(config, "utf8")); } catch (e) {}
 if (typeof cfg !== "object" || cfg === null || Array.isArray(cfg)) cfg = {};
@@ -137,6 +166,14 @@ cfg.mcpServers.easybdd = {
          "--header", "Authorization:${EASYBDD_AUTH}"],
   env: { EASYBDD_AUTH: "Bearer " + token },
 };
+if (jenkinsUrl && jenkinsAuth) {
+  cfg.mcpServers.jenkins = {
+    command: "npx",
+    args: ["-y", "mcp-remote", jenkinsUrl, "--allow-http", "--transport", "http-only",
+           "--header", "Authorization:${JENKINS_AUTH}"],
+    env: { JENKINS_AUTH: jenkinsAuth },
+  };
+}
 fs.writeFileSync(config, JSON.stringify(cfg, null, 2) + "\n");
 EOF
   ok "Claude Desktop configured: $CONFIG"
