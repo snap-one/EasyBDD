@@ -155,7 +155,7 @@ pipeline {
                     echo "Builder is UP on :8091"
 
                     echo "=== Other systemd references to the old path? ==="
-                    REFS=$(grep -rl "workspace/EASYBDD" /etc/systemd/system 2>/dev/null || true)
+                    REFS=$(grep -rl --exclude='*.pre-decommission' "workspace/EASYBDD" /etc/systemd/system 2>/dev/null || true)
                     if [ -n "$REFS" ]; then
                         echo "Old path still referenced by: $REFS — NOT archiving"
                         exit 1
