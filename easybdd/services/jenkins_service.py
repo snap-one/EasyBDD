@@ -83,6 +83,20 @@ class JenkinsService:
             )
         return queue_url.rstrip("/") + "/"
 
+    def set_build_description(self, build_url: str, description: str) -> None:
+        """Set the description field on a specific build (not a job).
+
+        build_url must be a full build URL (e.g. Jenkins' $BUILD_URL env var),
+        not a job URL.
+        """
+        headers = self._crumb_headers()
+        resp = self._session.post(
+            f"{build_url.rstrip('/')}/submitDescription",
+            data={"description": description},
+            headers=headers,
+        )
+        self._raise_for_status(resp)
+
     def resolve_queue_item(
         self, queue_url: str, timeout: float = 15.0, interval: float = 1.0
     ) -> Optional[Dict[str, Any]]:

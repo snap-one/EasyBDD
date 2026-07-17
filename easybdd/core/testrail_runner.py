@@ -513,13 +513,31 @@ class TestRailRunner:
 
         run_id = run["id"]
         run_vars = TestRailService.parse_run_vars(run.get("description"))
+        testrail_base = os.getenv("TESTRAIL_URL", "").rstrip("/")
+        run_url = f"{testrail_base}/index.php?/runs/view/{run_id}" if testrail_base else ""
 
         if verbose:
             print(f"\n[TestRail] Run [{run_id}] {run['name']}")
+            if run_url:
+                print(f"[TestRail] {run_url}")
             if run_vars.cron:
                 print(f"[TestRail] Cron schedule: {run_vars.cron}")
             if run_vars.retry:
                 print(f"[TestRail] Retries configured: {run_vars.retry}")
+
+        # Surface the run in the Jenkins build description so it's visible
+        # from the job list, not just buried in the console log. Best-effort:
+        # a build triggered outside Jenkins (or missing Jenkins creds) just
+        # skips this silently.
+        build_url = os.getenv("BUILD_URL", "")
+        if build_url and run_url:
+            try:
+                from ..services.jenkins_service import JenkinsService
+                JenkinsService().set_build_description(
+                    build_url, f"{run['name']}\n{run_url}"
+                )
+            except Exception:
+                pass
 
         # Phase 2: Get tests
         tests = self._tr.get_tests(run_id)
