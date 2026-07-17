@@ -128,12 +128,13 @@ The builder also runs persistently on the main Jenkins server
 just open **<jenkins_url>:8091**.
 
 - Service unit: `/etc/systemd/system/easybdd-testrail-builder.service`
-- Runs from `/var/lib/jenkins/workspace/EASYBDD/frontend`, as the `jenkins`
-  user
-- Loads TestRail credentials from `/var/lib/jenkins/workspace/EASYBDD/.env`
+- Runs from `/home/jenkins/EasyBDD/frontend`, as the `jenkins` user
+- Loads TestRail credentials from `/home/jenkins/EasyBDD/.env`
 - Enabled at boot (`systemctl enable`) and auto-restarts on failure
 
-To pick up new code after a `git pull` in that checkout:
+New code is picked up automatically: pushing to `main` triggers the
+`EasyBDD` Jenkins deploy job, which pulls into `/home/jenkins/EasyBDD` and
+restarts the service. To restart manually:
 
 ```bash
 sudo systemctl restart easybdd-testrail-builder

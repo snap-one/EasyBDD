@@ -15,11 +15,14 @@ cases directly into TestRail via `TestRailService`. Do not confuse it with
 deprecated app with only copy-paste YAML export and no real TestRail push.
 
 - Runs persistently on `192.168.100.100` as systemd unit
-  `easybdd-testrail-builder.service`, from
-  `/var/lib/jenkins/workspace/EASYBDD/frontend`, enabled at boot,
-  auto-restarts on failure. Reachable at `http://192.168.100.100:8091`.
-- After pulling new code into that checkout, run
-  `sudo systemctl restart easybdd-testrail-builder` to pick it up.
+  `easybdd-testrail-builder.service`, from `/home/jenkins/EasyBDD/frontend`,
+  enabled at boot, auto-restarts on failure. Reachable at
+  `http://192.168.100.100:8091`.
+- Deploy = push to main: the `EasyBDD` Jenkins job pulls into
+  `/home/jenkins/EasyBDD` and restarts the service automatically. The old
+  `/var/lib/jenkins/workspace/EASYBDD` checkout was decommissioned in July
+  2026 (archived as `EASYBDD.decommissioned-*`) — do not reference or
+  recreate it.
 - See `ONBOARDING.md` "Production instance" section for more detail.
 
 ## Floci (local S3 emulator)
