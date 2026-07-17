@@ -2372,6 +2372,27 @@ async def route_onboard(request):
     from starlette.responses import HTMLResponse
 
     base = f"http://{request.url.hostname}:{request.url.port or 80}"
+    jenkins_enabled = all(
+        os.environ.get(v, "").strip()
+        for v in ("JENKINS_URL", "JENKINS_USERNAME", "JENKINS_API_TOKEN")
+    )
+    jenkins_note = (
+        """<li><code>jenkins</code> &mdash; control the Jenkins CI server (inspect jobs,
+        trigger builds, read consoles). Currently <strong>enabled</strong>; the same
+        commands below set it up automatically &mdash; no extra steps, no Jenkins
+        credentials to handle.</li>"""
+        if jenkins_enabled
+        else """<li><code>jenkins</code> &mdash; control the Jenkins CI server. Currently
+        <strong>not enabled</strong> on this server (an admin must set
+        <code>JENKINS_URL</code> / <code>JENKINS_USERNAME</code> /
+        <code>JENKINS_API_TOKEN</code> in the production <code>.env</code>); the setup
+        commands below will skip it until then.</li>"""
+    )
+    jenkins_try = (
+        """<li>Try: <em>"Using the jenkins tools, list the Jenkins jobs."</em></li>"""
+        if jenkins_enabled
+        else ""
+    )
     return HTMLResponse(textwrap.dedent(f"""\
         <!doctype html>
         <html><head><meta charset="utf-8"><title>Easy BDD MCP setup</title>
@@ -2387,6 +2408,13 @@ async def route_onboard(request):
         <strong>access token</strong> (ask Mark Fomin). No other tools, no repository
         checkout, no coding.</p>
 
+        <h2>What gets set up</h2>
+        <ul>
+          <li><code>easybdd</code> &mdash; run and fix tests, browse TestRail runs, and
+          drive the Easy BDD framework from Claude.</li>
+          {jenkins_note}
+        </ul>
+
         <h2>Windows</h2>
         <p>Open <strong>PowerShell</strong> (Start menu &rarr; type "PowerShell") and paste
         (replace <code>PASTE-TOKEN-HERE</code> with the token):</p>
@@ -2401,8 +2429,9 @@ async def route_onboard(request):
         <h2>Then</h2>
         <ol>
           <li>Fully quit Claude Desktop (system tray / menu bar &rarr; Quit) and reopen it.</li>
-          <li>In a new chat, click the tools (sliders) icon under the message box &mdash; you should see <code>easybdd</code>.</li>
+          <li>In a new chat, click the tools (sliders) icon under the message box &mdash; you should see <code>easybdd</code>{" and <code>jenkins</code>" if jenkins_enabled else ""}.</li>
           <li>Try: <em>"Using the easybdd tools, list the available tests."</em></li>
+          {jenkins_try}
         </ol>
 
         <p>Problems? Contact Mark Fomin.</p>
