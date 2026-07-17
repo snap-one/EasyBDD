@@ -927,6 +927,7 @@ class TestRunner:
             total_steps = len(test.steps)
 
             for i, step in enumerate(test.steps, 1):
+                step_description = self._get_step_description(step)
                 display_step_params = self._resolve_step_params(step, test.variables or {})
                 step_params = display_step_params.get("parameters", {}) if isinstance(display_step_params, dict) else {}
                 prev_response = (test.variables or {}).get("last_response")
@@ -1025,11 +1026,12 @@ class TestRunner:
                                 pass
                 except Exception as e:
                     import traceback
+                    tb_str = traceback.format_exc()
                     self._run_logger.step_fail(
                         i, step.action,
                         error=str(e),
-                        details=self._get_step_description(step),
-                        traceback_str=traceback.format_exc(),
+                        details=step_description,
+                        traceback_str=tb_str,
                     )
 
                     # Add failed step to step_logs
@@ -1043,7 +1045,7 @@ class TestRunner:
                         "step_action": step.action,
                         "step_details": step_description,
                         "error": str(e),
-                        "traceback": traceback_str,
+                        "traceback": tb_str,
                     }
                     failure_screenshot = self._capture_failure_screenshot(
                         services.get("browser"), test.name, i
@@ -4782,6 +4784,11 @@ class TestRunner:
         try:
             # Control-flow constructs — handled before variable substitution
             action_tag = getattr(step, "action", "")
+            # Bind 'action' up front so the except block below can always
+            # report it, even when an exception is raised on one of the
+            # early-return paths (control-flow/conditional) before the
+            # generic-action assignment further down reassigns it.
+            action = action_tag
             if action_tag == "for_loop":
                 return self._execute_for_loop(step, variables, soft_assert_manager, step_number)
             if action_tag == "while_loop":
