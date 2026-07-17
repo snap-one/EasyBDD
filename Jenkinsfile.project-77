@@ -34,7 +34,7 @@ pipeline {
                         echo "[DEBUG] Changing to per-build workspace: $WORKSPACE"
                         cd "$WORKSPACE"
                         echo "[DEBUG] Running testrail-run for project 77..."
-                        python -m easybdd testrail-run 77 --prefix 'EASYBDD:'
+                        xvfb-run --auto-servernum --server-args='-screen 0 1280x1024x24' python -m easybdd testrail-run 77 --prefix 'EASYBDD:'
                     '''
                     
                     currentBuild.description = "Test execution completed"
