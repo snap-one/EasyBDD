@@ -124,12 +124,22 @@ def _workspace_dir(project_id: str) -> Path:
     return TESTS_DIR / project_id
 
 
+def _assert_safe_section_path(section_id: str) -> List[str]:
+    """Validate a '/'-joined nested section path, one segment at a time."""
+    parts = [p for p in section_id.split("/") if p]
+    if not parts:
+        raise HTTPException(status_code=400, detail="Invalid section_id")
+    for p in parts:
+        _assert_safe_name(p, "section_id segment")
+    return parts
+
+
 def _section_dir(project_id: str, section_id: Optional[str]) -> Path:
     base = _workspace_dir(project_id)
     if not section_id:
         return base
-    _assert_safe_name(section_id, "section_id")
-    return base / section_id
+    parts = _assert_safe_section_path(section_id)
+    return base.joinpath(*parts)
 
 
 def _case_file_id(path: Path) -> str:
@@ -383,18 +393,26 @@ async def create_project(name: str = Query(...)):
     return {"id": slug, "name": slug}
 
 
+def _recursive_case_count(base: Path) -> int:
+    if not base.exists():
+        return 0
+    count = sum(1 for _ in _iter_case_files(base))
+    for d in base.iterdir():
+        if d.is_dir() and not d.name.startswith("."):
+            count += _recursive_case_count(d)
+    return count
+
+
 @app.get("/api/local/projects/{project_id}/stats")
 async def project_stats(project_id: str):
     base = _workspace_dir(project_id)
     if not base.exists():
         raise HTTPException(status_code=404, detail=f"Workspace '{project_id}' not found")
-    case_count = sum(1 for _ in _iter_case_files(base)) + sum(
-        1 for d in base.iterdir() if d.is_dir() for _ in _iter_case_files(d)
-    )
-    section_count = sum(1 for d in base.iterdir() if d.is_dir() and not d.name.startswith("."))
+    sections: List[Dict[str, Any]] = []
+    _walk_sections(base, [], sections)
     return {
-        "case_count": case_count,
-        "section_count": section_count,
+        "case_count": _recursive_case_count(base),
+        "section_count": len(sections),
         "has_shared_steps": (base / "shared_steps.yaml").exists(),
         "has_vars": (base / "vars.yaml").exists(),
     }
@@ -427,33 +445,49 @@ async def delete_project(project_id: str):
     return {"id": project_id, "status": "deleted"}
 
 
+def _walk_sections(base: Path, prefix: List[str], out: List[Dict[str, Any]]) -> None:
+    """Recursively list every nested section under `base`, appending
+    {id, name, parent_id, depth} for each — arbitrary depth, matching the
+    frontend's existing generic parent_id/depth tree renderer."""
+    if not base.exists():
+        return
+    for d in sorted(base.iterdir()):
+        if not d.is_dir() or d.name.startswith("."):
+            continue
+        parts = prefix + [d.name]
+        out.append({
+            "id": "/".join(parts),
+            "name": d.name,
+            "parent_id": "/".join(prefix) if prefix else None,
+            "depth": len(prefix),
+        })
+        _walk_sections(d, parts, out)
+
+
 @app.get("/api/local/sections")
 async def list_sections(project_id: str = Query(...)):
-    base = _workspace_dir(project_id)
-    if not base.exists():
-        return []
-    return [
-        {"id": d.name, "name": d.name, "parent_id": None, "depth": 0}
-        for d in sorted(base.iterdir())
-        if d.is_dir() and not d.name.startswith(".")
-    ]
+    out: List[Dict[str, Any]] = []
+    _walk_sections(_workspace_dir(project_id), [], out)
+    return out
 
 
 class LocalSectionRequest(BaseModel):
     project_id: str
     name: str
+    parent_id: Optional[str] = None  # nest under this existing section, or top-level if omitted
 
 
 @app.post("/api/local/section")
 async def create_section(req: LocalSectionRequest):
-    base = _workspace_dir(req.project_id)
+    base = _section_dir(req.project_id, req.parent_id) if req.parent_id else _workspace_dir(req.project_id)
     base.mkdir(parents=True, exist_ok=True)
     slug = _slug(req.name)
     path = base / slug
     if path.exists():
         raise HTTPException(status_code=409, detail=f"Section '{slug}' already exists")
     path.mkdir(parents=True)
-    return {"id": slug, "name": slug}
+    section_id = f"{req.parent_id}/{slug}" if req.parent_id else slug
+    return {"id": section_id, "name": slug}
 
 
 class RenameSectionRequest(BaseModel):
@@ -468,12 +502,14 @@ async def rename_section(req: RenameSectionRequest):
     if not src.exists():
         raise HTTPException(status_code=404, detail=f"Section '{req.section_id}' not found")
     slug = _slug(req.name)
-    dest = _workspace_dir(req.project_id) / slug
+    dest = src.parent / slug  # stay under the same parent — rename only touches the last segment
     if dest.exists() and dest != src:
         raise HTTPException(status_code=409, detail=f"Section '{slug}' already exists")
     if dest != src:
         src.rename(dest)
-    return {"id": slug, "name": slug}
+    parent_parts = req.section_id.split("/")[:-1]
+    section_id = "/".join(parent_parts + [slug]) if parent_parts else slug
+    return {"id": section_id, "name": slug}
 
 
 @app.delete("/api/local/sections")
@@ -497,11 +533,9 @@ async def list_cases(project_id: str = Query(...), section_id: Optional[str] = Q
     else:
         workspace = _workspace_dir(project_id)
         dirs = [(None, workspace)]
-        if workspace.exists():
-            dirs += [
-                (d.name, d) for d in sorted(workspace.iterdir())
-                if d.is_dir() and not d.name.startswith(".")
-            ]
+        sections: List[Dict[str, Any]] = []
+        _walk_sections(workspace, [], sections)
+        dirs += [(s["id"], _section_dir(project_id, s["id"])) for s in sections]
 
     out = []
     for sec_id, base in dirs:
@@ -518,7 +552,17 @@ async def list_cases(project_id: str = Query(...), section_id: Optional[str] = Q
             if role not in _LOCAL_CASE_ROLES:
                 role = "feature"
             title = f"{CASE_PREFIXES[role]} {data.get('name', f.stem)}"
-            out.append({"id": _case_file_id(f), "title": title, "section_id": sec_id, "role": role})
+            item: Dict[str, Any] = {"id": _case_file_id(f), "title": title, "section_id": sec_id, "role": role}
+            data_rows = data.get("data")
+            if isinstance(data_rows, list) and data_rows:
+                products = sorted({
+                    str(row["product"]) for row in data_rows
+                    if isinstance(row, dict) and row.get("product") is not None
+                })
+                if products:
+                    item["has_data"] = True
+                    item["sku_options"] = products
+            out.append(item)
     return out
 
 
@@ -536,7 +580,10 @@ async def get_case(case_id: str):
     parts = Path(case_id).parts
     result["case_id"] = case_id
     result["project_id"] = parts[0] if parts else None
-    result["section_id"] = parts[1] if len(parts) == 3 else None
+    # parts = (workspace, <section segments...>, filename) — everything
+    # between the workspace and the filename is the (possibly nested)
+    # section path; empty when the case sits directly in the workspace root.
+    result["section_id"] = "/".join(parts[1:-1]) if len(parts) > 2 else None
     result["link"] = ""
     return result
 
@@ -891,6 +938,7 @@ class LocalRunRequest(BaseModel):
     case_ids: List[str]
     var_scopes: List[str] = Field(default_factory=list)
     name: Optional[str] = None
+    sku_filter: Optional[List[str]] = None
 
 
 def _build_run_config(var_scopes: List[str]):
@@ -917,7 +965,7 @@ async def run_cases(req: LocalRunRequest, background_tasks: BackgroundTasks):
     RUN_STORE.create(run_id, name, req.project_id, req.case_ids)
 
     config = _build_run_config(req.var_scopes)
-    background_tasks.add_task(execute_run, RUN_STORE, run_id, config, case_paths)
+    background_tasks.add_task(execute_run, RUN_STORE, run_id, config, case_paths, req.sku_filter)
 
     return {"run_id": run_id, "name": name, "status": "running"}
 

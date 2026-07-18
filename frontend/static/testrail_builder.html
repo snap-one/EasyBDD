@@ -452,6 +452,14 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
         <span class="dim" style="margin-left:auto; font-size:12px" id="run-count"></span>
       </div>
       <div id="run-cases" style="flex:1; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:6px"></div>
+      <div id="run-sku-back" style="display:none; flex-shrink:0">
+        <div class="row" style="display:flex; gap:8px; align-items:center">
+          <label class="small" style="margin:0">SKUs to run <span class="dim">(data-driven cases — each gets its own result)</span></label>
+          <button class="add-link" id="run-sku-select-all">Select all</button>
+          <button class="add-link" id="run-sku-select-none">Select none</button>
+        </div>
+        <div id="run-sku-list" style="max-height:120px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:6px; margin-top:4px"></div>
+      </div>
     </div>
     <div class="modal-foot">
       <button class="btn" data-close="run-back">Cancel</button>
@@ -2000,6 +2008,9 @@ async function createSection() {
   try {
     const res = await api(trUrl("section"), { method: "POST", body: {
       project_id: S.projectId, suite_id: S.suiteId, name,
+      // Local mode: nest under whichever section is currently selected, like
+      // creating a subfolder inside the current folder — top-level otherwise.
+      parent_id: S.mode === "local" ? ($("#sel-section").value || null) : undefined,
     } });
     toast(`Section created: ${res.name}`, "ok");
     $("#section-back").classList.remove("open");
@@ -2096,8 +2107,11 @@ function caseRow(c) {
   );
 }
 
+let runSkuChecked = new Map(); // sku name -> checked, persists across re-renders within one modal session
+
 function openRunModal() {
   if (!S.projectId) { toast("Select a project first.", "err"); return; }
+  runSkuChecked = new Map();
   const box = $("#run-cases");
   box.innerHTML = "";
 
@@ -2172,6 +2186,35 @@ function onRunCaseToggle() {
   });
   const n = document.querySelectorAll("#run-cases input[data-cid]:checked").length;
   $("#run-count").textContent = `${n} case${n === 1 ? "" : "s"} selected`;
+  renderRunSkuPicker();
+}
+
+/* Union of sku_options across every currently-checked data-driven case;
+   hidden entirely when no checked case is data-driven (or in TestRail mode,
+   where cases never carry has_data/sku_options). */
+function renderRunSkuPicker() {
+  const back = $("#run-sku-back");
+  if (S.mode !== "local") { back.style.display = "none"; return; }
+  const checkedIds = new Set([...document.querySelectorAll("#run-cases input[data-cid]:checked")].map(cb => cb.dataset.cid));
+  const skus = new Set();
+  for (const c of S.cases) {
+    if (checkedIds.has(String(c.id)) && c.has_data && Array.isArray(c.sku_options)) {
+      c.sku_options.forEach(s => skus.add(s));
+    }
+  }
+  if (!skus.size) { back.style.display = "none"; return; }
+  back.style.display = "";
+  const list = $("#run-sku-list");
+  list.innerHTML = "";
+  for (const sku of [...skus].sort()) {
+    const checked = runSkuChecked.has(sku) ? runSkuChecked.get(sku) : true;
+    runSkuChecked.set(sku, checked);
+    list.appendChild(el("label", { class: "run-case-row" },
+      el("input", { type: "checkbox", "data-sku": sku, checked: checked || undefined,
+        onchange: (e) => runSkuChecked.set(sku, e.target.checked) }),
+      el("span", {}, sku),
+    ));
+  }
 }
 
 async function createRun() {
@@ -2180,10 +2223,15 @@ async function createRun() {
   const btn = $("#btn-create-run");
 
   if (S.mode === "local") {
+    const skuFilter = $("#run-sku-back").style.display !== "none"
+      ? [...runSkuChecked.entries()].filter(([, checked]) => checked).map(([sku]) => sku)
+      : null;
+    if (skuFilter && !skuFilter.length) { toast("Select at least one SKU, or uncheck the data-driven case(s).", "err"); return; }
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Running…';
     try {
       const res = await api("/api/local/run", { method: "POST", body: {
         project_id: S.projectId, case_ids: ids, var_scopes: ["global", S.projectId],
+        sku_filter: skuFilter,
       } });
       $("#run-back").classList.remove("open");
       toast(`Run started: <b>${escapeHtml(res.name)}</b> — check 📜 History for results.`, "ok", true);
@@ -2572,6 +2620,12 @@ $("#btn-run-modal").addEventListener("click", openRunModal);
 $("#btn-create-run").addEventListener("click", createRun);
 $("#run-select-all").addEventListener("click", () => { document.querySelectorAll("#run-cases input[data-cid]").forEach(cb => cb.checked = true); onRunCaseToggle(); });
 $("#run-select-none").addEventListener("click", () => { document.querySelectorAll("#run-cases input[data-cid]").forEach(cb => cb.checked = false); onRunCaseToggle(); });
+$("#run-sku-select-all").addEventListener("click", () => {
+  document.querySelectorAll("#run-sku-list input[data-sku]").forEach(cb => { cb.checked = true; runSkuChecked.set(cb.dataset.sku, true); });
+});
+$("#run-sku-select-none").addEventListener("click", () => {
+  document.querySelectorAll("#run-sku-list input[data-sku]").forEach(cb => { cb.checked = false; runSkuChecked.set(cb.dataset.sku, false); });
+});
 $("#palette-search").addEventListener("input", renderPaletteItems);
 $("#tab-preview").addEventListener("click", () => switchTab("preview"));
 $("#tab-issues").addEventListener("click", () => switchTab("issues"));
