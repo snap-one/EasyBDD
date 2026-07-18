@@ -982,7 +982,11 @@ def _dict_to_node(step: Dict[str, Any]) -> StepNode:
         return StepNode(
             kind="for_each",
             items=step.get("for_each"),
-            loop_var=step.get("loop_var"),
+            # "as" is a legacy alias for loop_var the runner itself already
+            # accepts (easybdd.core.parser._parse_steps) — recognize it here
+            # too so reverse-parsing (editing, TestRail import) doesn't
+            # silently drop the loop variable name.
+            loop_var=step.get("loop_var") or step.get("as"),
             steps=[_dict_to_node(s) for s in step.get("steps", []) if isinstance(s, dict)],
         )
     if "while" in step:

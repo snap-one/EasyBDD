@@ -383,6 +383,60 @@ def _fix_mapping_then_sequence(text: str) -> str:
     return "\n".join(result)
 
 
+_DASH_CONTROL_LINE_RE = _re_mod.compile(r'^- ([A-Za-z_]\w*)\s*:\s*(\S.*)$')
+
+
+def _fix_dash_control_flow_siblings(text: str) -> str:
+    """Fix a '- for_each: <value>' (or while/condition/if) list item whose
+    nested keys (as:/loop_var:/steps:/then:/else:/etc.) were written flush-left
+    at column 0 instead of indented under the list item.
+
+    This is the sibling case to _fix_mapping_then_sequence: that function
+    handles a control-flow block written as a *bare* root mapping key (no
+    leading dash); this handles the same authoring mistake when the author
+    did include the leading dash on the first line, e.g.::
+
+        - for_each: "[1, 2, 3, 4, 5]"
+        as: loop_number
+        steps:
+          - shared_step: dxGetAbout
+          ...
+
+    fix_step_list_indent leaves this alone because the first line already has
+    a value after the colon, so it assumes the step is self-contained on one
+    line — it never notices the trailing flush-left keys actually belong to
+    it. Detect that shape and indent everything from the second line up to
+    (but not including) the next column-0 '- ' item by 2 spaces, so it nests
+    under the list item and the previously-valid 'steps:' sub-list gains the
+    extra indent level it needs::
+
+        - for_each: "[1, 2, 3, 4, 5]"
+          as: loop_number
+          steps:
+            - shared_step: dxGetAbout
+            ...
+    """
+    lines = text.splitlines()
+    if len(lines) < 2:
+        return text
+    m = _DASH_CONTROL_LINE_RE.match(lines[0])
+    if not m or m.group(1) not in _LOOP_CONTROL_KEYS:
+        return text
+    second = lines[1]
+    # Already indented, or the next line is itself a new top-level item —
+    # nothing broken here.
+    if not second or second[0] in (' ', '\t') or second.startswith('-'):
+        return text
+
+    result = [lines[0]]
+    i = 1
+    while i < len(lines) and not lines[i].startswith('- '):
+        result.append('  ' + lines[i] if lines[i] else lines[i])
+        i += 1
+    result.extend(lines[i:])
+    return '\n'.join(result)
+
+
 def parse_yaml_lenient(text: str) -> Any:
     """Parse YAML text, retrying with repair passes if the first attempt fails.
 
@@ -402,6 +456,7 @@ def parse_yaml_lenient(text: str) -> Any:
         _dedent_root_keys,
         _extract_steps_block,
         _fix_mapping_then_sequence,
+        _fix_dash_control_flow_siblings,
         fix_step_list_indent,
     ):
         fixed = fixer(text)
