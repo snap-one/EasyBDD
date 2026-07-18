@@ -2015,8 +2015,7 @@ async function createRun() {
         project_id: S.projectId, case_ids: ids, var_scopes: ["global", S.projectId],
       } });
       $("#run-back").classList.remove("open");
-      toast(`Run finished: <b>${res.counts.passed} passed, ${res.counts.failed} failed</b> (${res.total} total)`,
-            res.success ? "ok" : "err", true);
+      toast(`Run started: <b>${escapeHtml(res.name)}</b> — check 📜 History for results.`, "ok", true);
     } catch (e) { toast(e.message, "err"); }
     finally { btn.disabled = false; btn.textContent = "Run now"; }
     return;
