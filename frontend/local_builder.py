@@ -577,6 +577,7 @@ class LocalPublishRequest(BaseModel):
     project_id: str
     section_id: Optional[str] = None
     case_id: Optional[str] = None  # existing relative path, to update in place
+    original_name: Optional[str] = None  # shared/var: name before this edit, for rename-safety
 
 
 @app.post("/api/local/publish")
@@ -596,11 +597,15 @@ async def publish(req: LocalPublishRequest):
         scope = req.project_id
         path = _vars_path(scope)
         data = _load_yaml_dict(path)
-        data[model.name.strip()] = variables
+        new_name = model.name.strip()
+        if req.original_name and req.original_name != new_name and req.original_name in data:
+            del data[req.original_name]
+        action = "updated" if req.original_name else "created"
+        data[new_name] = variables
         _save_yaml_dict(path, data)
         return {
-            "case_id": f"var:{scope}:{model.name.strip()}", "title": case_title(model),
-            "action": "created", "link": "", "warnings": [],
+            "case_id": f"var:{scope}:{new_name}", "title": case_title(model),
+            "action": action, "link": "", "warnings": [],
         }
 
     if model.case_type == "shared":
@@ -619,11 +624,15 @@ async def publish(req: LocalPublishRequest):
         scope = req.project_id
         path = _shared_steps_path(scope)
         data = _load_yaml_dict(path)
-        data[model.name.strip()] = entry
+        new_name = model.name.strip()
+        if req.original_name and req.original_name != new_name and req.original_name in data:
+            del data[req.original_name]
+        action = "updated" if req.original_name else "created"
+        data[new_name] = entry
         _save_yaml_dict(path, data)
         return {
-            "case_id": f"shared:{scope}:{model.name.strip()}", "title": case_title(model),
-            "action": "created", "link": "", "warnings": result["warnings"],
+            "case_id": f"shared:{scope}:{new_name}", "title": case_title(model),
+            "action": action, "link": "", "warnings": result["warnings"],
         }
 
     if model.case_type not in _LOCAL_CASE_ROLES:
@@ -780,6 +789,26 @@ async def delete_shared_step(name: str, scope: str = "global"):
     return {"name": name, "scope": scope, "status": "deleted"}
 
 
+@app.get("/api/local/shared-step-model")
+async def get_shared_step_model(scope: str = Query(...), name: str = Query(...)):
+    """Convert an existing shared step into the builder's editor model, the
+    same shape /api/local/case/{id} returns for a regular case — lets the
+    Shared Steps tab open an entry in the same step-builder editor."""
+    data = _load_yaml_dict(_shared_steps_path(scope))
+    entry = data.get(name)
+    if not isinstance(entry, dict):
+        raise HTTPException(status_code=404, detail=f"Shared step '{name}' not found in scope '{scope}'")
+    nodes = [_dict_to_node(s) for s in (entry.get("steps") or []) if isinstance(s, dict)]
+    model = {
+        "case_type": "shared",
+        "name": name,
+        "variables": [{"key": p, "value": ""} for p in (entry.get("parameters") or [])],
+        "data_rows": None,
+        "steps": [n.model_dump() for n in nodes],
+    }
+    return {"model": model, "scope": scope}
+
+
 # --------------------------------------------------------------------------- #
 # Routes — vars CRUD                                                          #
 # --------------------------------------------------------------------------- #
@@ -833,6 +862,24 @@ async def delete_var_set(name: str, scope: str = "global"):
     del data[name]
     _save_yaml_dict(path, data)
     return {"name": name, "scope": scope, "status": "deleted"}
+
+
+@app.get("/api/local/var-set-model")
+async def get_var_set_model(scope: str = Query(...), name: str = Query(...)):
+    """Convert an existing var set into the builder's editor model — the
+    Variables tab's equivalent of get_shared_step_model."""
+    data = _load_yaml_dict(_vars_path(scope))
+    entry = data.get(name)
+    if not isinstance(entry, dict):
+        raise HTTPException(status_code=404, detail=f"Var set '{name}' not found in scope '{scope}'")
+    model = {
+        "case_type": "var",
+        "name": name,
+        "variables": [{"key": str(k), "value": v} for k, v in entry.items()],
+        "data_rows": None,
+        "steps": [],
+    }
+    return {"model": model, "scope": scope}
 
 
 # --------------------------------------------------------------------------- #

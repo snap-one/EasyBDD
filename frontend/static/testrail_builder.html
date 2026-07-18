@@ -309,18 +309,40 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
           <select id="sel-suite" class="compact"><option value="">—</option></select>
         </div>
       </div>
-      <div style="display:flex; gap:6px; margin:10px 12px 4px">
-        <input id="case-search" class="compact" placeholder="Filter cases…" style="margin:0; flex:1">
-        <button class="btn ghost" id="btn-expand-sections" title="Expand all sections" style="padding:5px 8px; font-size:12.5px">▾</button>
-        <button class="btn ghost" id="btn-collapse-sections" title="Collapse all sections" style="padding:5px 8px; font-size:12.5px">▸</button>
-        <button class="btn ghost" id="btn-lint" title="Validate every case in this suite with the runner's parser — catches hand-edits made in TestRail's raw text field" style="padding:5px 10px; font-size:12.5px">🩺</button>
+      <div id="sidebar-tabs" style="display:none; gap:4px; margin:10px 12px 0">
+        <button class="btn ghost active" id="sidebar-tab-cases" style="flex:1; padding:4px 2px; font-size:12px">Cases</button>
+        <button class="btn ghost" id="sidebar-tab-shared" style="flex:1; padding:4px 2px; font-size:12px">Shared Steps</button>
+        <button class="btn ghost" id="sidebar-tab-vars" style="flex:1; padding:4px 2px; font-size:12px">Variables</button>
       </div>
-      <div id="bulk-delete-bar" style="display:none; gap:6px; margin:0 12px 6px; align-items:center; font-size:12px">
-        <button class="add-link" id="case-select-all">Select all</button>
-        <button class="add-link" id="case-select-none">Select none</button>
-        <button class="btn ghost" id="btn-bulk-delete" disabled style="margin-left:auto; padding:3px 10px; font-size:12px">Delete selected</button>
+
+      <div id="cases-tab-panel">
+        <div style="display:flex; gap:6px; margin:10px 12px 4px">
+          <input id="case-search" class="compact" placeholder="Filter cases…" style="margin:0; flex:1">
+          <button class="btn ghost" id="btn-expand-sections" title="Expand all sections" style="padding:5px 8px; font-size:12.5px">▾</button>
+          <button class="btn ghost" id="btn-collapse-sections" title="Collapse all sections" style="padding:5px 8px; font-size:12.5px">▸</button>
+          <button class="btn ghost" id="btn-lint" title="Validate every case in this suite with the runner's parser — catches hand-edits made in TestRail's raw text field" style="padding:5px 10px; font-size:12.5px">🩺</button>
+        </div>
+        <div id="bulk-delete-bar" style="display:none; gap:6px; margin:0 12px 6px; align-items:center; font-size:12px">
+          <button class="add-link" id="case-select-all">Select all</button>
+          <button class="add-link" id="case-select-none">Select none</button>
+          <button class="btn ghost" id="btn-bulk-delete" disabled style="margin-left:auto; padding:3px 10px; font-size:12px">Delete selected</button>
+        </div>
+        <div id="case-list"><div class="empty-note" style="padding:12px">Select a project to browse cases.</div></div>
       </div>
-      <div id="case-list"><div class="empty-note" style="padding:12px">Select a project to browse cases.</div></div>
+
+      <div id="shared-tab-panel" style="display:none">
+        <div style="margin:10px 12px 4px">
+          <button class="btn ghost" id="btn-new-shared-step" style="width:100%; padding:5px; font-size:12.5px">＋ New Shared Step</button>
+        </div>
+        <div id="shared-steps-list"></div>
+      </div>
+
+      <div id="vars-tab-panel" style="display:none">
+        <div style="margin:10px 12px 4px">
+          <button class="btn ghost" id="btn-new-var-set" style="width:100%; padding:5px; font-size:12.5px">＋ New Variable Set</button>
+        </div>
+        <div id="vars-list"></div>
+      </div>
     </div>
 
     <!-- ============ editor ============ -->
@@ -624,6 +646,9 @@ const S = {
   previewTimer: null,
   collapsedSections: new Set(),  // sidebar section ids the user collapsed
   selectedCaseIds: new Set(),    // local-mode bulk-delete selection
+  sidebarTab: "cases",           // "cases" | "shared" | "vars" — local mode only
+  editingSharedName: null,       // name of the shared step currently open in the editor, if any
+  editingVarName: null,          // name of the var set currently open in the editor, if any
   stepsExpanded: true,  // default expand/collapse state for newly-rendered step cards
   chatMessages: [],     // {role, content} history for the AI chat panel (session-only)
   chatBusy: false,
@@ -933,6 +958,8 @@ function applyModeUi() {
   $("#btn-delete-project").style.display = isLocal ? "" : "none";
   $("#btn-rename-section").style.display = isLocal ? "" : "none";
   $("#btn-delete-section").style.display = isLocal ? "" : "none";
+  $("#sidebar-tabs").style.display = isLocal ? "flex" : "none";
+  if (!isLocal) switchSidebarTab("cases");
   updateBulkDeleteBar();
 }
 
@@ -1077,11 +1104,18 @@ async function onProjectChange(preferredSuiteId) {
   S.suiteId = null;
   S.sections = []; S.cases = [];
   renderCaseList(); renderSections();
-  if (!S.projectId) { saveState(); return; }
+  if (!S.projectId) {
+    if (S.sidebarTab === "shared") renderSharedStepsList();
+    else if (S.sidebarTab === "vars") renderVarsList();
+    saveState();
+    return;
+  }
 
   if (S.mode === "local") {
     S.suiteMode = false;
     await reloadSuite();
+    if (S.sidebarTab === "shared") await renderSharedStepsList();
+    else if (S.sidebarTab === "vars") await renderVarsList();
     saveState();
     return;
   }
@@ -1275,6 +1309,134 @@ async function loadCase(caseId) {
     $("#publish-status").textContent = `Editing C${caseId} — publishing will update it.`;
     saveState();
   } catch (e) { toast(e.message, "err"); }
+}
+
+/* ============================== sidebar tabs: cases / shared steps / vars ============================== */
+function switchSidebarTab(tab) {
+  S.sidebarTab = tab;
+  for (const [id, name] of [["sidebar-tab-cases", "cases"], ["sidebar-tab-shared", "shared"], ["sidebar-tab-vars", "vars"]]) {
+    $(`#${id}`).classList.toggle("active", name === tab);
+  }
+  $("#cases-tab-panel").style.display = tab === "cases" ? "" : "none";
+  $("#shared-tab-panel").style.display = tab === "shared" ? "" : "none";
+  $("#vars-tab-panel").style.display = tab === "vars" ? "" : "none";
+  if (tab === "shared") renderSharedStepsList();
+  else if (tab === "vars") renderVarsList();
+}
+
+function sharedVarListItem(name, subtitle, editing, onClick, onDelete) {
+  return el("div", { class: "case-item" + (editing ? " active" : ""), style: "display:flex; align-items:center; gap:6px" },
+    el("button", {
+      style: "flex:1; text-align:left; background:none; border:none; cursor:pointer; padding:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap",
+      onclick: onClick,
+    }, name, subtitle ? el("span", { class: "dim", style: "font-size:11px; margin-left:6px" }, subtitle) : null),
+    el("button", { class: "icon-btn", title: "Delete", style: "flex-shrink:0", onclick: onDelete }, "🗑️"),
+  );
+}
+
+async function renderSharedStepsList() {
+  const box = $("#shared-steps-list");
+  if (!S.projectId) { box.innerHTML = ""; box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "Select a workspace first.")); return; }
+  box.innerHTML = "";
+  box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "Loading…"));
+  try {
+    const res = await api(`/api/shared-steps?scope=${S.projectId}`);
+    box.innerHTML = "";
+    if (!res.shared_steps.length) {
+      box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "No shared steps in this workspace yet."));
+      return;
+    }
+    for (const s of res.shared_steps.sort((a, b) => a.name.localeCompare(b.name))) {
+      box.appendChild(sharedVarListItem(
+        s.name, `${s.steps.length} step${s.steps.length === 1 ? "" : "s"}`,
+        S.editingSharedName === s.name,
+        () => loadSharedStepForEdit(s.name),
+        (e) => { e.stopPropagation(); deleteSharedStepItem(s.name); },
+      ));
+    }
+  } catch (e) {
+    box.innerHTML = "";
+    box.appendChild(el("div", { class: "issue error" }, "Failed to load shared steps: " + e.message));
+  }
+}
+
+async function renderVarsList() {
+  const box = $("#vars-list");
+  if (!S.projectId) { box.innerHTML = ""; box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "Select a workspace first.")); return; }
+  box.innerHTML = "";
+  box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "Loading…"));
+  try {
+    const res = await api(`/api/vars?scope=${S.projectId}`);
+    box.innerHTML = "";
+    if (!res.var_sets.length) {
+      box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "No variable sets in this workspace yet."));
+      return;
+    }
+    for (const v of res.var_sets.sort((a, b) => a.name.localeCompare(b.name))) {
+      const n = Object.keys(v.variables).length;
+      box.appendChild(sharedVarListItem(
+        v.name, `${n} var${n === 1 ? "" : "s"}`,
+        S.editingVarName === v.name,
+        () => loadVarSetForEdit(v.name),
+        (e) => { e.stopPropagation(); deleteVarSetItem(v.name); },
+      ));
+    }
+  } catch (e) {
+    box.innerHTML = "";
+    box.appendChild(el("div", { class: "issue error" }, "Failed to load variable sets: " + e.message));
+  }
+}
+
+async function loadSharedStepForEdit(name) {
+  if (S.dirty && !confirm("Discard unsaved changes in the editor?")) return;
+  try {
+    const res = await api(`/api/local/shared-step-model?scope=${S.projectId}&name=${encodeURIComponent(name)}`);
+    S.model = res.model;
+    S.model.variables = S.model.variables || [];
+    S.model.steps = S.model.steps || [];
+    S.editingCaseId = null;
+    S.editingSharedName = name;
+    S.editingVarName = null;
+    S.dirty = false;
+    renderTypeRow(); renderEditor(); renderSharedStepsList(); schedulePreview();
+    $("#publish-status").textContent = `Editing '${name}' — publishing will update it.`;
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function loadVarSetForEdit(name) {
+  if (S.dirty && !confirm("Discard unsaved changes in the editor?")) return;
+  try {
+    const res = await api(`/api/local/var-set-model?scope=${S.projectId}&name=${encodeURIComponent(name)}`);
+    S.model = res.model;
+    S.model.variables = S.model.variables || [];
+    S.model.steps = S.model.steps || [];
+    S.editingCaseId = null;
+    S.editingVarName = name;
+    S.editingSharedName = null;
+    S.dirty = false;
+    renderTypeRow(); renderEditor(); renderVarsList(); schedulePreview();
+    $("#publish-status").textContent = `Editing '${name}' — publishing will update it.`;
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function deleteSharedStepItem(name) {
+  if (!confirm(`Delete shared step '${name}'? This cannot be undone.`)) return;
+  try {
+    await api(`/api/shared-steps/${encodeURIComponent(name)}?scope=${S.projectId}`, { method: "DELETE" });
+    if (S.editingSharedName === name) { S.editingSharedName = null; S.model = newModel("shared"); S.dirty = false; renderTypeRow(); renderEditor(); schedulePreview(); }
+    toast(`Shared step '${name}' deleted.`, "ok");
+    await renderSharedStepsList();
+  } catch (e) { toast("Delete failed: " + e.message, "err"); }
+}
+
+async function deleteVarSetItem(name) {
+  if (!confirm(`Delete variable set '${name}'? This cannot be undone.`)) return;
+  try {
+    await api(`/api/vars/${encodeURIComponent(name)}?scope=${S.projectId}`, { method: "DELETE" });
+    if (S.editingVarName === name) { S.editingVarName = null; S.model = newModel("var"); S.dirty = false; renderTypeRow(); renderEditor(); schedulePreview(); }
+    toast(`Variable set '${name}' deleted.`, "ok");
+    await renderVarsList();
+  } catch (e) { toast("Delete failed: " + e.message, "err"); }
 }
 
 /* ============================== editor rendering ============================== */
@@ -1774,26 +1936,35 @@ function renderIssues(val) {
 /* ============================== publish ============================== */
 async function publish() {
   S.model.name = $("#case-name").value;
+  const isSharedOrVar = S.mode === "local" && (S.model.case_type === "var" || S.model.case_type === "shared");
   const sectionId = parseId($("#sel-section").value);
-  const needsSection = !(S.mode === "local" && (S.model.case_type === "var" || S.model.case_type === "shared"));
-  if (needsSection && !S.editingCaseId && !sectionId) { toast("Pick a section (or create one with ＋) before publishing.", "err"); return; }
+  if (!isSharedOrVar && !S.editingCaseId && !sectionId) { toast("Pick a section (or create one with ＋) before publishing.", "err"); return; }
   const btn = $("#btn-publish");
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publishing…';
   try {
+    const originalName = S.model.case_type === "shared" ? S.editingSharedName
+                        : S.model.case_type === "var" ? S.editingVarName : null;
     const res = await api(trUrl("publish"), { method: "POST", body: {
       model: S.model, project_id: S.projectId, suite_id: S.suiteId,
-      section_id: sectionId, case_id: S.editingCaseId,
+      section_id: sectionId, case_id: S.editingCaseId, original_name: originalName,
     } });
-    S.editingCaseId = res.case_id;
     S.dirty = false;
-    if (S.mode === "local") {
-      toast(`Case ${res.action}: <b>${escapeHtml(res.title)}</b> — saved as <code>${escapeHtml(res.case_id)}</code>`, "ok", true);
-      $("#publish-status").textContent = `Editing ${res.case_id} — publishing will update it.`;
+    if (isSharedOrVar) {
+      if (S.model.case_type === "shared") { S.editingSharedName = S.model.name.trim(); await renderSharedStepsList(); }
+      else { S.editingVarName = S.model.name.trim(); await renderVarsList(); }
+      toast(`${S.model.case_type === "shared" ? "Shared step" : "Variable set"} ${res.action}: <b>${escapeHtml(res.title)}</b>`, "ok", true);
+      $("#publish-status").textContent = `Editing '${S.model.name.trim()}' — publishing will update it.`;
     } else {
-      toast(`Case ${res.action}: <b>${escapeHtml(res.title)}</b> — <a href="${res.link}" target="_blank">open C${res.case_id} in TestRail ↗</a>`, "ok", true);
-      $("#publish-status").textContent = `Editing C${res.case_id} — publishing will update it.`;
+      S.editingCaseId = res.case_id;
+      if (S.mode === "local") {
+        toast(`Case ${res.action}: <b>${escapeHtml(res.title)}</b> — saved as <code>${escapeHtml(res.case_id)}</code>`, "ok", true);
+        $("#publish-status").textContent = `Editing ${res.case_id} — publishing will update it.`;
+      } else {
+        toast(`Case ${res.action}: <b>${escapeHtml(res.title)}</b> — <a href="${res.link}" target="_blank">open C${res.case_id} in TestRail ↗</a>`, "ok", true);
+        $("#publish-status").textContent = `Editing C${res.case_id} — publishing will update it.`;
+      }
+      await reloadSuite();
     }
-    await reloadSuite();
     saveState();
   } catch (e) {
     toast("Publish failed: " + e.message, "err");
@@ -2378,6 +2549,25 @@ $("#case-select-none").addEventListener("click", () => {
   renderCaseList();
 });
 $("#btn-bulk-delete").addEventListener("click", bulkDeleteSelectedCases);
+$("#sidebar-tab-cases").addEventListener("click", () => switchSidebarTab("cases"));
+$("#sidebar-tab-shared").addEventListener("click", () => switchSidebarTab("shared"));
+$("#sidebar-tab-vars").addEventListener("click", () => switchSidebarTab("vars"));
+$("#btn-new-shared-step").addEventListener("click", () => {
+  if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
+  if (S.dirty && !confirm("Discard unsaved changes in the editor?")) return;
+  S.model = newModel("shared"); S.editingCaseId = null; S.editingSharedName = null; S.editingVarName = null; S.dirty = false;
+  renderTypeRow(); renderEditor(); schedulePreview();
+  $("#publish-status").textContent = "";
+  $("#case-name").focus();
+});
+$("#btn-new-var-set").addEventListener("click", () => {
+  if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
+  if (S.dirty && !confirm("Discard unsaved changes in the editor?")) return;
+  S.model = newModel("var"); S.editingCaseId = null; S.editingSharedName = null; S.editingVarName = null; S.dirty = false;
+  renderTypeRow(); renderEditor(); schedulePreview();
+  $("#publish-status").textContent = "";
+  $("#case-name").focus();
+});
 $("#btn-run-modal").addEventListener("click", openRunModal);
 $("#btn-create-run").addEventListener("click", createRun);
 $("#run-select-all").addEventListener("click", () => { document.querySelectorAll("#run-cases input[data-cid]").forEach(cb => cb.checked = true); onRunCaseToggle(); });
