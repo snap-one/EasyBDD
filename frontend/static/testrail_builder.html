@@ -389,6 +389,7 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
             <select id="sel-section" class="compact"><option value="">—</option></select>
           </div>
           <button class="icon-btn" id="btn-new-section" title="Create new section" style="margin-top:16px">＋</button>
+          <button class="icon-btn" id="btn-move-section" title="Move section under another section" style="margin-top:16px; display:none">📂</button>
           <button class="icon-btn" id="btn-rename-section" title="Rename section" style="margin-top:16px; display:none">✏️</button>
           <button class="icon-btn" id="btn-delete-section" title="Delete section" style="margin-top:16px; display:none">🗑️</button>
         </div>
@@ -434,6 +435,22 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
     <div class="modal-foot">
       <button class="btn" data-close="section-back">Cancel</button>
       <button class="btn primary" id="btn-create-section">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ move section modal ============ -->
+<div class="modal-back" id="move-section-back">
+  <div class="modal" style="width:460px">
+    <div class="modal-head"><h2>Move section</h2><button class="icon-btn" data-close="move-section-back">✕</button></div>
+    <div class="modal-body">
+      <div class="dim" style="font-size:12px; margin-bottom:8px" id="move-section-label"></div>
+      <label class="small">Move under</label>
+      <select id="move-section-dest" class="compact" style="width:100%"></select>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close="move-section-back">Cancel</button>
+      <button class="btn primary" id="btn-move-section-confirm">Move</button>
     </div>
   </div>
 </div>
@@ -966,6 +983,7 @@ function applyModeUi() {
   $("#btn-new-project").style.display = isLocal ? "" : "none";
   $("#btn-rename-project").style.display = isLocal ? "" : "none";
   $("#btn-delete-project").style.display = isLocal ? "" : "none";
+  $("#btn-move-section").style.display = isLocal ? "" : "none";
   $("#btn-rename-section").style.display = isLocal ? "" : "none";
   $("#btn-delete-section").style.display = isLocal ? "" : "none";
   $("#sidebar-tabs").style.display = isLocal ? "flex" : "none";
@@ -2080,6 +2098,37 @@ async function deleteWorkspace() {
   } catch (e) { toast("Delete failed: " + e.message, "err"); }
 }
 
+function openMoveSectionModal() {
+  const sectionId = $("#sel-section").value;
+  if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
+  if (!sectionId) { toast("Select a section first.", "err"); return; }
+
+  $("#move-section-label").textContent = `Moving '${sectionId}' — its subsections and cases move with it.`;
+  const sel = $("#move-section-dest");
+  sel.innerHTML = "";
+  sel.appendChild(el("option", { value: "" }, "— top level —"));
+  for (const s of S.sections) {
+    // Can't move a section into itself or one of its own descendants.
+    if (s.id === sectionId || s.id.startsWith(sectionId + "/")) continue;
+    sel.appendChild(el("option", { value: s.id }, `${"  ".repeat(s.depth || 0)}${s.name}`));
+  }
+  $("#move-section-back").classList.add("open");
+}
+
+async function confirmMoveSection() {
+  const sectionId = $("#sel-section").value;
+  const newParentId = $("#move-section-dest").value || null;
+  try {
+    const res = await api("/api/local/sections/move", { method: "POST", body: {
+      project_id: S.projectId, section_id: sectionId, new_parent_id: newParentId,
+    } });
+    toast(`Moved to '${res.id}'.`, "ok");
+    $("#move-section-back").classList.remove("open");
+    await reloadSuite();
+    $("#sel-section").value = res.id;
+  } catch (e) { toast("Move failed: " + e.message, "err"); }
+}
+
 async function renameSection() {
   const sectionId = $("#sel-section").value;
   if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
@@ -2599,6 +2648,8 @@ $("#btn-create-section").addEventListener("click", createSection);
 $("#btn-new-project").addEventListener("click", createWorkspace);
 $("#btn-rename-project").addEventListener("click", renameWorkspace);
 $("#btn-delete-project").addEventListener("click", deleteWorkspace);
+$("#btn-move-section").addEventListener("click", openMoveSectionModal);
+$("#btn-move-section-confirm").addEventListener("click", confirmMoveSection);
 $("#btn-rename-section").addEventListener("click", renameSection);
 $("#btn-delete-section").addEventListener("click", deleteSection);
 $("#case-select-all").addEventListener("click", () => {

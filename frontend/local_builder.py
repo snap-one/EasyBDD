@@ -512,6 +512,48 @@ async def rename_section(req: RenameSectionRequest):
     return {"id": section_id, "name": slug}
 
 
+class MoveSectionRequest(BaseModel):
+    project_id: str
+    section_id: str
+    new_parent_id: Optional[str] = None  # None = move to the workspace's top level
+
+
+@app.post("/api/local/sections/move")
+async def move_section(req: MoveSectionRequest):
+    """Re-parent an existing section (and its subtree) under a different
+    section, or to the workspace top level. TestRail sections are often flat
+    even when their names imply a family grouping (e.g. "VPS API" / "VPS Web
+    UI" sharing a "VPS" prefix without an actual parent/child relationship in
+    TestRail), so importing can't reliably infer that grouping — this lets it
+    be built by hand instead."""
+    src = _section_dir(req.project_id, req.section_id)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Section '{req.section_id}' not found")
+
+    src_parts = req.section_id.split("/")
+    slug = src_parts[-1]
+    if req.new_parent_id:
+        new_parent_parts = _assert_safe_section_path(req.new_parent_id)
+        if new_parent_parts[: len(src_parts)] == src_parts:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot move a section into itself or one of its own descendants",
+            )
+        dest_base = _section_dir(req.project_id, req.new_parent_id)
+    else:
+        dest_base = _workspace_dir(req.project_id)
+
+    dest = dest_base / slug
+    if dest == src:
+        raise HTTPException(status_code=400, detail="Section is already under that parent")
+    if dest.exists():
+        raise HTTPException(status_code=409, detail=f"Section '{slug}' already exists under the target parent")
+    dest_base.mkdir(parents=True, exist_ok=True)
+    src.rename(dest)
+    section_id = f"{req.new_parent_id}/{slug}" if req.new_parent_id else slug
+    return {"id": section_id, "name": slug}
+
+
 @app.delete("/api/local/sections")
 async def delete_section(project_id: str = Query(...), section_id: str = Query(...)):
     path = _section_dir(project_id, section_id)
