@@ -82,6 +82,7 @@ textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
 .role-shared   { background: rgba(160,107,255,.18); color: #b98cff; }
 .role-setup    { background: rgba(46,204,113,.18); color: #5cdd97; }
 .role-teardown { background: rgba(231,76,92,.18);  color: #f08090; }
+.role-data     { background: rgba(45,212,191,.18); color: #5ce0d1; }
 .role-test, .role-other { background: rgba(138,153,171,.15); color: var(--text-dim); }
 
 /* ---------- editor ---------- */
@@ -314,6 +315,7 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
         <button class="btn ghost active" id="sidebar-tab-cases" style="flex:1; padding:4px 2px; font-size:12px">Cases</button>
         <button class="btn ghost" id="sidebar-tab-shared" style="flex:1; padding:4px 2px; font-size:12px">Shared Steps</button>
         <button class="btn ghost" id="sidebar-tab-vars" style="flex:1; padding:4px 2px; font-size:12px">Variables</button>
+        <button class="btn ghost" id="sidebar-tab-data" style="flex:1; padding:4px 2px; font-size:12px">Data Sets</button>
       </div>
 
       <div id="cases-tab-panel">
@@ -343,6 +345,13 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
           <button class="btn ghost" id="btn-new-var-set" style="width:100%; padding:5px; font-size:12.5px">＋ New Variable Set</button>
         </div>
         <div id="vars-list"></div>
+      </div>
+
+      <div id="data-tab-panel" style="display:none">
+        <div style="margin:10px 12px 4px">
+          <button class="btn ghost" id="btn-new-data-set" style="width:100%; padding:5px; font-size:12.5px">＋ New Data Set</button>
+        </div>
+        <div id="data-sets-list"></div>
       </div>
     </div>
 
@@ -672,9 +681,11 @@ const S = {
   previewTimer: null,
   collapsedSections: new Set(),  // sidebar section ids the user collapsed
   selectedCaseIds: new Set(),    // local-mode bulk-delete selection
-  sidebarTab: "cases",           // "cases" | "shared" | "vars" — local mode only
+  sidebarTab: "cases",           // "cases" | "shared" | "vars" | "data" — local mode only
   editingSharedName: null,       // name of the shared step currently open in the editor, if any
   editingVarName: null,          // name of the var set currently open in the editor, if any
+  editingDataSetName: null,      // name of the data set currently open in the editor, if any
+  dataSetNames: [],              // names of Data: cases in the current workspace — local mode only
   stepsExpanded: true,  // default expand/collapse state for newly-rendered step cards
   chatMessages: [],     // {role, content} history for the AI chat panel (session-only)
   chatBusy: false,
@@ -765,7 +776,12 @@ const TYPE_INFO = [
   ["shared",   "Shared",   "Reusable step library, called from Feature cases by name."],
   ["setup",    "Setup",    "Runs once before the Feature cases (login, device prep)."],
   ["teardown", "Teardown", "Runs once after all Feature cases (cleanup, logout)."],
+  ["data",     "Data",     "Named data table, referenced from Feature cases by name to drive data-driven runs. Local builder only."],
 ];
+// TYPE_INFO entries usable in the current backend — "data" is local-only.
+function visibleTypeInfo() {
+  return S.mode === "local" ? TYPE_INFO : TYPE_INFO.filter(([key]) => key !== "data");
+}
 const CONTROL_DEFS = [
   { id: "_for_each",  icon: "🔁", name: "For each loop", desc: "Repeat steps for every item in a list" },
   { id: "_while",     icon: "⏳", name: "While loop",    desc: "Repeat steps while a condition holds" },
@@ -859,7 +875,7 @@ function refreshVarDatalist() {
 
 /* ============================== model ============================== */
 function newModel(type) {
-  return { case_type: type, name: "", variables: [], data_rows: null, steps: [] };
+  return { case_type: type, name: "", variables: [], data_rows: null, data_ref: null, steps: [] };
 }
 function newNode(kind) {
   return { kind, action: null, params: {}, name: null, items: null, loop_var: null,
@@ -1180,6 +1196,14 @@ async function reloadSuite() {
       api(`${trUrl("cases")}?${q}`),
     ]);
   } catch (e) { toast(e.message, "err"); S.sections = []; S.cases = []; }
+  if (S.mode === "local") {
+    try {
+      const res = await api(`/api/data-sets?scope=${S.projectId}`);
+      S.dataSetNames = res.data_sets.map(d => d.name).sort();
+    } catch (e) { S.dataSetNames = []; }
+  } else {
+    S.dataSetNames = [];
+  }
   renderSections(); renderCaseList();
 }
 
@@ -1339,17 +1363,19 @@ async function loadCase(caseId) {
   } catch (e) { toast(e.message, "err"); }
 }
 
-/* ============================== sidebar tabs: cases / shared steps / vars ============================== */
+/* ============================== sidebar tabs: cases / shared steps / vars / data sets ============================== */
 function switchSidebarTab(tab) {
   S.sidebarTab = tab;
-  for (const [id, name] of [["sidebar-tab-cases", "cases"], ["sidebar-tab-shared", "shared"], ["sidebar-tab-vars", "vars"]]) {
+  for (const [id, name] of [["sidebar-tab-cases", "cases"], ["sidebar-tab-shared", "shared"], ["sidebar-tab-vars", "vars"], ["sidebar-tab-data", "data"]]) {
     $(`#${id}`).classList.toggle("active", name === tab);
   }
   $("#cases-tab-panel").style.display = tab === "cases" ? "" : "none";
   $("#shared-tab-panel").style.display = tab === "shared" ? "" : "none";
   $("#vars-tab-panel").style.display = tab === "vars" ? "" : "none";
+  $("#data-tab-panel").style.display = tab === "data" ? "" : "none";
   if (tab === "shared") renderSharedStepsList();
   else if (tab === "vars") renderVarsList();
+  else if (tab === "data") renderDataSetsList();
 }
 
 function sharedVarListItem(name, subtitle, editing, onClick, onDelete) {
@@ -1415,6 +1441,32 @@ async function renderVarsList() {
   }
 }
 
+async function renderDataSetsList() {
+  const box = $("#data-sets-list");
+  if (!S.projectId) { box.innerHTML = ""; box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "Select a workspace first.")); return; }
+  box.innerHTML = "";
+  box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "Loading…"));
+  try {
+    const res = await api(`/api/data-sets?scope=${S.projectId}`);
+    box.innerHTML = "";
+    if (!res.data_sets.length) {
+      box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "No data sets in this workspace yet."));
+      return;
+    }
+    for (const d of res.data_sets.sort((a, b) => a.name.localeCompare(b.name))) {
+      box.appendChild(sharedVarListItem(
+        d.name, `${d.rows.length} row${d.rows.length === 1 ? "" : "s"}`,
+        S.editingDataSetName === d.name,
+        () => loadDataSetForEdit(d.name),
+        (e) => { e.stopPropagation(); deleteDataSetItem(d.name); },
+      ));
+    }
+  } catch (e) {
+    box.innerHTML = "";
+    box.appendChild(el("div", { class: "issue error" }, "Failed to load data sets: " + e.message));
+  }
+}
+
 async function loadSharedStepForEdit(name) {
   if (S.dirty && !confirm("Discard unsaved changes in the editor?")) return;
   try {
@@ -1425,6 +1477,7 @@ async function loadSharedStepForEdit(name) {
     S.editingCaseId = null;
     S.editingSharedName = name;
     S.editingVarName = null;
+    S.editingDataSetName = null;
     S.dirty = false;
     renderTypeRow(); renderEditor(); renderSharedStepsList(); schedulePreview();
     $("#publish-status").textContent = `Editing '${name}' — publishing will update it.`;
@@ -1441,8 +1494,26 @@ async function loadVarSetForEdit(name) {
     S.editingCaseId = null;
     S.editingVarName = name;
     S.editingSharedName = null;
+    S.editingDataSetName = null;
     S.dirty = false;
     renderTypeRow(); renderEditor(); renderVarsList(); schedulePreview();
+    $("#publish-status").textContent = `Editing '${name}' — publishing will update it.`;
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function loadDataSetForEdit(name) {
+  if (S.dirty && !confirm("Discard unsaved changes in the editor?")) return;
+  try {
+    const res = await api(`/api/local/data-set-model?scope=${S.projectId}&name=${encodeURIComponent(name)}`);
+    S.model = res.model;
+    S.model.variables = S.model.variables || [];
+    S.model.steps = S.model.steps || [];
+    S.editingCaseId = null;
+    S.editingDataSetName = name;
+    S.editingSharedName = null;
+    S.editingVarName = null;
+    S.dirty = false;
+    renderTypeRow(); renderEditor(); renderDataSetsList(); schedulePreview();
     $("#publish-status").textContent = `Editing '${name}' — publishing will update it.`;
   } catch (e) { toast(e.message, "err"); }
 }
@@ -1467,11 +1538,22 @@ async function deleteVarSetItem(name) {
   } catch (e) { toast("Delete failed: " + e.message, "err"); }
 }
 
+async function deleteDataSetItem(name) {
+  if (!confirm(`Delete data set '${name}'? This cannot be undone.`)) return;
+  try {
+    await api(`/api/data-sets/${encodeURIComponent(name)}?scope=${S.projectId}`, { method: "DELETE" });
+    if (S.editingDataSetName === name) { S.editingDataSetName = null; S.model = newModel("data"); S.dirty = false; renderTypeRow(); renderEditor(); schedulePreview(); }
+    toast(`Data set '${name}' deleted.`, "ok");
+    await renderDataSetsList();
+    S.dataSetNames = S.dataSetNames.filter(n => n !== name);
+  } catch (e) { toast("Delete failed: " + e.message, "err"); }
+}
+
 /* ============================== editor rendering ============================== */
 function renderTypeRow() {
   const row = $("#type-row");
   row.innerHTML = "";
-  for (const [key, label, desc] of TYPE_INFO) {
+  for (const [key, label, desc] of visibleTypeInfo()) {
     row.appendChild(el("button", {
       class: "type-pill" + (S.model.case_type === key ? " active" : ""),
       title: desc,
@@ -1519,6 +1601,17 @@ function renderEditor() {
           "＋ Add step"))));
     return;
   }
+  if (S.model.case_type === "data") {
+    const ta = el("textarea", {
+      rows: 8, placeholder: "- mac: D4:6A:91:29:0F:5A\n  product: WB-800\n- mac: A8:3B:76:11:CC:22\n  product: WB-250",
+      oninput: (e) => { S.model.data_rows = e.target.value || null; markDirty(); },
+    });
+    ta.value = S.model.data_rows || "";
+    body.appendChild(sectionBox(
+      "Data rows", "YAML list of mappings — one row per SKU/device. Reference this table by name from any Feature: case.", ta,
+    ));
+    return;
+  }
 
   // variables (scoped to case)
   body.appendChild(sectionBox(
@@ -1528,14 +1621,7 @@ function renderEditor() {
 
   // data rows for feature cases
   if (S.model.case_type === "feature") {
-    const ta = el("textarea", {
-      rows: 3, placeholder: "- mac: D4:6A:91:29:0F:5A\n  product: WB-800\n- mac: A8:3B:76:11:CC:22\n  product: WB-250",
-      oninput: (e) => { S.model.data_rows = e.target.value || null; markDirty(); },
-    });
-    ta.value = S.model.data_rows || "";
-    body.appendChild(sectionBox(
-      "Data rows", "Optional — repeat all steps once per row (YAML list of mappings).", ta,
-    ));
+    body.appendChild(sectionBox("Data source", "Optional — repeat all steps once per row.", renderDataSourcePicker()));
   }
 
   // steps
@@ -1562,6 +1648,56 @@ function sectionBox(title, hint, content) {
   return el("div", { class: "section-box" },
     el("div", { class: "section-head" }, el("h3", {}, title), el("span", { class: "hint" }, hint)),
     content);
+}
+
+/* Feature:/Setup:/Teardown: data source — inline rows (TestRail mode: the
+   only option) vs a reference to a named Data: case (local mode only). */
+function renderDataSourcePicker() {
+  const wrap = el("div");
+  if (S.mode !== "local") {
+    const ta = el("textarea", {
+      rows: 3, placeholder: "- mac: D4:6A:91:29:0F:5A\n  product: WB-800\n- mac: A8:3B:76:11:CC:22\n  product: WB-250",
+      oninput: (e) => { S.model.data_rows = e.target.value || null; markDirty(); },
+    });
+    ta.value = S.model.data_rows || "";
+    wrap.appendChild(ta);
+    return wrap;
+  }
+
+  const current = S.model.data_ref ? S.model.data_ref : (S.model.data_rows ? "__inline__" : "");
+  const sel = el("select", { class: "compact", style: "margin-bottom:8px" });
+  sel.appendChild(el("option", { value: "" }, "— none —"));
+  sel.appendChild(el("option", { value: "__inline__" }, "Inline rows (below)"));
+  for (const name of S.dataSetNames || []) {
+    sel.appendChild(el("option", { value: name }, name));
+  }
+  sel.value = current;
+  const taWrap = el("div");
+  const renderInline = () => {
+    taWrap.innerHTML = "";
+    if (sel.value !== "__inline__") return;
+    const ta = el("textarea", {
+      rows: 3, placeholder: "- mac: D4:6A:91:29:0F:5A\n  product: WB-800\n- mac: A8:3B:76:11:CC:22\n  product: WB-250",
+      oninput: (e) => { S.model.data_rows = e.target.value || null; markDirty(); },
+    });
+    ta.value = S.model.data_rows || "";
+    taWrap.appendChild(ta);
+  };
+  sel.addEventListener("change", () => {
+    if (sel.value === "__inline__") {
+      S.model.data_ref = null;
+    } else if (sel.value === "") {
+      S.model.data_ref = null; S.model.data_rows = null;
+    } else {
+      S.model.data_ref = sel.value; S.model.data_rows = null;
+    }
+    markDirty();
+    renderInline();
+  });
+  wrap.appendChild(sel);
+  wrap.appendChild(taWrap);
+  renderInline();
+  return wrap;
 }
 
 function kvEditor(rows, noun) {
@@ -1964,23 +2100,27 @@ function renderIssues(val) {
 /* ============================== publish ============================== */
 async function publish() {
   S.model.name = $("#case-name").value;
-  const isSharedOrVar = S.mode === "local" && (S.model.case_type === "var" || S.model.case_type === "shared");
+  const isScopedType = S.mode === "local" && ["var", "shared", "data"].includes(S.model.case_type);
   const sectionId = parseId($("#sel-section").value);
-  if (!isSharedOrVar && !S.editingCaseId && !sectionId) { toast("Pick a section (or create one with ＋) before publishing.", "err"); return; }
+  if (!isScopedType && !S.editingCaseId && !sectionId) { toast("Pick a section (or create one with ＋) before publishing.", "err"); return; }
   const btn = $("#btn-publish");
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publishing…';
   try {
     const originalName = S.model.case_type === "shared" ? S.editingSharedName
-                        : S.model.case_type === "var" ? S.editingVarName : null;
+                        : S.model.case_type === "var" ? S.editingVarName
+                        : S.model.case_type === "data" ? S.editingDataSetName : null;
     const res = await api(trUrl("publish"), { method: "POST", body: {
       model: S.model, project_id: S.projectId, suite_id: S.suiteId,
       section_id: sectionId, case_id: S.editingCaseId, original_name: originalName,
     } });
     S.dirty = false;
-    if (isSharedOrVar) {
+    if (isScopedType) {
+      const typeLabel = { shared: "Shared step", var: "Variable set", data: "Data set" }[S.model.case_type];
       if (S.model.case_type === "shared") { S.editingSharedName = S.model.name.trim(); await renderSharedStepsList(); }
-      else { S.editingVarName = S.model.name.trim(); await renderVarsList(); }
-      toast(`${S.model.case_type === "shared" ? "Shared step" : "Variable set"} ${res.action}: <b>${escapeHtml(res.title)}</b>`, "ok", true);
+      else if (S.model.case_type === "var") { S.editingVarName = S.model.name.trim(); await renderVarsList(); }
+      else { S.editingDataSetName = S.model.name.trim(); await renderDataSetsList();
+        try { S.dataSetNames = (await api(`/api/data-sets?scope=${S.projectId}`)).data_sets.map(d => d.name).sort(); } catch (e) {} }
+      toast(`${typeLabel} ${res.action}: <b>${escapeHtml(res.title)}</b>`, "ok", true);
       $("#publish-status").textContent = `Editing '${S.model.name.trim()}' — publishing will update it.`;
     } else {
       S.editingCaseId = res.case_id;
@@ -2005,7 +2145,7 @@ async function publish() {
 function openNewCase() {
   const body = $("#newcase-body");
   body.innerHTML = "";
-  for (const [key, label, desc] of TYPE_INFO) {
+  for (const [key, label, desc] of visibleTypeInfo()) {
     body.appendChild(el("button", { class: "pal-item", onclick: () => {
       if (S.dirty && !confirm("Discard unsaved changes?")) return;
       S.model = newModel(key); S.editingCaseId = null; S.dirty = false;
@@ -2664,10 +2804,11 @@ $("#btn-bulk-delete").addEventListener("click", bulkDeleteSelectedCases);
 $("#sidebar-tab-cases").addEventListener("click", () => switchSidebarTab("cases"));
 $("#sidebar-tab-shared").addEventListener("click", () => switchSidebarTab("shared"));
 $("#sidebar-tab-vars").addEventListener("click", () => switchSidebarTab("vars"));
+$("#sidebar-tab-data").addEventListener("click", () => switchSidebarTab("data"));
 $("#btn-new-shared-step").addEventListener("click", () => {
   if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
   if (S.dirty && !confirm("Discard unsaved changes in the editor?")) return;
-  S.model = newModel("shared"); S.editingCaseId = null; S.editingSharedName = null; S.editingVarName = null; S.dirty = false;
+  S.model = newModel("shared"); S.editingCaseId = null; S.editingSharedName = null; S.editingVarName = null; S.editingDataSetName = null; S.dirty = false;
   renderTypeRow(); renderEditor(); schedulePreview();
   $("#publish-status").textContent = "";
   $("#case-name").focus();
@@ -2675,7 +2816,15 @@ $("#btn-new-shared-step").addEventListener("click", () => {
 $("#btn-new-var-set").addEventListener("click", () => {
   if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
   if (S.dirty && !confirm("Discard unsaved changes in the editor?")) return;
-  S.model = newModel("var"); S.editingCaseId = null; S.editingSharedName = null; S.editingVarName = null; S.dirty = false;
+  S.model = newModel("var"); S.editingCaseId = null; S.editingSharedName = null; S.editingVarName = null; S.editingDataSetName = null; S.dirty = false;
+  renderTypeRow(); renderEditor(); schedulePreview();
+  $("#publish-status").textContent = "";
+  $("#case-name").focus();
+});
+$("#btn-new-data-set").addEventListener("click", () => {
+  if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
+  if (S.dirty && !confirm("Discard unsaved changes in the editor?")) return;
+  S.model = newModel("data"); S.editingCaseId = null; S.editingSharedName = null; S.editingVarName = null; S.editingDataSetName = null; S.dirty = false;
   renderTypeRow(); renderEditor(); schedulePreview();
   $("#publish-status").textContent = "";
   $("#case-name").focus();

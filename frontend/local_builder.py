@@ -49,7 +49,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from easybdd.core.parser import fix_step_list_indent, parse_yaml_lenient, strip_html_to_text  # noqa: E402
+from easybdd.core.parser import (  # noqa: E402
+    fix_step_list_indent,
+    load_data_sets,
+    parse_yaml_lenient,
+    strip_html_to_text,
+)
 
 from local_runner import (  # noqa: E402
     LocalRunStore,
@@ -103,7 +108,7 @@ RUN_STORE = LocalRunStore(RUNS_DIR)
 # Case files carry a `role:` key limited to these — Var:/Shared: never
 # materialize as case files (see module docstring).
 _LOCAL_CASE_ROLES = {"feature", "setup", "teardown"}
-_RESERVED_FILENAMES = {"shared_steps.yaml", "vars.yaml"}
+_RESERVED_FILENAMES = {"shared_steps.yaml", "vars.yaml", "data_sets.yaml"}
 
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -196,6 +201,10 @@ def _vars_path(scope: str) -> Path:
     return _scope_dir(scope) / "vars.yaml"
 
 
+def _data_sets_path(scope: str) -> Path:
+    return _scope_dir(scope) / "data_sets.yaml"
+
+
 def _load_yaml_dict(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -219,18 +228,20 @@ def _all_scopes() -> List[str]:
     for d in sorted(TESTS_DIR.iterdir()):
         if not d.is_dir() or d.name.startswith("."):
             continue
-        if (d / "shared_steps.yaml").exists() or (d / "vars.yaml").exists():
+        if (d / "shared_steps.yaml").exists() or (d / "vars.yaml").exists() or (d / "data_sets.yaml").exists():
             scopes.append(d.name)
         for sub in sorted(d.iterdir()):
-            if sub.is_dir() and ((sub / "shared_steps.yaml").exists() or (sub / "vars.yaml").exists()):
+            if sub.is_dir() and ((sub / "shared_steps.yaml").exists() or (sub / "vars.yaml").exists()
+                                  or (sub / "data_sets.yaml").exists()):
                 scopes.append(f"{d.name}/{sub.name}")
     return scopes
 
 
 def _workspace_context(project_id: str) -> tuple:
-    """Collect (known var names, known shared-step names) visible to a
-    workspace — global scope, the workspace itself, and its sections — for
-    validate_case's best-effort cross-reference warnings."""
+    """Collect (known var names, known shared-step names, known data-set
+    names) visible to a workspace — global scope, the workspace itself, and
+    its sections — for validate_case's best-effort cross-reference
+    warnings."""
     scopes = ["global", project_id]
     base = _workspace_dir(project_id)
     if base.exists():
@@ -240,12 +251,14 @@ def _workspace_context(project_id: str) -> tuple:
 
     known_vars: List[str] = []
     known_shared: List[str] = []
+    known_data_sets: List[str] = []
     for scope in scopes:
         for var_set in _load_yaml_dict(_vars_path(scope)).values():
             if isinstance(var_set, dict):
                 known_vars.extend(str(k) for k in var_set.keys())
         known_shared.extend(_load_yaml_dict(_shared_steps_path(scope)).keys())
-    return sorted(set(known_vars)), sorted(set(known_shared))
+        known_data_sets.extend(_load_yaml_dict(_data_sets_path(scope)).keys())
+    return sorted(set(known_vars)), sorted(set(known_shared)), sorted(set(known_data_sets))
 
 
 # --------------------------------------------------------------------------- #
@@ -266,6 +279,7 @@ def _local_case_to_model(data: Dict[str, Any]) -> Dict[str, Any]:
             yaml.safe_dump(data["data"], default_flow_style=False, width=100000).rstrip()
             if data.get("data") else None
         ),
+        "data_ref": data.get("data_ref"),
         "steps": [],
     }
     steps = data.get("steps") or []
@@ -328,11 +342,13 @@ class ValidateRequest(BaseModel):
     model: CaseModel
     known_vars: Optional[List[str]] = None
     known_shared: Optional[List[str]] = None
+    known_data_sets: Optional[List[str]] = None
 
 
 @app.post("/api/validate")
 async def validate(req: ValidateRequest):
-    return validate_case(req.model, known_vars=req.known_vars, known_shared=req.known_shared)
+    return validate_case(req.model, known_vars=req.known_vars, known_shared=req.known_shared,
+                          known_data_sets=req.known_data_sets)
 
 
 @app.post("/api/import/recording")
@@ -580,6 +596,7 @@ async def list_cases(project_id: str = Query(...), section_id: Optional[str] = Q
         dirs += [(s["id"], _section_dir(project_id, s["id"])) for s in sections]
 
     out = []
+    data_sets_cache: Dict[Path, Dict[str, Any]] = {}
     for sec_id, base in dirs:
         for f in _iter_case_files(base):
             try:
@@ -596,6 +613,12 @@ async def list_cases(project_id: str = Query(...), section_id: Optional[str] = Q
             title = f"{CASE_PREFIXES[role]} {data.get('name', f.stem)}"
             item: Dict[str, Any] = {"id": _case_file_id(f), "title": title, "section_id": sec_id, "role": role}
             data_rows = data.get("data")
+            if not isinstance(data_rows, list) or not data_rows:
+                data_ref = data.get("data_ref")
+                if data_ref:
+                    if f.parent not in data_sets_cache:
+                        data_sets_cache[f.parent] = load_data_sets(f.parent)
+                    data_rows = data_sets_cache[f.parent].get(data_ref)
             if isinstance(data_rows, list) and data_rows:
                 products = sorted({
                     str(row["product"]) for row in data_rows
@@ -724,11 +747,31 @@ async def publish(req: LocalPublishRequest):
             "action": action, "link": "", "warnings": result["warnings"],
         }
 
+    if model.case_type == "data":
+        result = validate_case(model)
+        if not result["valid"]:
+            raise HTTPException(status_code=422, detail={"errors": result["errors"]})
+        rows = yaml.safe_load(result["body"]) if result["body"].strip() else []
+        scope = req.project_id
+        path = _data_sets_path(scope)
+        data = _load_yaml_dict(path)
+        new_name = model.name.strip()
+        if req.original_name and req.original_name != new_name and req.original_name in data:
+            del data[req.original_name]
+        action = "updated" if req.original_name else "created"
+        data[new_name] = rows
+        _save_yaml_dict(path, data)
+        return {
+            "case_id": f"data:{scope}:{new_name}", "title": case_title(model),
+            "action": action, "link": "", "warnings": result["warnings"],
+        }
+
     if model.case_type not in _LOCAL_CASE_ROLES:
         raise HTTPException(status_code=422, detail=f"Unknown case type '{model.case_type}'")
 
-    known_vars, known_shared = _workspace_context(req.project_id)
-    result = validate_case(model, known_vars=known_vars, known_shared=known_shared)
+    known_vars, known_shared, known_data_sets = _workspace_context(req.project_id)
+    result = validate_case(model, known_vars=known_vars, known_shared=known_shared,
+                            known_data_sets=known_data_sets)
     if not result["valid"]:
         raise HTTPException(status_code=422, detail={"errors": result["errors"]})
 
@@ -766,7 +809,7 @@ class LocalLintRequest(BaseModel):
 async def lint_workspace(req: LocalLintRequest):
     """Health-check every case file in a workspace with the builder's validation."""
     base = _workspace_dir(req.project_id)
-    known_vars, known_shared = _workspace_context(req.project_id)
+    known_vars, known_shared, known_data_sets = _workspace_context(req.project_id)
     sections: List[Optional[str]] = [None]
     if base.exists():
         sections.extend(
@@ -793,7 +836,8 @@ async def lint_workspace(req: LocalLintRequest):
             title = f"{CASE_PREFIXES.get(parsed['model']['case_type'], '')} {parsed['model']['name']}".strip()
             try:
                 model = CaseModel(**parsed["model"])
-                v = validate_case(model, known_vars=known_vars, known_shared=known_shared)
+                v = validate_case(model, known_vars=known_vars, known_shared=known_shared,
+                                  known_data_sets=known_data_sets)
                 errors, warnings = v["errors"], v["warnings"]
             except Exception as exc:
                 errors, warnings = [f"Could not validate: {exc}"], []
@@ -966,6 +1010,80 @@ async def get_var_set_model(scope: str = Query(...), name: str = Query(...)):
         "name": name,
         "variables": [{"key": str(k), "value": v} for k, v in entry.items()],
         "data_rows": None,
+        "steps": [],
+    }
+    return {"model": model, "scope": scope}
+
+
+# --------------------------------------------------------------------------- #
+# Routes — data sets CRUD                                                     #
+# --------------------------------------------------------------------------- #
+
+class DataSetModel(BaseModel):
+    name: str
+    scope: str = "global"
+    rows: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+@app.get("/api/data-sets")
+async def list_data_sets(scope: Optional[str] = None):
+    scopes = [scope] if scope else _all_scopes()
+    items = []
+    for sc in scopes:
+        data = _load_yaml_dict(_data_sets_path(sc))
+        for name, rows in data.items():
+            if isinstance(rows, list):
+                items.append({"name": name, "scope": sc, "rows": rows})
+    return {"data_sets": items, "total": len(items), "scopes": _all_scopes()}
+
+
+@app.post("/api/data-sets")
+async def create_data_set(d: DataSetModel):
+    path = _data_sets_path(d.scope)
+    data = _load_yaml_dict(path)
+    if d.name in data:
+        raise HTTPException(status_code=409, detail=f"Data set '{d.name}' already exists in scope '{d.scope}'")
+    data[d.name] = d.rows
+    _save_yaml_dict(path, data)
+    return {"name": d.name, "scope": d.scope, "status": "created"}
+
+
+@app.put("/api/data-sets/{name}")
+async def update_data_set(name: str, d: DataSetModel, scope: str = "global"):
+    path = _data_sets_path(scope)
+    data = _load_yaml_dict(path)
+    if d.name != name and name in data:
+        del data[name]
+    data[d.name] = d.rows
+    _save_yaml_dict(path, data)
+    return {"name": d.name, "scope": scope, "status": "updated"}
+
+
+@app.delete("/api/data-sets/{name}")
+async def delete_data_set(name: str, scope: str = "global"):
+    path = _data_sets_path(scope)
+    data = _load_yaml_dict(path)
+    if name not in data:
+        raise HTTPException(status_code=404, detail=f"Data set '{name}' not found in scope '{scope}'")
+    del data[name]
+    _save_yaml_dict(path, data)
+    return {"name": name, "scope": scope, "status": "deleted"}
+
+
+@app.get("/api/local/data-set-model")
+async def get_data_set_model(scope: str = Query(...), name: str = Query(...)):
+    """Convert an existing data set into the builder's editor model — the
+    Data Sets tab's equivalent of get_var_set_model."""
+    data = _load_yaml_dict(_data_sets_path(scope))
+    rows = data.get(name)
+    if not isinstance(rows, list):
+        raise HTTPException(status_code=404, detail=f"Data set '{name}' not found in scope '{scope}'")
+    model = {
+        "case_type": "data",
+        "name": name,
+        "variables": [],
+        "data_rows": yaml.safe_dump(rows, default_flow_style=False, width=100000).rstrip() if rows else None,
+        "data_ref": None,
         "steps": [],
     }
     return {"model": model, "scope": scope}

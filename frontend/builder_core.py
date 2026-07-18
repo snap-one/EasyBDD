@@ -37,6 +37,7 @@ CASE_PREFIXES = {
     "setup": "Setup:",
     "teardown": "Teardown:",
     "test": "Test:",
+    "data": "Data:",
 }
 
 _ROLE_BY_PREFIX = {v: k for k, v in CASE_PREFIXES.items()}
@@ -395,10 +396,11 @@ class VarRow(BaseModel):
 
 
 class CaseModel(BaseModel):
-    case_type: str  # feature | var | shared | setup | teardown
+    case_type: str  # feature | var | shared | setup | teardown | data
     name: str = ""
     variables: List[VarRow] = Field(default_factory=list)
-    data_rows: Optional[str] = None  # YAML text for parameterized cases
+    data_rows: Optional[str] = None  # YAML text for parameterized cases, or a Data: case's own rows
+    data_ref: Optional[str] = None  # name of a Data: case to pull rows from instead of data_rows
     steps: List[StepNode] = Field(default_factory=list)
 
 
@@ -622,6 +624,12 @@ def serialize_case_body(model: CaseModel) -> str:
                 lines.append(f"{row.key.strip()}: {_scalar(value)}")
         return "\n".join(lines)
 
+    if model.case_type == "data":
+        rows = yaml.safe_load(model.data_rows) if model.data_rows and model.data_rows.strip() else []
+        if not isinstance(rows, list):
+            raise ValueError("Data rows must be a YAML list of mappings")
+        return yaml.safe_dump(rows, default_flow_style=False, width=100000).rstrip()
+
     lines: List[str] = []
     var_rows = [r for r in model.variables if r.key.strip()]
     if var_rows:
@@ -636,7 +644,10 @@ def serialize_case_body(model: CaseModel) -> str:
                 lines.append(f"  {row.key.strip()}: {_scalar(value)}")
         lines.append("")
 
-    if model.data_rows and model.data_rows.strip():
+    if model.data_ref and model.data_ref.strip():
+        lines.append(f"data_ref: {_scalar(model.data_ref.strip())}")
+        lines.append("")
+    elif model.data_rows and model.data_rows.strip():
         parsed_rows = yaml.safe_load(model.data_rows)
         if not isinstance(parsed_rows, list):
             raise ValueError("Data rows must be a YAML list of mappings")
@@ -894,12 +905,14 @@ def _scan_variable_usage(model: CaseModel) -> tuple:
 
 def validate_case(model: CaseModel,
                   known_vars: Optional[List[str]] = None,
-                  known_shared: Optional[List[str]] = None) -> Dict[str, Any]:
+                  known_shared: Optional[List[str]] = None,
+                  known_data_sets: Optional[List[str]] = None) -> Dict[str, Any]:
     """Validate a case model.
 
-    known_vars / known_shared carry suite context (keys from Var: cases,
-    names of Shared: cases). When provided, cross-reference checks run:
-    unknown ${variable} references and missing shared steps become warnings.
+    known_vars / known_shared / known_data_sets carry suite context (keys
+    from Var: cases, names of Shared: cases, names of Data: cases). When
+    provided, cross-reference checks run: unknown ${variable} references,
+    missing shared steps, and an unresolvable data_ref become warnings.
     """
     sanitize_model(model)
     errors: List[str] = []
@@ -907,6 +920,9 @@ def validate_case(model: CaseModel,
 
     if not model.name.strip():
         errors.append("Case name is required")
+
+    if model.data_ref and model.data_ref.strip() and model.data_rows and model.data_rows.strip():
+        errors.append("Set either inline Data rows or a Data: case reference, not both")
 
     if model.case_type == "var" and not model.steps:
         if not any(r.key.strip() for r in model.variables):
@@ -917,6 +933,16 @@ def validate_case(model: CaseModel,
             if key and key in seen:
                 errors.append(f"Duplicate variable key '{key}'")
             seen.add(key)
+    elif model.case_type == "data":
+        if not model.data_rows or not model.data_rows.strip():
+            errors.append("Data: case needs at least one row")
+        else:
+            try:
+                rows = yaml.safe_load(model.data_rows)
+                if not isinstance(rows, list) or not rows or not all(isinstance(r, dict) for r in rows):
+                    errors.append("Data rows must be a YAML list of mappings")
+            except yaml.YAMLError as exc:
+                errors.append(f"Data rows are not valid YAML: {exc}")
     else:
         if not model.steps:
             errors.append("Add at least one step")
@@ -938,6 +964,13 @@ def validate_case(model: CaseModel,
                     + " — not defined in this case, a Var: case in the suite, or by a store_as."
                 )
 
+        if known_data_sets is not None and model.data_ref and model.data_ref.strip():
+            if model.data_ref.strip() not in known_data_sets:
+                warnings.append(
+                    f"Unknown Data: case reference '{model.data_ref.strip()}' — "
+                    "not defined in this workspace."
+                )
+
     body = ""
     if not errors:
         try:
@@ -947,7 +980,8 @@ def validate_case(model: CaseModel,
 
     # Round-trip: parse the generated body with the exact functions the
     # runner uses, to guarantee TestRail content will execute.
-    if body and not errors and (model.case_type != "var" or model.steps):
+    steps_shaped = model.case_type not in ("var", "data") or (model.case_type == "var" and model.steps)
+    if body and not errors and steps_shaped:
         try:
             fixed = fix_step_list_indent(body)
             parsed = parse_yaml_lenient(fixed)
@@ -963,6 +997,13 @@ def validate_case(model: CaseModel,
                 errors.append("Var: body did not parse as key/value pairs")
         except yaml.YAMLError as exc:
             errors.append(f"Var: body is not valid YAML: {exc}")
+    elif body and not errors and model.case_type == "data":
+        try:
+            parsed = yaml.safe_load(body)
+            if not isinstance(parsed, list):
+                errors.append("Data: body did not parse as a list of rows")
+        except yaml.YAMLError as exc:
+            errors.append(f"Data: body is not valid YAML: {exc}")
 
     return {"valid": not errors, "errors": errors, "warnings": warnings, "body": body}
 

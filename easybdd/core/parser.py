@@ -544,12 +544,53 @@ class TestDefinition:
             self.variables = {}
 
 
+def load_data_sets(start_dir: Optional[Path] = None) -> Dict[str, List[Dict[str, Any]]]:
+    """Load named data tables from data_sets.yaml files: global (cwd) first,
+    then each ancestor directory between start_dir and cwd (outermost first,
+    so a deeper/more-specific data_sets.yaml still wins) — mirrors
+    YAMLParser._load_shared_steps's resolution exactly, minus the
+    topological sort (data sets don't reference each other).
+
+    Used both by YAMLParser (to resolve a case's `data_ref:`) and directly
+    by the local builder's run orchestration / case listing, which read
+    case files without going through YAMLParser.
+    """
+    dirs: List[Path] = []
+    if start_dir is not None:
+        start_dir = Path(start_dir).resolve()
+        cwd = Path.cwd().resolve()
+        chain = [start_dir]
+        if cwd in start_dir.parents:
+            d = start_dir
+            while d != cwd:
+                d = d.parent
+                chain.append(d)
+        dirs.extend(reversed(chain))
+    candidates = [Path("data_sets.yaml")] + [d / "data_sets.yaml" for d in dirs]
+
+    result: Dict[str, List[Dict[str, Any]]] = {}
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            if isinstance(data, dict):
+                for name, rows in data.items():
+                    if isinstance(rows, list):
+                        result[name] = rows
+        except Exception as e:
+            print(f"Warning: Failed to load data sets from {path}: {e}")
+    return result
+
+
 class YAMLParser:
     """Parser for YAML test definitions"""
 
     def __init__(self):
         self.supported_extensions = {".yaml", ".yml", ".json"}
         self.shared_steps: Dict[str, SharedStep] = {}
+        self.data_sets: Dict[str, List[Dict[str, Any]]] = {}
         self._load_shared_steps()
 
     def _load_shared_steps(self, workspace_dir: Optional[Path] = None) -> None:
@@ -644,6 +685,8 @@ class YAMLParser:
         file_path = Path(file_path)
         # Reload workspace-local shared steps (local overrides global)
         self._load_shared_steps(workspace_dir=file_path.parent)
+        # Reload workspace-local data sets (local overrides global) — resolves data_ref:
+        self.data_sets = load_data_sets(file_path.parent)
 
         if not file_path.exists():
             error_info = self._create_test_error_info(
@@ -844,6 +887,11 @@ class YAMLParser:
 
         # Extract data-driven fields
         test_data = data.get("data", None)
+        data_ref = data.get("data_ref")
+        if test_data is None and data_ref:
+            test_data = self.data_sets.get(data_ref)
+            if test_data is None:
+                print(f"Warning: data_ref '{data_ref}' not found in any data_sets.yaml")
         async_execution = data.get("async_execution", False)
         max_workers = data.get("max_workers", 1)
 

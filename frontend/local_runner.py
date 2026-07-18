@@ -117,8 +117,14 @@ def run_summary(record: Dict[str, Any]) -> Dict[str, Any]:
 
 def _matching_data_rows(path: Path, sku_filter: Optional[List[str]]):
     """Return (raw_yaml_dict, matching_rows) if `path` is data-driven and
-    `sku_filter` is set, else (raw_yaml_dict, None) — None means "run as-is"."""
+    `sku_filter` is set, else (raw_yaml_dict, None) — None means "run as-is".
+
+    Data-driven cases carry their rows either inline (`data:`) or by
+    reference (`data_ref: <name>`, resolved from a Data: case's
+    data_sets.yaml via the same ancestor-walk easybdd.core.parser uses for
+    shared_step: references)."""
     import yaml
+    from easybdd.core.parser import load_data_sets
 
     if not sku_filter:
         return None, None
@@ -127,6 +133,10 @@ def _matching_data_rows(path: Path, sku_filter: Optional[List[str]]):
     except Exception:
         return None, None
     data_rows = raw.get("data")
+    if not isinstance(data_rows, list) or not data_rows:
+        data_ref = raw.get("data_ref")
+        if data_ref:
+            data_rows = load_data_sets(path.parent).get(data_ref)
     if not isinstance(data_rows, list) or not data_rows:
         return None, None
     wanted = {str(s) for s in sku_filter}
@@ -161,6 +171,7 @@ def _run_one_sku_row(runner, raw: Dict[str, Any], row: Dict[str, Any], config, l
 
     temp_body = dict(raw)
     temp_body.pop("data", None)
+    temp_body.pop("data_ref", None)  # otherwise the runner re-resolves the full table for this "single row" file
     temp_path = log_dir / f"_sku_{_temp_slug(case_stem)}_{_temp_slug(row.get('product'))}.yaml"
     with open(temp_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(temp_body, f, sort_keys=False, allow_unicode=True, default_flow_style=False, width=100000)
