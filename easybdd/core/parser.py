@@ -6,6 +6,7 @@ so that both the local runner and the TestRail runner share a single parse path.
 """
 
 import html as _html_mod
+import platform
 import re as _re_mod
 import yaml
 import json
@@ -505,10 +506,27 @@ class YAMLParser:
           Pass 2 — parse each entry in dependency order (topological sort) so
                    nested shared_step references are already registered when a
                    dependent entry is parsed.
+
+        Beyond the file's own directory, every ancestor directory between it
+        and the current working directory is also checked (outermost first,
+        so a deeper/more-specific shared_steps.yaml still wins) — this lets a
+        nested folder structure (e.g. tests/cases/<workspace>/<section>/) share
+        one shared_steps.yaml at the workspace level instead of requiring a
+        copy in every leaf section. If workspace_dir isn't under cwd, only
+        workspace_dir itself is checked, same as before.
         """
-        candidates = [Path("shared_steps.yaml")]
+        dirs: List[Path] = []
         if workspace_dir is not None:
-            candidates.append(Path(workspace_dir) / "shared_steps.yaml")
+            workspace_dir = Path(workspace_dir).resolve()
+            cwd = Path.cwd().resolve()
+            chain = [workspace_dir]
+            if cwd in workspace_dir.parents:
+                d = workspace_dir
+                while d != cwd:
+                    d = d.parent
+                    chain.append(d)
+            dirs.extend(reversed(chain))
+        candidates = [Path("shared_steps.yaml")] + [d / "shared_steps.yaml" for d in dirs]
 
         # Pass 1: gather raw data from all candidate files (later files override earlier)
         raw: Dict[str, Dict[str, Any]] = {}

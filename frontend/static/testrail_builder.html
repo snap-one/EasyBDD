@@ -285,6 +285,8 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
     <div id="conn"><span class="dot"></span><span id="conn-text">connecting…</span></div>
     <div style="flex:1"></div>
     <button class="btn ghost" id="btn-runs-view" title="Browse test runs, check results, mark tests for retest">📊 Runs</button>
+    <button class="btn ghost" id="btn-history" style="display:none" title="Browse past local runs">📜 History</button>
+    <button class="btn ghost" id="btn-import-testrail" style="display:none" title="Pull existing TestRail cases into this local workspace">⬇ Import from TestRail</button>
     <button class="btn ghost" id="btn-run-modal" title="Assemble published cases into an EASY_BDD: run">🏃 Create Run</button>
     <button class="btn ghost" id="btn-migrate-modal" title="Convert legacy pipe-delimited mybdd cases to Easy BDD actions">🔀 Migrate</button>
     <button class="btn ghost" id="btn-new-case">＋ New Case</button>
@@ -425,6 +427,44 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
   </div>
 </div>
 
+<!-- ============ local run history modal ============ -->
+<div class="modal-back" id="history-back">
+  <div class="modal" style="width:640px; height:76vh">
+    <div class="modal-head"><h2>Run history</h2><button class="icon-btn" data-close="history-back">✕</button></div>
+    <div class="modal-body" id="history-body" style="flex:1; min-height:0; overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- ============ import from TestRail modal ============ -->
+<div class="modal-back" id="import-tr-back">
+  <div class="modal" style="width:720px; height:80vh">
+    <div class="modal-head"><h2>Import from TestRail</h2><button class="icon-btn" data-close="import-tr-back">✕</button></div>
+    <div class="modal-body" style="flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:10px">
+      <div class="dim" style="font-size:12px">
+        Pulls Feature:/Setup:/Teardown: cases as local YAML files, Shared: cases into this
+        workspace's shared_steps.yaml, and Var: cases into vars.yaml. Existing local files are
+        never overwritten unless you check "Overwrite existing".
+      </div>
+      <div style="display:flex; gap:8px">
+        <div style="flex:1"><label class="small">TestRail project id</label><input id="import-tr-project-id" type="number" placeholder="e.g. 59"></div>
+        <div style="flex:1"><label class="small">Suite id (optional)</label><input id="import-tr-suite-id" type="number"></div>
+        <div style="flex:1"><label class="small">Section id (optional)</label><input id="import-tr-section-id" type="number"></div>
+      </div>
+      <label style="display:flex; align-items:center; gap:6px; font-size:13px">
+        <input type="checkbox" id="import-tr-overwrite"> Overwrite existing (only rewrites entries that actually changed)
+      </label>
+      <div id="import-tr-body" style="flex:1; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:8px">
+        <div class="empty-note">Enter a TestRail project id and click Preview.</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close="import-tr-back">Close</button>
+      <button class="btn ghost" id="btn-import-tr-preview">Preview</button>
+      <button class="btn primary" id="btn-import-tr-apply" disabled>Import</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ suite health modal ============ -->
 <div class="modal-back" id="lint-back">
   <div class="modal" style="width:760px; height:80vh">
@@ -555,6 +595,7 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
 "use strict";
 /* ============================== state ============================== */
 const S = {
+  mode: "testrail",     // "testrail" or "local" — detected once in boot()
   catalog: {},          // category -> [action defs]
   actionsById: {},      // action id -> def
   projects: [],
@@ -689,6 +730,18 @@ const el = (tag, attrs = {}, ...children) => {
   return n;
 };
 
+// Local ids are file-path strings ("workspace/section/case.yaml"); TestRail
+// ids are integers — only coerce to a number in TestRail mode.
+function parseId(raw) {
+  return S.mode === "local" ? (raw || null) : (Number(raw) || null);
+}
+
+// The two backends implement the same shape under different prefixes for
+// everything that isn't backend-specific (suites, runs, migrate, Jenkins).
+function trUrl(suffix) {
+  return S.mode === "local" ? `/api/local/${suffix}` : `/api/testrail/${suffix}`;
+}
+
 async function api(path, opts = {}) {
   const r = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -711,6 +764,11 @@ function toast(msg, kind = "", html = false) {
 }
 
 function stripPrefix(title) { return title.replace(/^[A-Za-z]+:\s*/, ""); }
+// TestRail ids are short numbers ("C123"); local ids are file paths — show
+// just the filename so the badge stays compact.
+function caseBadge(id) {
+  return S.mode === "local" ? String(id).split("/").pop() : `C${id}`;
+}
 function escapeHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
 
 function knownVariables() {
@@ -795,19 +853,37 @@ async function boot() {
   if (S.editingCaseId) $("#publish-status").textContent = `Editing C${S.editingCaseId} — publishing will update it.`;
 
   try {
-    const st = await api("/api/testrail/status");
-    if (!st.configured) {
-      $("#conn").className = "err";
-      $("#conn-text").textContent = "TestRail credentials missing (.env)";
-      return;
+    await api("/api/testrail/status");
+    S.mode = "testrail";
+  } catch (e) {
+    S.mode = "local";
+  }
+  applyModeUi();
+
+  try {
+    let projects, label;
+    if (S.mode === "local") {
+      const st = await api("/api/local/status");
+      projects = await api("/api/local/projects");
+      label = st.tests_dir;
+    } else {
+      const st = await api("/api/testrail/status");
+      if (!st.configured) {
+        $("#conn").className = "err";
+        $("#conn-text").textContent = "TestRail credentials missing (.env)";
+        return;
+      }
+      projects = await api("/api/testrail/projects");
+      label = st.url.replace(/^https?:\/\//, "");
     }
-    const projects = await api("/api/testrail/projects");
     S.projects = projects;
     $("#conn").className = "ok";
-    $("#conn-text").textContent = st.url.replace(/^https?:\/\//, "");
+    $("#conn-text").textContent = label;
     const sel = $("#sel-project");
     sel.innerHTML = "<option value=''>— select —</option>";
-    for (const p of projects) sel.appendChild(el("option", { value: p.id }, `${p.name} (#${p.id})`));
+    for (const p of projects) {
+      sel.appendChild(el("option", { value: p.id }, S.mode === "local" ? p.name : `${p.name} (#${p.id})`));
+    }
 
     if (saved && saved.projectId && projects.some(p => p.id === saved.projectId)) {
       sel.value = String(saved.projectId);
@@ -819,21 +895,180 @@ async function boot() {
     }
   } catch (e) {
     $("#conn").className = "err";
-    $("#conn-text").textContent = "TestRail unreachable";
-    toast("TestRail: " + e.message, "err");
+    $("#conn-text").textContent = S.mode === "local" ? "Local builder unreachable" : "TestRail unreachable";
+    toast((S.mode === "local" ? "Local builder: " : "TestRail: ") + e.message, "err");
   }
 }
+
+// Toggle UI elements that only make sense for one backend. Called once mode
+// is known, before the first project/case data loads.
+function applyModeUi() {
+  const isLocal = S.mode === "local";
+  document.querySelector('.logo span').textContent = isLocal ? "· Local Test Builder" : "· TestRail Test Builder";
+  document.querySelector('#sidebar .ctx label.small').textContent = isLocal ? "Workspace" : "Project";
+  $("#suite-wrap").style.display = isLocal ? "none" : "";
+  $("#btn-runs-view").style.display = isLocal ? "none" : "";
+  $("#btn-migrate-modal").style.display = isLocal ? "none" : "";
+  $("#btn-run-modal").title = isLocal
+    ? "Execute selected cases immediately"
+    : "Assemble published cases into an EASY_BDD: run";
+  $("#btn-publish").textContent = isLocal ? "Publish" : "Publish to TestRail";
+  $("#run-name").closest("div").style.display = isLocal ? "none" : "";
+  $("#btn-create-run").textContent = isLocal ? "Run now" : "Create run";
+  $("#btn-history").style.display = isLocal ? "" : "none";
+  $("#btn-import-testrail").style.display = isLocal ? "" : "none";
+}
+
+/* ============================== local run history ============================== */
+function runStatusBadge(status) {
+  const cls = status === "completed" ? "okline" : status === "running" ? "warning" : "error";
+  return el("span", { class: `issue ${cls}`, style: "display:inline-block; padding:2px 8px; font-size:11px" }, status);
+}
+
+async function openHistoryModal() {
+  if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
+  const body = $("#history-body");
+  body.innerHTML = "";
+  $("#history-back").classList.add("open");
+  body.appendChild(el("div", { class: "empty-note" }, "Loading run history…"));
+  try {
+    const runs = await api(`/api/local/runs?project_id=${S.projectId}`);
+    body.innerHTML = "";
+    if (!runs.length) {
+      body.appendChild(el("div", { class: "empty-note" }, "No runs yet for this workspace."));
+      return;
+    }
+    for (const r of runs) {
+      const card = el("div", { class: "step-card", style: "margin-top:10px; padding:10px 12px" });
+      card.appendChild(el("div", { style: "display:flex; align-items:center; gap:8px" },
+        el("b", {}, r.name),
+        runStatusBadge(r.status),
+        el("span", { class: "dim", style: "margin-left:auto; font-size:12px" },
+          `${r.counts.passed} passed, ${r.counts.failed} failed`),
+      ));
+      card.appendChild(el("div", { class: "dim", style: "font-size:11px; margin-top:4px" },
+        `Started ${r.started || "—"}${r.finished ? ` · finished ${r.finished}` : ""}`));
+      if (r.total > 0) {
+        card.appendChild(el("a", {
+          class: "add-link", style: "font-size:12px",
+          href: `/api/local/run/${r.run_id}/report`, target: "_blank",
+        }, "View report ↗"));
+      }
+      body.appendChild(card);
+    }
+  } catch (e) {
+    body.innerHTML = "";
+    body.appendChild(el("div", { class: "issue error" }, "Failed to load run history: " + e.message));
+  }
+}
+
+$("#btn-history").addEventListener("click", openHistoryModal);
+
+/* ============================== import from TestRail ============================== */
+function openTestRailImportModal() {
+  if (!S.projectId) { toast("Select a local workspace first — that's where imported cases will land.", "err"); return; }
+  $("#import-tr-body").innerHTML = "";
+  $("#import-tr-body").appendChild(el("div", { class: "empty-note" }, "Enter a TestRail project id and click Preview."));
+  $("#btn-import-tr-apply").disabled = true;
+  $("#import-tr-back").classList.add("open");
+}
+
+function importParams() {
+  const projectId = $("#import-tr-project-id").value.trim();
+  if (!projectId) { toast("Enter a TestRail project id.", "err"); return null; }
+  const params = new URLSearchParams({ project_id: projectId, workspace: S.projectId });
+  const suiteId = $("#import-tr-suite-id").value.trim();
+  const sectionId = $("#import-tr-section-id").value.trim();
+  if (suiteId) params.set("suite_id", suiteId);
+  if (sectionId) params.set("section_id", sectionId);
+  return params;
+}
+
+async function previewTestRailImport() {
+  const params = importParams();
+  if (!params) return;
+  const body = $("#import-tr-body");
+  body.innerHTML = "";
+  body.appendChild(el("div", { class: "empty-note" }, "Fetching cases from TestRail…"));
+  try {
+    const res = await api(`/api/local/import/testrail/preview?${params}`);
+    body.innerHTML = "";
+    if (!res.manifest.length) {
+      body.appendChild(el("div", { class: "empty-note" }, "No cases found for that project/suite/section."));
+      $("#btn-import-tr-apply").disabled = true;
+      return;
+    }
+    for (const item of res.manifest) {
+      body.appendChild(el("div", { style: "display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13px" },
+        el("span", { class: `role-badge role-${item.role === "other" ? "feature" : item.role}` }, item.role === "other" ? "?" : item.role),
+        el("span", { style: "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, item.title),
+        el("span", { class: "dim", style: "font-size:11px" }, item.target),
+        item.exists ? el("span", { class: "issue warning", style: "font-size:10px; padding:1px 6px" }, "exists") : null,
+      ));
+    }
+    $("#btn-import-tr-apply").disabled = false;
+  } catch (e) {
+    body.innerHTML = "";
+    body.appendChild(el("div", { class: "issue error" }, "Preview failed: " + e.message));
+    $("#btn-import-tr-apply").disabled = true;
+  }
+}
+
+async function applyImport() {
+  const projectId = $("#import-tr-project-id").value.trim();
+  if (!projectId) { toast("Enter a TestRail project id.", "err"); return; }
+  const suiteId = $("#import-tr-suite-id").value.trim();
+  const sectionId = $("#import-tr-section-id").value.trim();
+  const btn = $("#btn-import-tr-apply");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Importing…';
+  try {
+    const res = await api("/api/local/import/testrail", { method: "POST", body: {
+      project_id: Number(projectId),
+      suite_id: suiteId ? Number(suiteId) : null,
+      section_id: sectionId ? Number(sectionId) : null,
+      workspace: S.projectId,
+      overwrite: $("#import-tr-overwrite").checked,
+    } });
+    toast(
+      `Import done — ${res.created.length} created, ${res.updated.length} updated, ` +
+      `${res.skipped_existing.length} skipped, ${res.errors.length} error(s).`,
+      res.errors.length ? "err" : "ok", true,
+    );
+    if (res.errors.length) {
+      const body = $("#import-tr-body");
+      body.innerHTML = "";
+      for (const e of res.errors) body.appendChild(el("div", { class: "issue error" }, "✕ " + e));
+    }
+    await reloadSuite();
+  } catch (e) {
+    toast("Import failed: " + e.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "Import";
+  }
+}
+
+$("#btn-import-testrail").addEventListener("click", openTestRailImportModal);
+$("#btn-import-tr-preview").addEventListener("click", previewTestRailImport);
+$("#btn-import-tr-apply").addEventListener("click", applyImport);
 
 /* ============================== TestRail context ============================== */
 // preferredSuiteId is only passed when restoring a saved session; the DOM "change"
 // event invokes this with an Event object instead, which matches no suite and just
 // falls back to suites[0] below.
 async function onProjectChange(preferredSuiteId) {
-  S.projectId = Number($("#sel-project").value) || null;
+  S.projectId = parseId($("#sel-project").value);
   S.suiteId = null;
   S.sections = []; S.cases = [];
   renderCaseList(); renderSections();
   if (!S.projectId) { saveState(); return; }
+
+  if (S.mode === "local") {
+    S.suiteMode = false;
+    await reloadSuite();
+    saveState();
+    return;
+  }
+
   const proj = S.projects.find(p => p.id === S.projectId);
   S.suiteMode = proj ? proj.suite_mode : 1;
   const suiteSel = $("#sel-suite");
@@ -850,6 +1085,7 @@ async function onProjectChange(preferredSuiteId) {
 }
 
 async function onSuiteChange() {
+  if (S.mode === "local") return;  // suite dropdown is hidden in local mode
   S.suiteId = Number($("#sel-suite").value) || null;
   await reloadSuite();
   saveState();
@@ -861,8 +1097,8 @@ async function reloadSuite() {
   const q = `project_id=${S.projectId}` + (S.suiteId ? `&suite_id=${S.suiteId}` : "");
   try {
     [S.sections, S.cases] = await Promise.all([
-      api(`/api/testrail/sections?${q}`),
-      api(`/api/testrail/cases?${q}`),
+      api(`${trUrl("sections")}?${q}`),
+      api(`${trUrl("cases")}?${q}`),
     ]);
   } catch (e) { toast(e.message, "err"); S.sections = []; S.cases = []; }
   renderSections(); renderCaseList();
@@ -884,7 +1120,7 @@ function caseListItem(c) {
   },
     el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
     el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
-    el("span", { class: "cid" }, `C${c.id}`),
+    el("span", { class: "cid" }, caseBadge(c.id)),
   );
 }
 
@@ -956,7 +1192,7 @@ function renderCaseList() {
 async function loadCase(caseId) {
   if (S.dirty && !confirm("Discard unsaved changes in the editor?")) return;
   try {
-    const res = await api(`/api/testrail/case/${caseId}`);
+    const res = await api(`${trUrl("case")}/${caseId}`);
     S.model = res.model;
     S.model.variables = S.model.variables || [];
     S.model.steps = S.model.steps || [];
@@ -1460,31 +1696,39 @@ function renderIssues(val) {
   for (const e of val.errors) pane.appendChild(el("div", { class: "issue error" }, "✕ " + e));
   for (const w of val.warnings) pane.appendChild(el("div", { class: "issue warning" }, "⚠ " + w));
   $("#btn-publish").disabled = !val.valid || !S.projectId;
-  if (!S.projectId) $("#publish-status").textContent = "Select a TestRail project to publish.";
+  if (!S.projectId) {
+    $("#publish-status").textContent = S.mode === "local" ? "Select a workspace to publish." : "Select a TestRail project to publish.";
+  }
 }
 
 /* ============================== publish ============================== */
 async function publish() {
   S.model.name = $("#case-name").value;
-  const sectionId = Number($("#sel-section").value) || null;
-  if (!S.editingCaseId && !sectionId) { toast("Pick a section (or create one with ＋) before publishing.", "err"); return; }
+  const sectionId = parseId($("#sel-section").value);
+  const needsSection = !(S.mode === "local" && (S.model.case_type === "var" || S.model.case_type === "shared"));
+  if (needsSection && !S.editingCaseId && !sectionId) { toast("Pick a section (or create one with ＋) before publishing.", "err"); return; }
   const btn = $("#btn-publish");
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publishing…';
   try {
-    const res = await api("/api/testrail/publish", { method: "POST", body: {
+    const res = await api(trUrl("publish"), { method: "POST", body: {
       model: S.model, project_id: S.projectId, suite_id: S.suiteId,
       section_id: sectionId, case_id: S.editingCaseId,
     } });
     S.editingCaseId = res.case_id;
     S.dirty = false;
-    toast(`Case ${res.action}: <b>${escapeHtml(res.title)}</b> — <a href="${res.link}" target="_blank">open C${res.case_id} in TestRail ↗</a>`, "ok", true);
-    $("#publish-status").textContent = `Editing C${res.case_id} — publishing will update it.`;
+    if (S.mode === "local") {
+      toast(`Case ${res.action}: <b>${escapeHtml(res.title)}</b> — saved as <code>${escapeHtml(res.case_id)}</code>`, "ok", true);
+      $("#publish-status").textContent = `Editing ${res.case_id} — publishing will update it.`;
+    } else {
+      toast(`Case ${res.action}: <b>${escapeHtml(res.title)}</b> — <a href="${res.link}" target="_blank">open C${res.case_id} in TestRail ↗</a>`, "ok", true);
+      $("#publish-status").textContent = `Editing C${res.case_id} — publishing will update it.`;
+    }
     await reloadSuite();
     saveState();
   } catch (e) {
     toast("Publish failed: " + e.message, "err");
   } finally {
-    btn.disabled = false; btn.textContent = "Publish to TestRail";
+    btn.disabled = false; btn.textContent = S.mode === "local" ? "Publish" : "Publish to TestRail";
   }
 }
 
@@ -1513,7 +1757,7 @@ async function createSection() {
   const name = $("#new-section-name").value.trim();
   if (!name) return;
   try {
-    const res = await api("/api/testrail/section", { method: "POST", body: {
+    const res = await api(trUrl("section"), { method: "POST", body: {
       project_id: S.projectId, suite_id: S.suiteId, name,
     } });
     toast(`Section created: ${res.name}`, "ok");
@@ -1528,7 +1772,7 @@ function caseRow(c) {
     el("input", { type: "checkbox", "data-cid": c.id, onchange: onRunCaseToggle }),
     el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
     el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
-    el("span", { class: "cid" }, `C${c.id}`),
+    el("span", { class: "cid" }, caseBadge(c.id)),
   );
 }
 
@@ -1611,11 +1855,26 @@ function onRunCaseToggle() {
 }
 
 async function createRun() {
-  const name = $("#run-name").value.trim();
-  if (!name) { toast("Give the run a name.", "err"); return; }
-  const ids = [...document.querySelectorAll("#run-cases input[data-cid]:checked")].map(cb => Number(cb.dataset.cid));
+  const ids = [...document.querySelectorAll("#run-cases input[data-cid]:checked")].map(cb => parseId(cb.dataset.cid));
   if (!ids.length) { toast("Select at least one case.", "err"); return; }
   const btn = $("#btn-create-run");
+
+  if (S.mode === "local") {
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Running…';
+    try {
+      const res = await api("/api/local/run", { method: "POST", body: {
+        project_id: S.projectId, case_ids: ids, var_scopes: ["global", S.projectId],
+      } });
+      $("#run-back").classList.remove("open");
+      toast(`Run finished: <b>${res.counts.passed} passed, ${res.counts.failed} failed</b> (${res.total} total)`,
+            res.success ? "ok" : "err", true);
+    } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; btn.textContent = "Run now"; }
+    return;
+  }
+
+  const name = $("#run-name").value.trim();
+  if (!name) { toast("Give the run a name.", "err"); return; }
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Creating…';
   try {
     const res = await api("/api/testrail/run", { method: "POST", body: {
@@ -1638,7 +1897,7 @@ async function runLint() {
   $("#lint-back").classList.add("open");
   body.appendChild(el("div", { class: "empty-note" }, "Checking every case in the suite…"));
   try {
-    const res = await api("/api/testrail/lint", { method: "POST", body: { project_id: S.projectId, suite_id: S.suiteId } });
+    const res = await api(trUrl("lint"), { method: "POST", body: { project_id: S.projectId, suite_id: S.suiteId } });
     body.innerHTML = "";
     const c = res.counts;
     const summary = el("div", { class: "issue " + (c.errors ? "error" : c.warnings ? "warning" : "okline") },
@@ -1654,7 +1913,7 @@ async function runLint() {
         }, title: "Open in the editor" },
         el("span", { class: `role-badge role-${item.role}` }, item.role === "other" ? "?" : item.role),
         el("span", { class: "titlebit", style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(item.title) || item.title),
-        el("span", { class: "actid", style: "margin-left:auto; flex-shrink:0" }, `C${item.case_id}`),
+        el("span", { class: "actid", style: "margin-left:auto; flex-shrink:0" }, caseBadge(item.case_id)),
       ));
       const det = el("div", { style: "padding: 4px 12px 10px" });
       for (const e of item.errors) det.appendChild(el("div", { class: "issue error" }, "✕ " + e));
