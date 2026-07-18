@@ -34,7 +34,8 @@ or reference it.
   server (`easy-bdd-mcp.service`, runs from `/home/jenkins/EasyBDD` — its
   systemd unit does `git pull --ff-only` on start, so deploy = push to main
   + `sudo systemctl restart easy-bdd-mcp`), 4566 Floci (S3 endpoint +
-  built-in UI).
+  built-in UI), 9001/9002 Jira/Confluence MCP (`mcp-jira` / `mcp-confluence`
+  Docker containers, no systemd units — see `docs/atlassian-mcp-setup.md`).
 - The MCP server also serves engineer self-setup over plain HTTP:
   `http://192.168.100.100:8092/onboard` (instructions page), `/setup`
   (macOS/Linux bash installer), `/setup.ps1` (Windows PowerShell installer).

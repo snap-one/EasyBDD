@@ -209,7 +209,9 @@ And a **`confluence` MCP server**, same pattern again but its own endpoint —
 production `.env`, fetched from `/confluence-mcp-config`. It's deliberately a
 separate deployment/entry from `jira` (even though mcp-atlassian can serve
 both from one process) so each can be enabled, disabled, or pointed at a
-different host independently.
+different host independently. How the two mcp-atlassian instances are
+deployed and operated server-side is documented in
+[docs/atlassian-mcp-setup.md](docs/atlassian-mcp-setup.md).
 
 Server-side, auth is a shared bearer token in `EASYBDD_MCP_TOKEN` (set in the
 production `.env`, loaded by the systemd unit). If unset, the server runs
