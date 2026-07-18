@@ -14,7 +14,6 @@ pipeline {
             artifactNumToKeepStr: '50'
         ))
         timestamps()
-        timeout(time: 60, unit: 'MINUTES')
     }
 
     stages {
