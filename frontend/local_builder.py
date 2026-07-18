@@ -1029,6 +1029,48 @@ def _fetch_testrail_cases(project_id: int, suite_id: Optional[int], section_id: 
     return cases
 
 
+def _fetch_testrail_sections_by_id(project_id: int, suite_id: Optional[int]) -> Dict[int, Dict[str, Any]]:
+    from easybdd.services.testrail_service import TestRailError
+
+    try:
+        sections = _tr().get_sections(project_id, suite_id)
+    except TestRailError as exc:
+        raise HTTPException(status_code=502, detail=f"TestRail error: {exc}")
+    return {s["id"]: s for s in sections}
+
+
+def _tr_solo_root_section_id(sections_by_id: Dict[int, Dict[str, Any]]) -> Optional[int]:
+    """Id of the suite's sole top-level section, if it has exactly one.
+
+    TestRail suites almost always start with one auto-created root section
+    (commonly named after the suite itself). Nesting every imported case one
+    extra level under that alone would just duplicate the workspace name in
+    every path without representing a real grouping, so it's excluded from
+    the path. When a suite has more than one top-level section, each one is a
+    real distinction (e.g. separate family trees) and is kept.
+    """
+    roots = [s["id"] for s in sections_by_id.values() if s.get("parent_id") is None]
+    return roots[0] if len(roots) == 1 else None
+
+
+def _tr_section_path(section_id: Optional[int], sections_by_id: Dict[int, Dict[str, Any]],
+                      skip_id: Optional[int] = None) -> str:
+    """Slugified '/'-joined path (root ancestor first) mirroring TestRail's own
+    subsection nesting for `section_id`, so imported cases land in the same
+    family/SKU subfolders TestRail organizes them into instead of one flat
+    workspace folder. `skip_id` (see _tr_solo_root_section_id) is omitted."""
+    chain: List[str] = []
+    seen = set()
+    current = sections_by_id.get(section_id) if section_id is not None else None
+    while current is not None and current["id"] not in seen:
+        seen.add(current["id"])
+        if current["id"] != skip_id:
+            chain.append(_slug(current.get("name") or str(current["id"])))
+        parent_id = current.get("parent_id")
+        current = sections_by_id.get(parent_id) if parent_id is not None else None
+    return "/".join(reversed(chain))
+
+
 def _clean_title(title: str, role: str) -> str:
     prefix = CASE_PREFIXES.get(role)
     return title[len(prefix):].strip() if prefix else title.strip()
@@ -1070,6 +1112,8 @@ async def import_testrail_preview(
 ):
     _assert_safe_name(workspace, "workspace")
     cases = _fetch_testrail_cases(project_id, suite_id, section_id)
+    sections_by_id = _fetch_testrail_sections_by_id(project_id, suite_id)
+    solo_root_id = _tr_solo_root_section_id(sections_by_id)
     manifest = []
     for c in cases:
         title = c.get("title", "") or ""
@@ -1082,8 +1126,10 @@ async def import_testrail_preview(
             target, exists = f"{workspace}/vars.yaml#{clean}", clean in _load_yaml_dict(_vars_path(workspace))
         elif role in _LOCAL_CASE_ROLES:
             stem = _slug(clean)
-            target = f"{workspace}/{stem}.yaml"
-            exists = (TESTS_DIR / workspace / f"{stem}.yaml").exists()
+            sec_path = _tr_section_path(c.get("section_id"), sections_by_id, skip_id=solo_root_id)
+            rel = f"{sec_path}/{stem}.yaml" if sec_path else f"{stem}.yaml"
+            target = f"{workspace}/{rel}"
+            exists = (TESTS_DIR / workspace / rel).exists()
         elif role == "test":
             target, exists = "(pointer case — nothing to import)", False
         else:
@@ -1104,6 +1150,8 @@ class ImportApplyRequest(BaseModel):
 async def import_testrail_apply(req: ImportApplyRequest):
     _assert_safe_name(req.workspace, "workspace")
     cases = _fetch_testrail_cases(req.project_id, req.suite_id, req.section_id)
+    sections_by_id = _fetch_testrail_sections_by_id(req.project_id, req.suite_id)
+    solo_root_id = _tr_solo_root_section_id(sections_by_id)
 
     created: List[str] = []
     updated: List[str] = []
@@ -1174,7 +1222,9 @@ async def import_testrail_apply(req: ImportApplyRequest):
                     continue
                 file_data = _model_to_file_dict(model, v["body"])
                 stem = _slug(clean)
-                out_path = TESTS_DIR / req.workspace / f"{stem}.yaml"
+                sec_path = _tr_section_path(c.get("section_id"), sections_by_id, skip_id=solo_root_id)
+                rel = f"{sec_path}/{stem}.yaml" if sec_path else f"{stem}.yaml"
+                out_path = TESTS_DIR / req.workspace / rel
                 exists = out_path.exists()
                 if exists:
                     if not req.overwrite:

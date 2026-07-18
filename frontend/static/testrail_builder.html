@@ -301,6 +301,7 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
             <label class="small">Project</label>
             <select id="sel-project" class="compact"><option value="">loading…</option></select>
           </div>
+          <button class="icon-btn" id="btn-new-project" title="Create new workspace" style="margin-top:16px; display:none">＋</button>
           <button class="icon-btn" id="btn-rename-project" title="Rename workspace" style="margin-top:16px; display:none">✏️</button>
           <button class="icon-btn" id="btn-delete-project" title="Delete workspace" style="margin-top:16px; display:none">🗑️</button>
         </div>
@@ -962,6 +963,7 @@ function applyModeUi() {
   $("#btn-create-run").textContent = isLocal ? "Run now" : "Create run";
   $("#btn-history").style.display = isLocal ? "" : "none";
   $("#btn-import-testrail").style.display = isLocal ? "" : "none";
+  $("#btn-new-project").style.display = isLocal ? "" : "none";
   $("#btn-rename-project").style.display = isLocal ? "" : "none";
   $("#btn-delete-project").style.display = isLocal ? "" : "none";
   $("#btn-rename-section").style.display = isLocal ? "" : "none";
@@ -2035,6 +2037,16 @@ async function refreshProjectsDropdown(selectId) {
   }
 }
 
+async function createWorkspace() {
+  const name = (prompt("New workspace name:") || "").trim();
+  if (!name) return;
+  try {
+    const res = await api(`/api/local/projects?name=${encodeURIComponent(name)}`, { method: "POST" });
+    toast(`Workspace '${res.id}' created.`, "ok");
+    await refreshProjectsDropdown(res.id);
+  } catch (e) { toast("Create failed: " + e.message, "err"); }
+}
+
 async function renameWorkspace() {
   if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
   const current = S.projectId;
@@ -2584,6 +2596,7 @@ $("#btn-new-section").addEventListener("click", () => {
   $("#section-back").classList.add("open");
 });
 $("#btn-create-section").addEventListener("click", createSection);
+$("#btn-new-project").addEventListener("click", createWorkspace);
 $("#btn-rename-project").addEventListener("click", renameWorkspace);
 $("#btn-delete-project").addEventListener("click", deleteWorkspace);
 $("#btn-rename-section").addEventListener("click", renameSection);
