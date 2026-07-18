@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -382,6 +383,50 @@ async def create_project(name: str = Query(...)):
     return {"id": slug, "name": slug}
 
 
+@app.get("/api/local/projects/{project_id}/stats")
+async def project_stats(project_id: str):
+    base = _workspace_dir(project_id)
+    if not base.exists():
+        raise HTTPException(status_code=404, detail=f"Workspace '{project_id}' not found")
+    case_count = sum(1 for _ in _iter_case_files(base)) + sum(
+        1 for d in base.iterdir() if d.is_dir() for _ in _iter_case_files(d)
+    )
+    section_count = sum(1 for d in base.iterdir() if d.is_dir() and not d.name.startswith("."))
+    return {
+        "case_count": case_count,
+        "section_count": section_count,
+        "has_shared_steps": (base / "shared_steps.yaml").exists(),
+        "has_vars": (base / "vars.yaml").exists(),
+    }
+
+
+class RenameRequest(BaseModel):
+    name: str
+
+
+@app.put("/api/local/projects/{project_id}")
+async def rename_project(project_id: str, req: RenameRequest):
+    src = _workspace_dir(project_id)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Workspace '{project_id}' not found")
+    slug = _slug(req.name)
+    dest = TESTS_DIR / slug
+    if dest.exists() and dest != src:
+        raise HTTPException(status_code=409, detail=f"Workspace '{slug}' already exists")
+    if dest != src:
+        src.rename(dest)
+    return {"id": slug, "name": slug}
+
+
+@app.delete("/api/local/projects/{project_id}")
+async def delete_project(project_id: str):
+    path = _workspace_dir(project_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Workspace '{project_id}' not found")
+    shutil.rmtree(path)
+    return {"id": project_id, "status": "deleted"}
+
+
 @app.get("/api/local/sections")
 async def list_sections(project_id: str = Query(...)):
     base = _workspace_dir(project_id)
@@ -411,24 +456,69 @@ async def create_section(req: LocalSectionRequest):
     return {"id": slug, "name": slug}
 
 
+class RenameSectionRequest(BaseModel):
+    project_id: str
+    section_id: str
+    name: str
+
+
+@app.put("/api/local/sections")
+async def rename_section(req: RenameSectionRequest):
+    src = _section_dir(req.project_id, req.section_id)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Section '{req.section_id}' not found")
+    slug = _slug(req.name)
+    dest = _workspace_dir(req.project_id) / slug
+    if dest.exists() and dest != src:
+        raise HTTPException(status_code=409, detail=f"Section '{slug}' already exists")
+    if dest != src:
+        src.rename(dest)
+    return {"id": slug, "name": slug}
+
+
+@app.delete("/api/local/sections")
+async def delete_section(project_id: str = Query(...), section_id: str = Query(...)):
+    path = _section_dir(project_id, section_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Section '{section_id}' not found")
+    shutil.rmtree(path)
+    return {"id": section_id, "status": "deleted"}
+
+
 @app.get("/api/local/cases")
 async def list_cases(project_id: str = Query(...), section_id: Optional[str] = Query(None)):
-    base = _section_dir(project_id, section_id)
+    # When section_id is omitted, return cases from every section (plus the
+    # workspace root) so the client can group them into its section tree —
+    # matching /api/testrail/cases, which always returns the whole suite and
+    # lets the client do the grouping. Only scope to one folder when a
+    # specific section_id is given.
+    if section_id:
+        dirs = [(section_id, _section_dir(project_id, section_id))]
+    else:
+        workspace = _workspace_dir(project_id)
+        dirs = [(None, workspace)]
+        if workspace.exists():
+            dirs += [
+                (d.name, d) for d in sorted(workspace.iterdir())
+                if d.is_dir() and not d.name.startswith(".")
+            ]
+
     out = []
-    for f in _iter_case_files(base):
-        try:
-            data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-        except yaml.YAMLError as exc:
-            out.append({
-                "id": _case_file_id(f), "title": f.stem, "section_id": section_id,
-                "role": "other", "error": f"Invalid YAML: {exc}",
-            })
-            continue
-        role = data.get("role") or "feature"
-        if role not in _LOCAL_CASE_ROLES:
-            role = "feature"
-        title = f"{CASE_PREFIXES[role]} {data.get('name', f.stem)}"
-        out.append({"id": _case_file_id(f), "title": title, "section_id": section_id, "role": role})
+    for sec_id, base in dirs:
+        for f in _iter_case_files(base):
+            try:
+                data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            except yaml.YAMLError as exc:
+                out.append({
+                    "id": _case_file_id(f), "title": f.stem, "section_id": sec_id,
+                    "role": "other", "error": f"Invalid YAML: {exc}",
+                })
+                continue
+            role = data.get("role") or "feature"
+            if role not in _LOCAL_CASE_ROLES:
+                role = "feature"
+            title = f"{CASE_PREFIXES[role]} {data.get('name', f.stem)}"
+            out.append({"id": _case_file_id(f), "title": title, "section_id": sec_id, "role": role})
     return out
 
 
@@ -458,6 +548,28 @@ async def delete_case(case_id: str):
         raise HTTPException(status_code=404, detail="Case not found")
     path.unlink()
     return {"case_id": case_id, "status": "deleted"}
+
+
+class BulkDeleteRequest(BaseModel):
+    case_ids: List[str]
+
+
+@app.post("/api/local/cases/bulk-delete")
+async def bulk_delete_cases(req: BulkDeleteRequest):
+    deleted: List[str] = []
+    errors: List[str] = []
+    for case_id in req.case_ids:
+        try:
+            path = _case_path_from_id(case_id)
+        except HTTPException as exc:
+            errors.append(f"{case_id}: {exc.detail}")
+            continue
+        if not path.exists():
+            errors.append(f"{case_id}: not found")
+            continue
+        path.unlink()
+        deleted.append(case_id)
+    return {"deleted": deleted, "errors": errors}
 
 
 class LocalPublishRequest(BaseModel):

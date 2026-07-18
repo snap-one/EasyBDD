@@ -296,9 +296,13 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
     <!-- ============ sidebar ============ -->
     <div id="sidebar">
       <div class="ctx">
-        <div>
-          <label class="small">Project</label>
-          <select id="sel-project" class="compact"><option value="">loading…</option></select>
+        <div class="row">
+          <div style="flex:1">
+            <label class="small">Project</label>
+            <select id="sel-project" class="compact"><option value="">loading…</option></select>
+          </div>
+          <button class="icon-btn" id="btn-rename-project" title="Rename workspace" style="margin-top:16px; display:none">✏️</button>
+          <button class="icon-btn" id="btn-delete-project" title="Delete workspace" style="margin-top:16px; display:none">🗑️</button>
         </div>
         <div id="suite-wrap">
           <label class="small">Suite</label>
@@ -310,6 +314,11 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
         <button class="btn ghost" id="btn-expand-sections" title="Expand all sections" style="padding:5px 8px; font-size:12.5px">▾</button>
         <button class="btn ghost" id="btn-collapse-sections" title="Collapse all sections" style="padding:5px 8px; font-size:12.5px">▸</button>
         <button class="btn ghost" id="btn-lint" title="Validate every case in this suite with the runner's parser — catches hand-edits made in TestRail's raw text field" style="padding:5px 10px; font-size:12.5px">🩺</button>
+      </div>
+      <div id="bulk-delete-bar" style="display:none; gap:6px; margin:0 12px 6px; align-items:center; font-size:12px">
+        <button class="add-link" id="case-select-all">Select all</button>
+        <button class="add-link" id="case-select-none">Select none</button>
+        <button class="btn ghost" id="btn-bulk-delete" disabled style="margin-left:auto; padding:3px 10px; font-size:12px">Delete selected</button>
       </div>
       <div id="case-list"><div class="empty-note" style="padding:12px">Select a project to browse cases.</div></div>
     </div>
@@ -357,6 +366,8 @@ select.compact, input.compact { padding: 5px 8px; font-size: 13px; }
             <select id="sel-section" class="compact"><option value="">—</option></select>
           </div>
           <button class="icon-btn" id="btn-new-section" title="Create new section" style="margin-top:16px">＋</button>
+          <button class="icon-btn" id="btn-rename-section" title="Rename section" style="margin-top:16px; display:none">✏️</button>
+          <button class="icon-btn" id="btn-delete-section" title="Delete section" style="margin-top:16px; display:none">🗑️</button>
         </div>
         <div class="row">
           <button class="btn primary" id="btn-publish" style="flex:1">Publish to TestRail</button>
@@ -612,6 +623,7 @@ const S = {
   paletteTarget: null,  // {list: array, allowControl: bool, onAdd: fn}
   previewTimer: null,
   collapsedSections: new Set(),  // sidebar section ids the user collapsed
+  selectedCaseIds: new Set(),    // local-mode bulk-delete selection
   stepsExpanded: true,  // default expand/collapse state for newly-rendered step cards
   chatMessages: [],     // {role, content} history for the AI chat panel (session-only)
   chatBusy: false,
@@ -917,6 +929,11 @@ function applyModeUi() {
   $("#btn-create-run").textContent = isLocal ? "Run now" : "Create run";
   $("#btn-history").style.display = isLocal ? "" : "none";
   $("#btn-import-testrail").style.display = isLocal ? "" : "none";
+  $("#btn-rename-project").style.display = isLocal ? "" : "none";
+  $("#btn-delete-project").style.display = isLocal ? "" : "none";
+  $("#btn-rename-section").style.display = isLocal ? "" : "none";
+  $("#btn-delete-section").style.display = isLocal ? "" : "none";
+  updateBulkDeleteBar();
 }
 
 /* ============================== local run history ============================== */
@@ -1106,18 +1123,28 @@ async function reloadSuite() {
 
 function renderSections() {
   const sel = $("#sel-section");
+  const prev = sel.value;
   sel.innerHTML = "<option value=''>— select section —</option>";
   for (const s of S.sections) {
     sel.appendChild(el("option", { value: s.id }, `${"  ".repeat(s.depth || 0)}${s.name}`));
   }
+  if (prev && S.sections.some(s => s.id === prev)) sel.value = prev;
 }
 
 function caseListItem(c) {
+  const checkbox = S.mode === "local" ? el("input", {
+    type: "checkbox",
+    checked: S.selectedCaseIds.has(c.id) || null,
+    onclick: (e) => e.stopPropagation(),
+    onchange: (e) => toggleCaseSelection(c.id, e.target.checked),
+    style: "margin-right:2px",
+  }) : null;
   return el("button", {
     class: "case-item" + (S.editingCaseId === c.id ? " active" : ""),
     onclick: () => loadCase(c.id),
     title: c.title,
   },
+    checkbox,
     el("span", { class: `role-badge role-${c.role}` }, c.role === "other" ? "?" : c.role),
     el("span", { style: "overflow:hidden; text-overflow:ellipsis; white-space:nowrap" }, stripPrefix(c.title)),
     el("span", { class: "cid" }, caseBadge(c.id)),
@@ -1127,6 +1154,7 @@ function caseListItem(c) {
 function renderCaseList() {
   const box = $("#case-list");
   box.innerHTML = "";
+  updateBulkDeleteBar();
   const filter = $("#case-search").value.trim().toLowerCase();
   if (!S.cases.length) {
     box.appendChild(el("div", { class: "empty-note", style: "padding:12px" },
@@ -1187,6 +1215,48 @@ function renderCaseList() {
     ));
   }
   if (!any) box.appendChild(el("div", { class: "empty-note", style: "padding:12px" }, "No cases match the filter."));
+}
+
+/* ============================== bulk case selection (local mode) ============================== */
+function toggleCaseSelection(caseId, checked) {
+  if (checked) S.selectedCaseIds.add(caseId);
+  else S.selectedCaseIds.delete(caseId);
+  updateBulkDeleteBar();
+}
+
+function updateBulkDeleteBar() {
+  const bar = $("#bulk-delete-bar");
+  if (S.mode !== "local") { bar.style.display = "none"; return; }
+  bar.style.display = "flex";
+  const n = S.selectedCaseIds.size;
+  const btn = $("#btn-bulk-delete");
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Delete selected (${n})` : "Delete selected";
+}
+
+async function bulkDeleteSelectedCases() {
+  const ids = [...S.selectedCaseIds];
+  if (!ids.length) return;
+  if (!confirm(`Delete ${ids.length} selected case(s)? This cannot be undone.`)) return;
+  const btn = $("#btn-bulk-delete");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    const res = await api("/api/local/cases/bulk-delete", { method: "POST", body: { case_ids: ids } });
+    S.selectedCaseIds.clear();
+    if (res.errors.length) toast(`Deleted ${res.deleted.length}, ${res.errors.length} error(s) — see console.`, "err");
+    else toast(`Deleted ${res.deleted.length} case(s).`, "ok");
+    if (res.errors.length) console.warn("Bulk delete errors:", res.errors);
+    if (S.editingCaseId && ids.includes(S.editingCaseId)) {
+      S.editingCaseId = null; S.model = newModel("feature"); S.dirty = false;
+      renderTypeRow(); renderEditor(); schedulePreview();
+    }
+    await reloadSuite();
+  } catch (e) {
+    toast("Bulk delete failed: " + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    updateBulkDeleteBar();
+  }
 }
 
 async function loadCase(caseId) {
@@ -1767,6 +1837,85 @@ async function createSection() {
   } catch (e) { toast(e.message, "err"); }
 }
 
+/* ============================== workspace/section rename & delete (local mode) ============================== */
+async function refreshProjectsDropdown(selectId) {
+  const projects = await api("/api/local/projects");
+  S.projects = projects;
+  const sel = $("#sel-project");
+  sel.innerHTML = "<option value=''>— select —</option>";
+  for (const p of projects) sel.appendChild(el("option", { value: p.id }, p.name));
+  if (selectId && projects.some(p => p.id === selectId)) {
+    sel.value = String(selectId);
+    await onProjectChange();
+  } else {
+    sel.value = "";
+    await onProjectChange();
+  }
+}
+
+async function renameWorkspace() {
+  if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
+  const current = S.projectId;
+  const name = prompt("Rename workspace to:", current);
+  if (!name || !name.trim() || name.trim() === current) return;
+  try {
+    const res = await api(`/api/local/projects/${current}`, { method: "PUT", body: { name: name.trim() } });
+    toast(`Workspace renamed to '${res.id}'.`, "ok");
+    await refreshProjectsDropdown(res.id);
+  } catch (e) { toast("Rename failed: " + e.message, "err"); }
+}
+
+async function deleteWorkspace() {
+  if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
+  const current = S.projectId;
+  let stats;
+  try {
+    stats = await api(`/api/local/projects/${current}/stats`);
+  } catch (e) { toast("Could not check workspace contents: " + e.message, "err"); return; }
+  const extras = [];
+  if (stats.has_shared_steps) extras.push("its shared steps");
+  if (stats.has_vars) extras.push("its variable sets");
+  const extraText = extras.length ? `, plus ${extras.join(" and ")}` : "";
+  const msg = `Delete workspace '${current}'? This will permanently delete ${stats.case_count} ` +
+    `case(s) across ${stats.section_count} section(s)${extraText}. This cannot be undone.`;
+  if (!confirm(msg)) return;
+  try {
+    await api(`/api/local/projects/${current}`, { method: "DELETE" });
+    toast(`Workspace '${current}' deleted.`, "ok");
+    await refreshProjectsDropdown(null);
+  } catch (e) { toast("Delete failed: " + e.message, "err"); }
+}
+
+async function renameSection() {
+  const sectionId = $("#sel-section").value;
+  if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
+  if (!sectionId) { toast("Select a section first.", "err"); return; }
+  const name = prompt("Rename section to:", sectionId);
+  if (!name || !name.trim() || name.trim() === sectionId) return;
+  try {
+    const res = await api("/api/local/sections", { method: "PUT", body: {
+      project_id: S.projectId, section_id: sectionId, name: name.trim(),
+    } });
+    toast(`Section renamed to '${res.id}'.`, "ok");
+    await reloadSuite();
+    $("#sel-section").value = res.id;
+  } catch (e) { toast("Rename failed: " + e.message, "err"); }
+}
+
+async function deleteSection() {
+  const sectionId = $("#sel-section").value;
+  if (!S.projectId) { toast("Select a workspace first.", "err"); return; }
+  if (!sectionId) { toast("Select a section first.", "err"); return; }
+  const count = S.cases.filter(c => c.section_id === sectionId).length;
+  const msg = `Delete section '${sectionId}'? This will permanently delete ${count} case(s) in it. This cannot be undone.`;
+  if (!confirm(msg)) return;
+  try {
+    await api(`/api/local/sections?project_id=${S.projectId}&section_id=${sectionId}`, { method: "DELETE" });
+    toast(`Section '${sectionId}' deleted.`, "ok");
+    await reloadSuite();
+  } catch (e) { toast("Delete failed: " + e.message, "err"); }
+}
+
 function caseRow(c) {
   return el("label", { class: "run-case-row" },
     el("input", { type: "checkbox", "data-cid": c.id, onchange: onRunCaseToggle }),
@@ -2217,6 +2366,19 @@ $("#btn-new-section").addEventListener("click", () => {
   $("#section-back").classList.add("open");
 });
 $("#btn-create-section").addEventListener("click", createSection);
+$("#btn-rename-project").addEventListener("click", renameWorkspace);
+$("#btn-delete-project").addEventListener("click", deleteWorkspace);
+$("#btn-rename-section").addEventListener("click", renameSection);
+$("#btn-delete-section").addEventListener("click", deleteSection);
+$("#case-select-all").addEventListener("click", () => {
+  for (const c of S.cases) S.selectedCaseIds.add(c.id);
+  renderCaseList();
+});
+$("#case-select-none").addEventListener("click", () => {
+  S.selectedCaseIds.clear();
+  renderCaseList();
+});
+$("#btn-bulk-delete").addEventListener("click", bulkDeleteSelectedCases);
 $("#btn-run-modal").addEventListener("click", openRunModal);
 $("#btn-create-run").addEventListener("click", createRun);
 $("#run-select-all").addEventListener("click", () => { document.querySelectorAll("#run-cases input[data-cid]").forEach(cb => cb.checked = true); onRunCaseToggle(); });
