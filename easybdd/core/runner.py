@@ -1751,6 +1751,7 @@ class TestRunner:
             items = items[:limit]
 
         print(f"      → FOR {loop_var} in <{len(items)} items>")
+        loop_all_passed = True
         for idx, item in enumerate(items):
             variables[loop_var] = item
             try:
@@ -1763,15 +1764,22 @@ class TestRunner:
                     continue_if=step.continue_if,
                 )
                 if not ok:
-                    return False
+                    loop_all_passed = False
+                    print(f"      ❌ FOR iteration {idx + 1} failed")
             except _BreakSignal:
                 print(f"      → FOR loop: BREAK at iteration {idx + 1}")
                 break
             except _ContinueSignal:
                 continue
+            except Exception as e:
+                # A single iteration's exception (e.g. a transient connection
+                # glitch) must not abort the remaining iterations — same
+                # reasoning as the sequential data-iteration fix above.
+                loop_all_passed = False
+                print(f"      ☠️  FOR iteration {idx + 1} ERROR: {e}")
 
         variables.pop(loop_var, None)
-        return True
+        return loop_all_passed
 
     def _execute_while_loop(self, step, variables: dict, soft_assert_manager, step_number: int) -> bool:
         """Execute a while loop step."""
