@@ -63,8 +63,11 @@ textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
 }
 #sidebar .ctx { padding: 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
 #sidebar label.small, .field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); }
+#cases-tab-panel, #shared-tab-panel, #vars-tab-panel, #data-tab-panel {
+  display: flex; flex-direction: column; flex: 1; min-height: 0;
+}
 #case-search { margin: 10px 12px 4px; width: calc(100% - 24px); }
-#case-list { flex: 1; overflow-y: auto; padding: 6px 8px 20px; }
+#case-list, #shared-steps-list, #vars-list, #data-sets-list { flex: 1; overflow-y: auto; padding: 6px 8px 20px; }
 .case-group-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); padding: 10px 6px 4px; }
 .case-item {
   display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
