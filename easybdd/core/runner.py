@@ -748,8 +748,16 @@ class TestRunner:
                 max_workers=1,
             )
 
-            # Execute this iteration
-            success = self._execute_single_test(iteration_test)
+            # Execute this iteration. An exception here (e.g. a transient
+            # connection glitch) must not abort the remaining iterations —
+            # mirrors the exception handling the async path already has in
+            # execute_single_iteration/future.result() above.
+            try:
+                success = self._execute_single_test(iteration_test)
+            except Exception as e:
+                print(f"    ☠️  Data iteration {i} ERROR: {e}")
+                success = False
+
             if not success:
                 all_passed = False
                 print(f"    ❌ Data iteration {i} failed")
