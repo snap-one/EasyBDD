@@ -12,6 +12,20 @@
 #   4. Configures VS Code GitHub Copilot's MCP user config.
 # It never removes existing MCP servers from your config; it only adds/updates
 # the "easybdd" entry. A timestamped backup of your config is made first.
+#
+# Two Windows-specific quirks this script has to work around, both of which
+# make the script *report* success while the app silently never picks up the
+# config (see anthropics/claude-code#25075 and #26073):
+#   - The Claude Desktop installer registers a "Claude.exe" alias under
+#     %LOCALAPPDATA%\Microsoft\WindowsApps, which sits ahead of the npm-installed
+#     Claude Code CLI on PATH. A plain `claude` lookup can resolve to Desktop
+#     instead of the CLI, so `claude mcp add` silently launches the Desktop app
+#     instead of registering anything.
+#   - Fresh Claude Desktop installs use MSIX packaging, which redirects
+#     %APPDATA%\Claude\* to a virtualized path under
+#     %LOCALAPPDATA%\Packages\Claude_<hash>\LocalCache\Roaming\Claude\. The app
+#     reads its config from the virtualized path, not the documented one, so
+#     writing only to %APPDATA%\Claude never actually reaches the app.
 
 $ErrorActionPreference = "Stop"
 $McpUrl = if ($env:EASYBDD_MCP_URL) { $env:EASYBDD_MCP_URL } else { "http://192.168.100.100:8092/mcp" }
@@ -22,6 +36,11 @@ function Say($m)  { Write-Host "==> $m" -ForegroundColor Blue }
 function Ok($m)   { Write-Host " OK $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "  ! $m" -ForegroundColor Yellow }
 function Fail($m) { Write-Host "  X $m" -ForegroundColor Red }
+
+function Refresh-Path {
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                [Environment]::GetEnvironmentVariable("Path", "User")
+}
 
 function Ensure-JsonObject($obj) {
     if ($null -eq $obj) { return [pscustomobject]@{} }
@@ -39,8 +58,8 @@ function Ensure-JsonObject($obj) {
 function Ensure-NotePropertyObject($obj, $propertyName) {
     if (-not $obj.PSObject.Properties[$propertyName] -or
         $null -eq $obj.$propertyName -or
-        -not ($obj.$propertyName -is [System.Management.Automation.PSCustomObject]) -and
-        -not ($obj.$propertyName -is [System.Collections.IDictionary])) {
+        (($obj.$propertyName -isnot [System.Management.Automation.PSCustomObject]) -and
+         ($obj.$propertyName -isnot [System.Collections.IDictionary]))) {
         if ($obj.PSObject.Properties[$propertyName]) {
             $obj.$propertyName = [pscustomobject]@{}
         } else {
@@ -48,6 +67,10 @@ function Ensure-NotePropertyObject($obj, $propertyName) {
         }
     }
 }
+
+# Refresh PATH up front: if the user just installed Claude Code (or Node) in
+# this same terminal session, a stale PATH would make Get-Command miss it.
+Refresh-Path
 
 Say "Easy BDD MCP setup (server: $McpUrl)"
 
@@ -148,50 +171,54 @@ try {
 }
 
 # --- 3. Claude Code (CLI / IDE) ----------------------------------------------
-if (Get-Command claude -ErrorAction SilentlyContinue) {
-    try {
-        claude mcp remove --scope user easybdd 2>$null | Out-Null
-    } catch {}
-    try {
-        claude mcp add --scope user --transport http easybdd $McpUrl --header "Authorization: Bearer $Token" | Out-Null
+# Skip the WindowsApps "Claude.exe" alias (that's Desktop, not the CLI - see
+# header note) and use whatever real CLI resolves first on PATH, calling it by
+# full path so we can't be fooled by alias ordering.
+$claudeCliCmd = Get-Command claude -All -ErrorAction SilentlyContinue |
+                Where-Object { $_.Source -notlike "*\Microsoft\WindowsApps\*" } |
+                Select-Object -First 1
+
+if ($claudeCliCmd) {
+    & $claudeCliCmd.Source mcp remove --scope user easybdd *>$null
+    & $claudeCliCmd.Source mcp add --scope user --transport http easybdd $McpUrl --header "Authorization: Bearer $Token" *>$null
+    # Native commands don't throw into try/catch on non-zero exit - check
+    # $LASTEXITCODE explicitly or a failed add silently reports as "OK".
+    if ($LASTEXITCODE -eq 0) {
         Ok "Claude Code configured (user scope)."
         $Configured += "Claude Code"
-    } catch {
-        Warn "Claude Code is installed but 'claude mcp add' failed - configure it manually later."
+    } else {
+        Warn "Claude Code is installed but 'claude mcp add' failed (exit $LASTEXITCODE) - configure it manually later."
     }
+
     if ($JenkinsUrl) {
-        try {
-            claude mcp remove --scope user jenkins 2>$null | Out-Null
-        } catch {}
-        try {
-            claude mcp add --scope user --transport http jenkins $JenkinsUrl --header "Authorization: $JenkinsAuth" | Out-Null
+        & $claudeCliCmd.Source mcp remove --scope user jenkins *>$null
+        & $claudeCliCmd.Source mcp add --scope user --transport http jenkins $JenkinsUrl --header "Authorization: $JenkinsAuth" *>$null
+        if ($LASTEXITCODE -eq 0) {
             Ok "Claude Code: jenkins MCP configured."
-        } catch {
+        } else {
             Warn "Could not add the jenkins MCP server to Claude Code."
         }
     }
     if ($JiraUrl) {
-        try {
-            claude mcp remove --scope user jira 2>$null | Out-Null
-        } catch {}
-        try {
-            claude mcp add --scope user --transport http jira $JiraUrl --header "Authorization: $JiraAuth" | Out-Null
+        & $claudeCliCmd.Source mcp remove --scope user jira *>$null
+        & $claudeCliCmd.Source mcp add --scope user --transport http jira $JiraUrl --header "Authorization: $JiraAuth" *>$null
+        if ($LASTEXITCODE -eq 0) {
             Ok "Claude Code: jira MCP configured."
-        } catch {
+        } else {
             Warn "Could not add the jira MCP server to Claude Code."
         }
     }
     if ($ConfluenceUrl) {
-        try {
-            claude mcp remove --scope user confluence 2>$null | Out-Null
-        } catch {}
-        try {
-            claude mcp add --scope user --transport http confluence $ConfluenceUrl --header "Authorization: $ConfluenceAuth" | Out-Null
+        & $claudeCliCmd.Source mcp remove --scope user confluence *>$null
+        & $claudeCliCmd.Source mcp add --scope user --transport http confluence $ConfluenceUrl --header "Authorization: $ConfluenceAuth" *>$null
+        if ($LASTEXITCODE -eq 0) {
             Ok "Claude Code: confluence MCP configured."
-        } catch {
+        } else {
             Warn "Could not add the confluence MCP server to Claude Code."
         }
     }
+} elseif (Get-Command claude -ErrorAction SilentlyContinue) {
+    Warn "A 'claude' command was found, but it points to the Claude Desktop app, not the Claude Code CLI (a known Windows PATH conflict - Desktop's WindowsApps alias shadows the CLI). Skipping Claude Code setup - configure it manually with 'claude mcp add' from a terminal where the CLI resolves first."
 }
 
 # --- 3.5 GitHub Copilot in VS Code (native MCP) ------------------------------
@@ -273,11 +300,6 @@ Ok "GitHub Copilot (VS Code) configured: $VsCodeConfigPath"
 $Configured += "GitHub Copilot"
 
 # --- 4. Node.js (needed for the Claude Desktop bridge) ------------------------
-function Refresh-Path {
-    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
-                [Environment]::GetEnvironmentVariable("Path", "User")
-}
-
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     Say "Node.js is required for Claude Desktop - attempting to install it with winget..."
     if (Get-Command winget -ErrorAction SilentlyContinue) {
@@ -295,13 +317,25 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 Ok "Node.js found: $(node --version)"
 
 # --- 5. Claude Desktop config -------------------------------------------------
+# Fresh (MSIX-packaged) installs redirect %APPDATA%\Claude to a virtualized
+# path and read their config from *there*, not from the documented location
+# (see header note / anthropics/claude-code#26073). Write both so the config
+# reaches the app regardless of which packaging this machine has:
+#   - %APPDATA%\Claude\claude_desktop_config.json           (documented path;
+#     also what "Edit Config" opens, and what older/non-MSIX installs read)
+#   - %LOCALAPPDATA%\Packages\Claude_<hash>\LocalCache\Roaming\Claude\...
+#     (the virtualized path MSIX installs actually read from)
 $DesktopDir = Join-Path $env:APPDATA "Claude"
 New-Item -ItemType Directory -Force -Path $DesktopDir | Out-Null
-$ConfigPaths = @(
-    (Join-Path $DesktopDir "claude_desktop_config.json"),
-    (Join-Path $env:LOCALAPPDATA "Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json")
-)
-$ConfigPaths = $ConfigPaths | Select-Object -Unique
+$ConfigPaths = [System.Collections.Generic.List[string]]::new()
+$ConfigPaths.Add((Join-Path $DesktopDir "claude_desktop_config.json"))
+
+$PkgRoot = Join-Path $env:LOCALAPPDATA "Packages"
+if (Test-Path $PkgRoot) {
+    Get-ChildItem -Path $PkgRoot -Directory -Filter "Claude_*" -ErrorAction SilentlyContinue | ForEach-Object {
+        $ConfigPaths.Add((Join-Path $_.FullName "LocalCache\Roaming\Claude\claude_desktop_config.json"))
+    }
+}
 
 # Token is passed via env and expanded by mcp-remote itself; keeping the header
 # argument free of spaces avoids a Claude Desktop arg-parsing bug on Windows.
@@ -311,11 +345,10 @@ $serverEntry = [pscustomobject]@{
                 "--header", 'Authorization:${EASYBDD_AUTH}')
     env     = [pscustomobject]@{ EASYBDD_AUTH = "Bearer $Token" }
 }
-foreach ($ConfigPath in $ConfigPaths) {
-    $ConfigDir = Split-Path -Parent $ConfigPath
-    if (-not (Test-Path $ConfigDir)) {
-        New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
-    }
+
+$WrittenPaths = @()
+foreach ($ConfigPath in ($ConfigPaths | Select-Object -Unique)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $ConfigPath -Parent) | Out-Null
 
     $cfg = $null
     if (Test-Path $ConfigPath) {
@@ -324,60 +357,74 @@ foreach ($ConfigPath in $ConfigPaths) {
         try { $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json } catch { $cfg = $null }
     }
     $cfg = Ensure-JsonObject $cfg
-    Ensure-NotePropertyObject -obj $cfg -propertyName "mcpServers"
 
-    if ($cfg.mcpServers.PSObject.Properties["easybdd"]) {
-        $cfg.mcpServers.easybdd = $serverEntry
-    } else {
-        $cfg.mcpServers | Add-Member -NotePropertyName easybdd -NotePropertyValue $serverEntry
+    # Rebuild mcpServers as a hashtable to avoid Add-Member corruption on
+    # JSON-loaded objects. ConvertFrom-Json -> Add-Member -> ConvertTo-Json
+    # can lose or corrupt nested properties.
+    $mcpHash = @{}
+    if ($cfg.PSObject.Properties["mcpServers"] -and $null -ne $cfg.mcpServers) {
+        if ($cfg.mcpServers -is [System.Collections.IDictionary]) {
+            foreach ($k in $cfg.mcpServers.Keys) {
+                if ($k -notin @("easybdd", "jenkins", "jira", "confluence")) {
+                    $mcpHash[$k] = $cfg.mcpServers[$k]
+                }
+            }
+        } elseif ($cfg.mcpServers -is [System.Management.Automation.PSCustomObject]) {
+            $cfg.mcpServers.PSObject.Properties | ForEach-Object {
+                if ($_.Name -notin @("easybdd", "jenkins", "jira", "confluence")) {
+                    $mcpHash[$_.Name] = $_.Value
+                }
+            }
+        }
     }
 
+    # Add/update our servers.
+    $mcpHash["easybdd"] = $serverEntry
     if ($JenkinsUrl) {
-        $jenkinsEntry = [pscustomobject]@{
+        $mcpHash["jenkins"] = [pscustomobject]@{
             command = "npx"
             args    = @("-y", "mcp-remote", $JenkinsUrl, "--allow-http", "--transport", "http-only",
                         "--header", 'Authorization:${JENKINS_AUTH}')
             env     = [pscustomobject]@{ JENKINS_AUTH = $JenkinsAuth }
         }
-        if ($cfg.mcpServers.PSObject.Properties["jenkins"]) {
-            $cfg.mcpServers.jenkins = $jenkinsEntry
-        } else {
-            $cfg.mcpServers | Add-Member -NotePropertyName jenkins -NotePropertyValue $jenkinsEntry
-        }
     }
-
     if ($JiraUrl) {
-        $jiraEntry = [pscustomobject]@{
+        $mcpHash["jira"] = [pscustomobject]@{
             command = "npx"
             args    = @("-y", "mcp-remote", $JiraUrl, "--allow-http", "--transport", "http-only",
                         "--header", 'Authorization:${JIRA_AUTH}')
             env     = [pscustomobject]@{ JIRA_AUTH = $JiraAuth }
         }
-        if ($cfg.mcpServers.PSObject.Properties["jira"]) {
-            $cfg.mcpServers.jira = $jiraEntry
-        } else {
-            $cfg.mcpServers | Add-Member -NotePropertyName jira -NotePropertyValue $jiraEntry
-        }
     }
-
     if ($ConfluenceUrl) {
-        $confluenceEntry = [pscustomobject]@{
+        $mcpHash["confluence"] = [pscustomobject]@{
             command = "npx"
             args    = @("-y", "mcp-remote", $ConfluenceUrl, "--allow-http", "--transport", "http-only",
                         "--header", 'Authorization:${CONFLUENCE_AUTH}')
             env     = [pscustomobject]@{ CONFLUENCE_AUTH = $ConfluenceAuth }
         }
-        if ($cfg.mcpServers.PSObject.Properties["confluence"]) {
-            $cfg.mcpServers.confluence = $confluenceEntry
-        } else {
-            $cfg.mcpServers | Add-Member -NotePropertyName confluence -NotePropertyValue $confluenceEntry
-        }
     }
 
-    $cfg | ConvertTo-Json -Depth 20 | Set-Content -Path $ConfigPath -Encoding UTF8
-    Ok "Claude Desktop configured: $ConfigPath"
+    if ($cfg.PSObject.Properties["mcpServers"]) {
+        $cfg.mcpServers = [pscustomobject]$mcpHash
+    } else {
+        $cfg | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]$mcpHash)
+    }
+
+    try {
+        $cfg | ConvertTo-Json -Depth 20 | Set-Content -Path $ConfigPath -Encoding UTF8
+        Ok "Claude Desktop configured: $ConfigPath"
+        $WrittenPaths += $ConfigPath
+    } catch {
+        Warn "Could not write $ConfigPath - $($_.Exception.Message)"
+    }
 }
-$Configured += "Claude Desktop"
+
+if ($WrittenPaths.Count -gt 0) {
+    $Configured += "Claude Desktop"
+} else {
+    Fail "Could not write any Claude Desktop config file."
+}
 
 # Pre-download the bridge so Claude Desktop's first launch isn't slow.
 Say "Pre-downloading the mcp-remote bridge (one-time)..."
