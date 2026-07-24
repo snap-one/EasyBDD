@@ -182,9 +182,10 @@ curl -fsSL http://192.168.100.100:8092/setup | EASYBDD_TOKEN=<token> bash
 ```
 
 The script configures Claude Desktop (via the `mcp-remote` bridge, installing
-Node.js if needed) and/or Claude Code, backing up any existing config. Then fully
-quit and reopen Claude Desktop and ask: *"Using the easybdd tools, list the
-available tests."* Script sources live in [onboarding/](onboarding/).
+Node.js if needed), Claude Code, and GitHub Copilot in VS Code (user-level
+`mcp.json`), backing up any existing config. Then fully quit and reopen Claude
+Desktop, reload VS Code, and ask: *"Using the easybdd tools, list the available
+tests."* Script sources live in [onboarding/](onboarding/).
 
 The same setup also configures a **`jenkins` MCP server** (the Jenkins MCP
 plugin at `http://192.168.100.100:8080/mcp-server/mcp`, so Claude can inspect

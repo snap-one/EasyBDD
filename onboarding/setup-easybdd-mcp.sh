@@ -10,6 +10,7 @@
 #   2. Configures Claude Code (if installed) — native HTTP, no extras needed.
 #   3. Configures Claude Desktop (if installed) via the mcp-remote bridge,
 #      installing Node.js first when possible.
+#   4. Configures VS Code GitHub Copilot's MCP user config.
 # It never removes existing MCP servers from your config; it only adds/updates
 # the "easybdd" entry. A timestamped backup of your config is made first.
 
@@ -157,6 +158,103 @@ if command -v claude >/dev/null 2>&1; then
   fi
 fi
 
+# --- 3.5 VS Code GitHub Copilot (native MCP) --------------------------------
+# Writes VS Code user-level MCP config so Copilot Chat can use easybdd tools.
+VSCODE_USER_DIR="${EASYBDD_VSCODE_USER_DIR:-}"
+if [ -z "$VSCODE_USER_DIR" ]; then
+  case "$OS" in
+    Darwin)
+      if [ -d "$HOME/Library/Application Support/Code/User" ]; then
+        VSCODE_USER_DIR="$HOME/Library/Application Support/Code/User"
+      elif [ -d "$HOME/Library/Application Support/Code - Insiders/User" ]; then
+        VSCODE_USER_DIR="$HOME/Library/Application Support/Code - Insiders/User"
+      else
+        VSCODE_USER_DIR="$HOME/Library/Application Support/Code/User"
+      fi
+      ;;
+    Linux)
+      if [ -d "$HOME/.config/Code/User" ]; then
+        VSCODE_USER_DIR="$HOME/.config/Code/User"
+      elif [ -d "$HOME/.config/Code - Insiders/User" ]; then
+        VSCODE_USER_DIR="$HOME/.config/Code - Insiders/User"
+      else
+        VSCODE_USER_DIR="$HOME/.config/Code/User"
+      fi
+      ;;
+  esac
+fi
+
+if [ -n "$VSCODE_USER_DIR" ]; then
+  mkdir -p "$VSCODE_USER_DIR"
+  VSCODE_MCP_CONFIG="$VSCODE_USER_DIR/mcp.json"
+  if [ -f "$VSCODE_MCP_CONFIG" ]; then
+    cp "$VSCODE_MCP_CONFIG" "$VSCODE_MCP_CONFIG.backup.$(date +%Y%m%d%H%M%S)"
+    ok "Backed up existing VS Code MCP config."
+  fi
+
+  PYTHON_BIN=""
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  fi
+
+  if [ -z "$PYTHON_BIN" ]; then
+    warn "Python is required to update VS Code mcp.json automatically; skipping Copilot setup."
+  else
+    "$PYTHON_BIN" - "$VSCODE_MCP_CONFIG" "$MCP_URL" "$TOKEN" "$JENKINS_MCP_URL" "$JENKINS_MCP_AUTH" "$JIRA_MCP_URL" "$JIRA_MCP_AUTH" "$CONFLUENCE_MCP_URL" "$CONFLUENCE_MCP_AUTH" <<'EOF'
+import json
+import pathlib
+import sys
+
+config, url, token, j_url, j_auth, jira_url, jira_auth, conf_url, conf_auth = sys.argv[1:]
+path = pathlib.Path(config)
+
+cfg = {}
+try:
+    cfg = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    cfg = {}
+
+if not isinstance(cfg, dict):
+    cfg = {}
+servers = cfg.get("servers")
+if not isinstance(servers, dict):
+    servers = {}
+cfg["servers"] = servers
+
+servers["easybdd"] = {
+    "type": "http",
+    "url": url,
+    "headers": {"Authorization": f"Bearer {token}"},
+}
+
+if j_url and j_auth:
+    servers["jenkins"] = {
+        "type": "http",
+        "url": j_url,
+        "headers": {"Authorization": j_auth},
+    }
+if jira_url and jira_auth:
+    servers["jira"] = {
+        "type": "http",
+        "url": jira_url,
+        "headers": {"Authorization": jira_auth},
+    }
+if conf_url and conf_auth:
+    servers["confluence"] = {
+        "type": "http",
+        "url": conf_url,
+        "headers": {"Authorization": conf_auth},
+    }
+
+path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+EOF
+    ok "GitHub Copilot (VS Code) configured: $VSCODE_MCP_CONFIG"
+    CONFIGURED="${CONFIGURED:+$CONFIGURED and }GitHub Copilot"
+  fi
+fi
+
 # --- 4. Claude Desktop ---------------------------------------------------------
 case "$OS" in
   Darwin) DESKTOP_DIR="$HOME/Library/Application Support/Claude" ;;
@@ -271,5 +369,10 @@ EON
 esac
 case "$CONFIGURED" in *Code*) cat <<'EON'
   Claude Code: run 'claude mcp list' — easybdd should show as connected.
+EON
+esac
+case "$CONFIGURED" in *"GitHub Copilot"*) cat <<'EON'
+  GitHub Copilot (VS Code): restart VS Code (or run "Developer: Reload Window").
+  Then open Copilot Chat and ask: "Using the easybdd tools, list the available tests."
 EON
 esac

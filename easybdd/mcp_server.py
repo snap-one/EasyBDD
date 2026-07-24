@@ -2524,16 +2524,15 @@ async def route_onboard(request):
           pre {{ padding: 0.8rem; overflow-x: auto; }}
           h1 {{ font-size: 1.5rem; }} h2 {{ font-size: 1.15rem; margin-top: 2rem; }}
         </style></head><body>
-        <h1>Connect Claude to Easy BDD</h1>
-        <p>One-time setup. You need Claude Desktop (<a href="https://claude.ai/download">claude.ai/download</a>)
-        or Claude Code installed, to be on the office network / VPN, and the
-        <strong>access token</strong> (ask Mark Fomin). No other tools, no repository
-        checkout, no coding.</p>
+        <h1>Connect AI clients to Easy BDD</h1>
+        <p>One-time setup. These commands configure Claude Desktop/Code and GitHub
+        Copilot in VS Code (native MCP). Be on the office network / VPN and use the
+        <strong>access token</strong> (ask Mark Fomin). No repository checkout needed.</p>
 
         <h2>What gets set up</h2>
         <ul>
           <li><code>easybdd</code> &mdash; run and fix tests, browse TestRail runs, and
-          drive the Easy BDD framework from Claude.</li>
+          drive the Easy BDD framework from Claude or Copilot.</li>
           {jenkins_note}
           {jira_note}
           {confluence_note}
@@ -2550,11 +2549,12 @@ async def route_onboard(request):
         <pre>curl -fsSL {base}/setup | EASYBDD_TOKEN=PASTE-TOKEN-HERE bash</pre>
         <p>If you leave the token out, the script simply asks you for it.</p>
 
-        <h2>Then</h2>
+                <h2>Then</h2>
         <ol>
           <li>Fully quit Claude Desktop (system tray / menu bar &rarr; Quit) and reopen it.</li>
           <li>In a new chat, click the tools (sliders) icon under the message box &mdash; you should see <code>easybdd</code>{" and <code>jenkins</code>" if jenkins_enabled else ""}{" and <code>jira</code>" if jira_enabled else ""}{" and <code>confluence</code>" if confluence_enabled else ""}.</li>
           <li>Try: <em>"Using the easybdd tools, list the available tests."</em></li>
+                    <li>For GitHub Copilot: restart VS Code (or run <em>Developer: Reload Window</em>), then ask the same prompt in Copilot Chat.</li>
           {jenkins_try}
           {jira_try}
           {confluence_try}

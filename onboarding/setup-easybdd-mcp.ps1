@@ -9,6 +9,7 @@
 #   2. Configures Claude Code (if installed).
 #   3. Configures Claude Desktop via the mcp-remote bridge, installing
 #      Node.js with winget if it's missing.
+#   4. Configures VS Code GitHub Copilot's MCP user config.
 # It never removes existing MCP servers from your config; it only adds/updates
 # the "easybdd" entry. A timestamped backup of your config is made first.
 
@@ -21,6 +22,32 @@ function Say($m)  { Write-Host "==> $m" -ForegroundColor Blue }
 function Ok($m)   { Write-Host " OK $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "  ! $m" -ForegroundColor Yellow }
 function Fail($m) { Write-Host "  X $m" -ForegroundColor Red }
+
+function Ensure-JsonObject($obj) {
+    if ($null -eq $obj) { return [pscustomobject]@{} }
+    if ($obj -is [System.Collections.IDictionary]) {
+        $newObj = [pscustomobject]@{}
+        foreach ($k in $obj.Keys) {
+            $newObj | Add-Member -NotePropertyName ([string]$k) -NotePropertyValue $obj[$k]
+        }
+        return $newObj
+    }
+    if ($obj -is [System.Management.Automation.PSCustomObject]) { return $obj }
+    return [pscustomobject]@{}
+}
+
+function Ensure-NotePropertyObject($obj, $propertyName) {
+    if (-not $obj.PSObject.Properties[$propertyName] -or
+        $null -eq $obj.$propertyName -or
+        -not ($obj.$propertyName -is [System.Management.Automation.PSCustomObject]) -and
+        -not ($obj.$propertyName -is [System.Collections.IDictionary])) {
+        if ($obj.PSObject.Properties[$propertyName]) {
+            $obj.$propertyName = [pscustomobject]@{}
+        } else {
+            $obj | Add-Member -NotePropertyName $propertyName -NotePropertyValue ([pscustomobject]@{})
+        }
+    }
+}
 
 Say "Easy BDD MCP setup (server: $McpUrl)"
 
@@ -167,6 +194,84 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     }
 }
 
+# --- 3.5 GitHub Copilot in VS Code (native MCP) ------------------------------
+# Writes VS Code user-level MCP config so Copilot Chat can use easybdd tools.
+$VsCodeUserDir = if ($env:EASYBDD_VSCODE_USER_DIR) {
+    $env:EASYBDD_VSCODE_USER_DIR
+} elseif (Test-Path (Join-Path $env:APPDATA "Code\User")) {
+    Join-Path $env:APPDATA "Code\User"
+} elseif (Test-Path (Join-Path $env:APPDATA "Code - Insiders\User")) {
+    Join-Path $env:APPDATA "Code - Insiders\User"
+} else {
+    Join-Path $env:APPDATA "Code\User"
+}
+
+New-Item -ItemType Directory -Force -Path $VsCodeUserDir | Out-Null
+$VsCodeConfigPath = Join-Path $VsCodeUserDir "mcp.json"
+
+$vCfg = $null
+if (Test-Path $VsCodeConfigPath) {
+    Copy-Item $VsCodeConfigPath "$VsCodeConfigPath.backup.$(Get-Date -Format yyyyMMddHHmmss)"
+    Ok "Backed up existing VS Code MCP config."
+    try { $vCfg = Get-Content $VsCodeConfigPath -Raw | ConvertFrom-Json } catch { $vCfg = $null }
+}
+$vCfg = Ensure-JsonObject $vCfg
+Ensure-NotePropertyObject -obj $vCfg -propertyName "servers"
+
+$easybddVsCodeEntry = [pscustomobject]@{
+    type = "http"
+    url = $McpUrl
+    headers = [pscustomobject]@{ Authorization = "Bearer $Token" }
+}
+if ($vCfg.servers.PSObject.Properties["easybdd"]) {
+    $vCfg.servers.easybdd = $easybddVsCodeEntry
+} else {
+    $vCfg.servers | Add-Member -NotePropertyName easybdd -NotePropertyValue $easybddVsCodeEntry
+}
+
+if ($JenkinsUrl -and $JenkinsAuth) {
+    $jenkinsVsCodeEntry = [pscustomobject]@{
+        type = "http"
+        url = $JenkinsUrl
+        headers = [pscustomobject]@{ Authorization = $JenkinsAuth }
+    }
+    if ($vCfg.servers.PSObject.Properties["jenkins"]) {
+        $vCfg.servers.jenkins = $jenkinsVsCodeEntry
+    } else {
+        $vCfg.servers | Add-Member -NotePropertyName jenkins -NotePropertyValue $jenkinsVsCodeEntry
+    }
+}
+
+if ($JiraUrl -and $JiraAuth) {
+    $jiraVsCodeEntry = [pscustomobject]@{
+        type = "http"
+        url = $JiraUrl
+        headers = [pscustomobject]@{ Authorization = $JiraAuth }
+    }
+    if ($vCfg.servers.PSObject.Properties["jira"]) {
+        $vCfg.servers.jira = $jiraVsCodeEntry
+    } else {
+        $vCfg.servers | Add-Member -NotePropertyName jira -NotePropertyValue $jiraVsCodeEntry
+    }
+}
+
+if ($ConfluenceUrl -and $ConfluenceAuth) {
+    $confluenceVsCodeEntry = [pscustomobject]@{
+        type = "http"
+        url = $ConfluenceUrl
+        headers = [pscustomobject]@{ Authorization = $ConfluenceAuth }
+    }
+    if ($vCfg.servers.PSObject.Properties["confluence"]) {
+        $vCfg.servers.confluence = $confluenceVsCodeEntry
+    } else {
+        $vCfg.servers | Add-Member -NotePropertyName confluence -NotePropertyValue $confluenceVsCodeEntry
+    }
+}
+
+$vCfg | ConvertTo-Json -Depth 20 | Set-Content -Path $VsCodeConfigPath -Encoding UTF8
+Ok "GitHub Copilot (VS Code) configured: $VsCodeConfigPath"
+$Configured += "GitHub Copilot"
+
 # --- 4. Node.js (needed for the Claude Desktop bridge) ------------------------
 function Refresh-Path {
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
@@ -192,18 +297,11 @@ Ok "Node.js found: $(node --version)"
 # --- 5. Claude Desktop config -------------------------------------------------
 $DesktopDir = Join-Path $env:APPDATA "Claude"
 New-Item -ItemType Directory -Force -Path $DesktopDir | Out-Null
-$ConfigPath = Join-Path $DesktopDir "claude_desktop_config.json"
-
-$cfg = $null
-if (Test-Path $ConfigPath) {
-    Copy-Item $ConfigPath "$ConfigPath.backup.$(Get-Date -Format yyyyMMddHHmmss)"
-    Ok "Backed up existing Claude Desktop config."
-    try { $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json } catch { $cfg = $null }
-}
-if ($null -eq $cfg) { $cfg = [pscustomobject]@{} }
-if (-not $cfg.PSObject.Properties["mcpServers"]) {
-    $cfg | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{})
-}
+$ConfigPaths = @(
+    (Join-Path $DesktopDir "claude_desktop_config.json"),
+    (Join-Path $env:LOCALAPPDATA "Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json")
+)
+$ConfigPaths = $ConfigPaths | Select-Object -Unique
 
 # Token is passed via env and expanded by mcp-remote itself; keeping the header
 # argument free of spaces avoids a Claude Desktop arg-parsing bug on Windows.
@@ -213,56 +311,72 @@ $serverEntry = [pscustomobject]@{
                 "--header", 'Authorization:${EASYBDD_AUTH}')
     env     = [pscustomobject]@{ EASYBDD_AUTH = "Bearer $Token" }
 }
-if ($cfg.mcpServers.PSObject.Properties["easybdd"]) {
-    $cfg.mcpServers.easybdd = $serverEntry
-} else {
-    $cfg.mcpServers | Add-Member -NotePropertyName easybdd -NotePropertyValue $serverEntry
-}
-
-if ($JenkinsUrl) {
-    $jenkinsEntry = [pscustomobject]@{
-        command = "npx"
-        args    = @("-y", "mcp-remote", $JenkinsUrl, "--allow-http", "--transport", "http-only",
-                    "--header", 'Authorization:${JENKINS_AUTH}')
-        env     = [pscustomobject]@{ JENKINS_AUTH = $JenkinsAuth }
+foreach ($ConfigPath in $ConfigPaths) {
+    $ConfigDir = Split-Path -Parent $ConfigPath
+    if (-not (Test-Path $ConfigDir)) {
+        New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
     }
-    if ($cfg.mcpServers.PSObject.Properties["jenkins"]) {
-        $cfg.mcpServers.jenkins = $jenkinsEntry
+
+    $cfg = $null
+    if (Test-Path $ConfigPath) {
+        Copy-Item $ConfigPath "$ConfigPath.backup.$(Get-Date -Format yyyyMMddHHmmss)"
+        Ok "Backed up existing config: $ConfigPath"
+        try { $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json } catch { $cfg = $null }
+    }
+    $cfg = Ensure-JsonObject $cfg
+    Ensure-NotePropertyObject -obj $cfg -propertyName "mcpServers"
+
+    if ($cfg.mcpServers.PSObject.Properties["easybdd"]) {
+        $cfg.mcpServers.easybdd = $serverEntry
     } else {
-        $cfg.mcpServers | Add-Member -NotePropertyName jenkins -NotePropertyValue $jenkinsEntry
+        $cfg.mcpServers | Add-Member -NotePropertyName easybdd -NotePropertyValue $serverEntry
     }
-}
 
-if ($JiraUrl) {
-    $jiraEntry = [pscustomobject]@{
-        command = "npx"
-        args    = @("-y", "mcp-remote", $JiraUrl, "--allow-http", "--transport", "http-only",
-                    "--header", 'Authorization:${JIRA_AUTH}')
-        env     = [pscustomobject]@{ JIRA_AUTH = $JiraAuth }
+    if ($JenkinsUrl) {
+        $jenkinsEntry = [pscustomobject]@{
+            command = "npx"
+            args    = @("-y", "mcp-remote", $JenkinsUrl, "--allow-http", "--transport", "http-only",
+                        "--header", 'Authorization:${JENKINS_AUTH}')
+            env     = [pscustomobject]@{ JENKINS_AUTH = $JenkinsAuth }
+        }
+        if ($cfg.mcpServers.PSObject.Properties["jenkins"]) {
+            $cfg.mcpServers.jenkins = $jenkinsEntry
+        } else {
+            $cfg.mcpServers | Add-Member -NotePropertyName jenkins -NotePropertyValue $jenkinsEntry
+        }
     }
-    if ($cfg.mcpServers.PSObject.Properties["jira"]) {
-        $cfg.mcpServers.jira = $jiraEntry
-    } else {
-        $cfg.mcpServers | Add-Member -NotePropertyName jira -NotePropertyValue $jiraEntry
-    }
-}
 
-if ($ConfluenceUrl) {
-    $confluenceEntry = [pscustomobject]@{
-        command = "npx"
-        args    = @("-y", "mcp-remote", $ConfluenceUrl, "--allow-http", "--transport", "http-only",
-                    "--header", 'Authorization:${CONFLUENCE_AUTH}')
-        env     = [pscustomobject]@{ CONFLUENCE_AUTH = $ConfluenceAuth }
+    if ($JiraUrl) {
+        $jiraEntry = [pscustomobject]@{
+            command = "npx"
+            args    = @("-y", "mcp-remote", $JiraUrl, "--allow-http", "--transport", "http-only",
+                        "--header", 'Authorization:${JIRA_AUTH}')
+            env     = [pscustomobject]@{ JIRA_AUTH = $JiraAuth }
+        }
+        if ($cfg.mcpServers.PSObject.Properties["jira"]) {
+            $cfg.mcpServers.jira = $jiraEntry
+        } else {
+            $cfg.mcpServers | Add-Member -NotePropertyName jira -NotePropertyValue $jiraEntry
+        }
     }
-    if ($cfg.mcpServers.PSObject.Properties["confluence"]) {
-        $cfg.mcpServers.confluence = $confluenceEntry
-    } else {
-        $cfg.mcpServers | Add-Member -NotePropertyName confluence -NotePropertyValue $confluenceEntry
-    }
-}
 
-$cfg | ConvertTo-Json -Depth 20 | Set-Content -Path $ConfigPath -Encoding UTF8
-Ok "Claude Desktop configured: $ConfigPath"
+    if ($ConfluenceUrl) {
+        $confluenceEntry = [pscustomobject]@{
+            command = "npx"
+            args    = @("-y", "mcp-remote", $ConfluenceUrl, "--allow-http", "--transport", "http-only",
+                        "--header", 'Authorization:${CONFLUENCE_AUTH}')
+            env     = [pscustomobject]@{ CONFLUENCE_AUTH = $ConfluenceAuth }
+        }
+        if ($cfg.mcpServers.PSObject.Properties["confluence"]) {
+            $cfg.mcpServers.confluence = $confluenceEntry
+        } else {
+            $cfg.mcpServers | Add-Member -NotePropertyName confluence -NotePropertyValue $confluenceEntry
+        }
+    }
+
+    $cfg | ConvertTo-Json -Depth 20 | Set-Content -Path $ConfigPath -Encoding UTF8
+    Ok "Claude Desktop configured: $ConfigPath"
+}
 $Configured += "Claude Desktop"
 
 # Pre-download the bridge so Claude Desktop's first launch isn't slow.
@@ -279,3 +393,5 @@ Write-Host "     If Claude Desktop is not installed yet, get it from https://cla
 Write-Host "  2. In a new chat, click the tools (sliders) icon under the message box -"
 Write-Host "     you should see 'easybdd' listed."
 Write-Host "  3. Try asking: 'Using the easybdd tools, list the available tests.'"
+Write-Host "  4. For GitHub Copilot, restart VS Code (or run 'Developer: Reload Window')"
+Write-Host "     then ask Copilot Chat: 'Using the easybdd tools, list the available tests.'"
