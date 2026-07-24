@@ -11,6 +11,20 @@
 #      Node.js with winget if it's missing.
 # It never removes existing MCP servers from your config; it only adds/updates
 # the "easybdd" entry. A timestamped backup of your config is made first.
+#
+# Two Windows-specific quirks this script has to work around, both of which
+# make the script *report* success while the app silently never picks up the
+# config (see anthropics/claude-code#25075 and #26073):
+#   - The Claude Desktop installer registers a "Claude.exe" alias under
+#     %LOCALAPPDATA%\Microsoft\WindowsApps, which sits ahead of the npm-installed
+#     Claude Code CLI on PATH. A plain `claude` lookup can resolve to Desktop
+#     instead of the CLI, so `claude mcp add` silently launches the Desktop app
+#     instead of registering anything.
+#   - Fresh Claude Desktop installs use MSIX packaging, which redirects
+#     %APPDATA%\Claude\* to a virtualized path under
+#     %LOCALAPPDATA%\Packages\Claude_<hash>\LocalCache\Roaming\Claude\. The app
+#     reads its config from the virtualized path, not the documented one, so
+#     writing only to %APPDATA%\Claude never actually reaches the app.
 
 $ErrorActionPreference = "Stop"
 $McpUrl = if ($env:EASYBDD_MCP_URL) { $env:EASYBDD_MCP_URL } else { "http://192.168.100.100:8092/mcp" }
@@ -21,6 +35,15 @@ function Say($m)  { Write-Host "==> $m" -ForegroundColor Blue }
 function Ok($m)   { Write-Host " OK $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "  ! $m" -ForegroundColor Yellow }
 function Fail($m) { Write-Host "  X $m" -ForegroundColor Red }
+
+function Refresh-Path {
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                [Environment]::GetEnvironmentVariable("Path", "User")
+}
+
+# Refresh PATH up front: if the user just installed Claude Code (or Node) in
+# this same terminal session, a stale PATH would make Get-Command miss it.
+Refresh-Path
 
 Say "Easy BDD MCP setup (server: $McpUrl)"
 
@@ -68,25 +91,29 @@ if (-not $tokenOk) {
 Ok "Access token accepted."
 
 # --- 3. Claude Code (CLI / IDE) ----------------------------------------------
-if (Get-Command claude -ErrorAction SilentlyContinue) {
-    try {
-        claude mcp remove --scope user easybdd 2>$null | Out-Null
-    } catch {}
-    try {
-        claude mcp add --scope user --transport http easybdd $McpUrl --header "Authorization: Bearer $Token" | Out-Null
+# Skip the WindowsApps "Claude.exe" alias (that's Desktop, not the CLI - see
+# header note) and use whatever real CLI resolves first on PATH, calling it by
+# full path so we can't be fooled by alias ordering.
+$claudeCliCmd = Get-Command claude -All -ErrorAction SilentlyContinue |
+                Where-Object { $_.Source -notlike "*\Microsoft\WindowsApps\*" } |
+                Select-Object -First 1
+
+if ($claudeCliCmd) {
+    & $claudeCliCmd.Source mcp remove --scope user easybdd *>$null
+    & $claudeCliCmd.Source mcp add --scope user --transport http easybdd $McpUrl --header "Authorization: Bearer $Token" *>$null
+    # Native commands don't throw into try/catch on non-zero exit - check
+    # $LASTEXITCODE explicitly or a failed add silently reports as "OK".
+    if ($LASTEXITCODE -eq 0) {
         Ok "Claude Code configured (user scope)."
         $Configured += "Claude Code"
-    } catch {
-        Warn "Claude Code is installed but 'claude mcp add' failed - configure it manually later."
+    } else {
+        Warn "Claude Code is installed but 'claude mcp add' failed (exit $LASTEXITCODE) - configure it manually later."
     }
+} elseif (Get-Command claude -ErrorAction SilentlyContinue) {
+    Warn "A 'claude' command was found, but it points to the Claude Desktop app, not the Claude Code CLI (a known Windows PATH conflict - Desktop's WindowsApps alias shadows the CLI). Skipping Claude Code setup - configure it manually with 'claude mcp add' from a terminal where the CLI resolves first."
 }
 
 # --- 4. Node.js (needed for the Claude Desktop bridge) ------------------------
-function Refresh-Path {
-    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
-                [Environment]::GetEnvironmentVariable("Path", "User")
-}
-
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     Say "Node.js is required for Claude Desktop - attempting to install it with winget..."
     if (Get-Command winget -ErrorAction SilentlyContinue) {
@@ -104,19 +131,24 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 Ok "Node.js found: $(node --version)"
 
 # --- 5. Claude Desktop config -------------------------------------------------
+# Fresh (MSIX-packaged) installs redirect %APPDATA%\Claude to a virtualized
+# path and read their config from *there*, not from the documented location
+# (see header note / anthropics/claude-code#26073). Write both so the config
+# reaches the app regardless of which packaging this machine has:
+#   - %APPDATA%\Claude\claude_desktop_config.json           (documented path;
+#     also what "Edit Config" opens, and what older/non-MSIX installs read)
+#   - %LOCALAPPDATA%\Packages\Claude_<hash>\LocalCache\Roaming\Claude\...
+#     (the virtualized path MSIX installs actually read from)
 $DesktopDir = Join-Path $env:APPDATA "Claude"
 New-Item -ItemType Directory -Force -Path $DesktopDir | Out-Null
-$ConfigPath = Join-Path $DesktopDir "claude_desktop_config.json"
+$ConfigPaths = [System.Collections.Generic.List[string]]::new()
+$ConfigPaths.Add((Join-Path $DesktopDir "claude_desktop_config.json"))
 
-$cfg = $null
-if (Test-Path $ConfigPath) {
-    Copy-Item $ConfigPath "$ConfigPath.backup.$(Get-Date -Format yyyyMMddHHmmss)"
-    Ok "Backed up existing Claude Desktop config."
-    try { $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json } catch { $cfg = $null }
-}
-if ($null -eq $cfg) { $cfg = [pscustomobject]@{} }
-if (-not $cfg.PSObject.Properties["mcpServers"]) {
-    $cfg | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{})
+$PkgRoot = Join-Path $env:LOCALAPPDATA "Packages"
+if (Test-Path $PkgRoot) {
+    Get-ChildItem -Path $PkgRoot -Directory -Filter "Claude_*" -ErrorAction SilentlyContinue | ForEach-Object {
+        $ConfigPaths.Add((Join-Path $_.FullName "LocalCache\Roaming\Claude\claude_desktop_config.json"))
+    }
 }
 
 # Token is passed via env and expanded by mcp-remote itself; keeping the header
@@ -127,15 +159,41 @@ $serverEntry = [pscustomobject]@{
                 "--header", 'Authorization:${EASYBDD_AUTH}')
     env     = [pscustomobject]@{ EASYBDD_AUTH = "Bearer $Token" }
 }
-if ($cfg.mcpServers.PSObject.Properties["easybdd"]) {
-    $cfg.mcpServers.easybdd = $serverEntry
-} else {
-    $cfg.mcpServers | Add-Member -NotePropertyName easybdd -NotePropertyValue $serverEntry
+
+$WrittenPaths = @()
+foreach ($ConfigPath in $ConfigPaths) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $ConfigPath -Parent) | Out-Null
+
+    $cfg = $null
+    if (Test-Path $ConfigPath) {
+        Copy-Item $ConfigPath "$ConfigPath.backup.$(Get-Date -Format yyyyMMddHHmmss)"
+        Ok "Backed up existing config: $ConfigPath"
+        try { $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json } catch { $cfg = $null }
+    }
+    if ($null -eq $cfg) { $cfg = [pscustomobject]@{} }
+    if (-not $cfg.PSObject.Properties["mcpServers"]) {
+        $cfg | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{})
+    }
+    if ($cfg.mcpServers.PSObject.Properties["easybdd"]) {
+        $cfg.mcpServers.easybdd = $serverEntry
+    } else {
+        $cfg.mcpServers | Add-Member -NotePropertyName easybdd -NotePropertyValue $serverEntry
+    }
+
+    try {
+        $cfg | ConvertTo-Json -Depth 20 | Set-Content -Path $ConfigPath -Encoding UTF8
+        Ok "Claude Desktop configured: $ConfigPath"
+        $WrittenPaths += $ConfigPath
+    } catch {
+        Warn "Could not write $ConfigPath - $($_.Exception.Message)"
+    }
 }
 
-$cfg | ConvertTo-Json -Depth 20 | Set-Content -Path $ConfigPath -Encoding UTF8
-Ok "Claude Desktop configured: $ConfigPath"
-$Configured += "Claude Desktop"
+if ($WrittenPaths.Count -gt 0) {
+    $Configured += "Claude Desktop"
+} else {
+    Fail "Could not write any Claude Desktop config file."
+}
 
 # Pre-download the bridge so Claude Desktop's first launch isn't slow.
 Say "Pre-downloading the mcp-remote bridge (one-time)..."
