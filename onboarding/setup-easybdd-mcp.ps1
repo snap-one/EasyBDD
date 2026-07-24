@@ -179,8 +179,8 @@ $claudeCliCmd = Get-Command claude -All -ErrorAction SilentlyContinue |
                 Select-Object -First 1
 
 if ($claudeCliCmd) {
-    & $claudeCliCmd.Source mcp remove --scope user easybdd *>$null
-    & $claudeCliCmd.Source mcp add --scope user --transport http easybdd $McpUrl --header "Authorization: Bearer $Token" *>$null
+    try { & $claudeCliCmd.Source mcp remove --scope user easybdd *>$null } catch {}
+    try { & $claudeCliCmd.Source mcp add --scope user --transport http easybdd $McpUrl --header "Authorization: Bearer $Token" *>$null } catch {}
     # Native commands don't throw into try/catch on non-zero exit - check
     # $LASTEXITCODE explicitly or a failed add silently reports as "OK".
     if ($LASTEXITCODE -eq 0) {
@@ -191,8 +191,8 @@ if ($claudeCliCmd) {
     }
 
     if ($JenkinsUrl) {
-        & $claudeCliCmd.Source mcp remove --scope user jenkins *>$null
-        & $claudeCliCmd.Source mcp add --scope user --transport http jenkins $JenkinsUrl --header "Authorization: $JenkinsAuth" *>$null
+        try { & $claudeCliCmd.Source mcp remove --scope user jenkins *>$null } catch {}
+        try { & $claudeCliCmd.Source mcp add --scope user --transport http jenkins $JenkinsUrl --header "Authorization: $JenkinsAuth" *>$null } catch {}
         if ($LASTEXITCODE -eq 0) {
             Ok "Claude Code: jenkins MCP configured."
         } else {
@@ -200,8 +200,8 @@ if ($claudeCliCmd) {
         }
     }
     if ($JiraUrl) {
-        & $claudeCliCmd.Source mcp remove --scope user jira *>$null
-        & $claudeCliCmd.Source mcp add --scope user --transport http jira $JiraUrl --header "Authorization: $JiraAuth" *>$null
+        try { & $claudeCliCmd.Source mcp remove --scope user jira *>$null } catch {}
+        try { & $claudeCliCmd.Source mcp add --scope user --transport http jira $JiraUrl --header "Authorization: $JiraAuth" *>$null } catch {}
         if ($LASTEXITCODE -eq 0) {
             Ok "Claude Code: jira MCP configured."
         } else {
@@ -209,8 +209,8 @@ if ($claudeCliCmd) {
         }
     }
     if ($ConfluenceUrl) {
-        & $claudeCliCmd.Source mcp remove --scope user confluence *>$null
-        & $claudeCliCmd.Source mcp add --scope user --transport http confluence $ConfluenceUrl --header "Authorization: $ConfluenceAuth" *>$null
+        try { & $claudeCliCmd.Source mcp remove --scope user confluence *>$null } catch {}
+        try { & $claudeCliCmd.Source mcp add --scope user --transport http confluence $ConfluenceUrl --header "Authorization: $ConfluenceAuth" *>$null } catch {}
         if ($LASTEXITCODE -eq 0) {
             Ok "Claude Code: confluence MCP configured."
         } else {
