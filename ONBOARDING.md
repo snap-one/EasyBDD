@@ -128,12 +128,13 @@ The builder also runs persistently on the main Jenkins server
 just open **<jenkins_url>:8091**.
 
 - Service unit: `/etc/systemd/system/easybdd-testrail-builder.service`
-- Runs from `/var/lib/jenkins/workspace/EASYBDD/frontend`, as the `jenkins`
-  user
-- Loads TestRail credentials from `/var/lib/jenkins/workspace/EASYBDD/.env`
+- Runs from `/home/jenkins/EasyBDD/frontend`, as the `jenkins` user
+- Loads TestRail credentials from `/home/jenkins/EasyBDD/.env`
 - Enabled at boot (`systemctl enable`) and auto-restarts on failure
 
-To pick up new code after a `git pull` in that checkout:
+New code is picked up automatically: pushing to `main` triggers the
+`EasyBDD` Jenkins deploy job, which pulls into `/home/jenkins/EasyBDD` and
+restarts the service. To restart manually:
 
 ```bash
 sudo systemctl restart easybdd-testrail-builder
@@ -184,6 +185,33 @@ The script configures Claude Desktop (via the `mcp-remote` bridge, installing
 Node.js if needed) and/or Claude Code, backing up any existing config. Then fully
 quit and reopen Claude Desktop and ask: *"Using the easybdd tools, list the
 available tests."* Script sources live in [onboarding/](onboarding/).
+
+The same setup also configures a **`jenkins` MCP server** (the Jenkins MCP
+plugin at `http://192.168.100.100:8080/mcp-server/mcp`, so Claude can inspect
+and manage Jenkins jobs) — but only when the production server has
+`JENKINS_URL` / `JENKINS_USERNAME` / `JENKINS_API_TOKEN` set in its `.env`.
+Engineers never handle the Jenkins API token by hand: the setup script fetches
+a ready-made `Authorization` header from the token-gated
+`/jenkins-mcp-config` endpoint. If Jenkins isn't configured server-side, the
+script says so and skips it.
+
+It also configures a **`jira` MCP server** the same way (a self-hosted
+[mcp-atlassian](https://github.com/sooperset/mcp-atlassian) instance, so
+Claude can look up and update Jira issues) — gated on `JIRA_MCP_URL` /
+`JIRA_USERNAME` / `JIRA_API_TOKEN` in the production `.env` and fetched from
+the token-gated `/jira-mcp-config` endpoint. Note this is separate from
+TestRail: TestRail integration doesn't need a standalone MCP server — it's
+already exposed as tools directly on the `easybdd` server (see
+[docs/mcp-setup.md](docs/mcp-setup.md)).
+
+And a **`confluence` MCP server**, same pattern again but its own endpoint —
+`CONFLUENCE_MCP_URL` / `CONFLUENCE_USERNAME` / `CONFLUENCE_API_TOKEN` in the
+production `.env`, fetched from `/confluence-mcp-config`. It's deliberately a
+separate deployment/entry from `jira` (even though mcp-atlassian can serve
+both from one process) so each can be enabled, disabled, or pointed at a
+different host independently. How the two mcp-atlassian instances are
+deployed and operated server-side is documented in
+[docs/atlassian-mcp-setup.md](docs/atlassian-mcp-setup.md).
 
 Server-side, auth is a shared bearer token in `EASYBDD_MCP_TOKEN` (set in the
 production `.env`, loaded by the systemd unit). If unset, the server runs

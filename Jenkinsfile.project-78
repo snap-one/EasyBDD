@@ -13,7 +13,6 @@ pipeline {
             artifactNumToKeepStr: '50'
         ))
         timestamps()
-        timeout(time: 60, unit: 'MINUTES')
     }
 
     stages {
@@ -34,10 +33,8 @@ pipeline {
                         echo "[DEBUG] Changing to project directory..."
                         cd /home/jenkins/EasyBDD
                         echo "[DEBUG] Running testrail-run for project 78..."
-                        /home/jenkins/EasyBDD/run-with-display.sh python -m easybdd testrail-run 78 --prefix 'EASYBDD:'
+                        xvfb-run --auto-servernum --server-args='-screen 0 1280x1024x24' python -m easybdd testrail-run 78 --prefix 'EASYBDD:'
                     '''
-                    
-                    currentBuild.description = "Test execution completed"
                 }
             }
         }

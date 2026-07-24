@@ -246,6 +246,21 @@ def _is_auth_error(exc: Exception) -> bool:
     return any(sig in msg for sig in _AUTH_SIGNALS)
 
 
+def _is_successful_jsonrpc_response(response: str) -> bool:
+    """True when response parses as a JSON-RPC result with no error field.
+
+    Guards the substring-based auth-error check below: "401"/"403" can appear
+    coincidentally inside an unrelated field (e.g. a UUID like
+    "...-401f-...") of an otherwise successful response, and must never be
+    misread as an auth error just because the digits happen to show up.
+    """
+    try:
+        parsed = json.loads(response)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(parsed, dict) and "result" in parsed and "error" not in parsed
+
+
 def _is_stale_connection_error(exc: Exception) -> bool:
     """Return True when the exception indicates the underlying socket silently dropped."""
     msg = str(exc).lower()
@@ -548,8 +563,15 @@ class WebSocketService:
             if response == "" and conn.is_auth_error():
                 raise ConnectionError("WebSocket closed with auth error")
             # Check for text-based auth errors in response body (OVRC returns these as JSON
-            # text rather than WebSocket close frames — mirrors bdd's execute_webservice check)
-            if response and any(sig in response for sig in _TEXT_AUTH_SIGNALS):
+            # text rather than WebSocket close frames — mirrors bdd's execute_webservice check).
+            # Skip this for a well-formed successful JSON-RPC response — "401"/"403" can appear
+            # coincidentally inside a field like a UUID (e.g. "...-401f-...") and must not be
+            # misread as an auth error just because the digits show up.
+            if (
+                response
+                and not _is_successful_jsonrpc_response(response)
+                and any(sig in response for sig in _TEXT_AUTH_SIGNALS)
+            ):
                 raise ConnectionError(f"Auth error in WebSocket response: {response[:200]}")
             if not response:
                 print(f"         ⚠️  No response received (timeout={timeout}s)")

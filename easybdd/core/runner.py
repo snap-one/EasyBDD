@@ -748,8 +748,16 @@ class TestRunner:
                 max_workers=1,
             )
 
-            # Execute this iteration
-            success = self._execute_single_test(iteration_test)
+            # Execute this iteration. An exception here (e.g. a transient
+            # connection glitch) must not abort the remaining iterations —
+            # mirrors the exception handling the async path already has in
+            # execute_single_iteration/future.result() above.
+            try:
+                success = self._execute_single_test(iteration_test)
+            except Exception as e:
+                print(f"    ☠️  Data iteration {i} ERROR: {e}")
+                success = False
+
             if not success:
                 all_passed = False
                 print(f"    ❌ Data iteration {i} failed")
@@ -927,6 +935,7 @@ class TestRunner:
             total_steps = len(test.steps)
 
             for i, step in enumerate(test.steps, 1):
+                step_description = self._get_step_description(step)
                 display_step_params = self._resolve_step_params(step, test.variables or {})
                 step_params = display_step_params.get("parameters", {}) if isinstance(display_step_params, dict) else {}
                 prev_response = (test.variables or {}).get("last_response")
@@ -1025,11 +1034,12 @@ class TestRunner:
                                 pass
                 except Exception as e:
                     import traceback
+                    tb_str = traceback.format_exc()
                     self._run_logger.step_fail(
                         i, step.action,
                         error=str(e),
-                        details=self._get_step_description(step),
-                        traceback_str=traceback.format_exc(),
+                        details=step_description,
+                        traceback_str=tb_str,
                     )
 
                     # Add failed step to step_logs
@@ -1043,7 +1053,7 @@ class TestRunner:
                         "step_action": step.action,
                         "step_details": step_description,
                         "error": str(e),
-                        "traceback": traceback_str,
+                        "traceback": tb_str,
                     }
                     failure_screenshot = self._capture_failure_screenshot(
                         services.get("browser"), test.name, i
@@ -1741,6 +1751,7 @@ class TestRunner:
             items = items[:limit]
 
         print(f"      → FOR {loop_var} in <{len(items)} items>")
+        loop_all_passed = True
         for idx, item in enumerate(items):
             variables[loop_var] = item
             try:
@@ -1753,15 +1764,22 @@ class TestRunner:
                     continue_if=step.continue_if,
                 )
                 if not ok:
-                    return False
+                    loop_all_passed = False
+                    print(f"      ❌ FOR iteration {idx + 1} failed")
             except _BreakSignal:
                 print(f"      → FOR loop: BREAK at iteration {idx + 1}")
                 break
             except _ContinueSignal:
                 continue
+            except Exception as e:
+                # A single iteration's exception (e.g. a transient connection
+                # glitch) must not abort the remaining iterations — same
+                # reasoning as the sequential data-iteration fix above.
+                loop_all_passed = False
+                print(f"      ☠️  FOR iteration {idx + 1} ERROR: {e}")
 
         variables.pop(loop_var, None)
-        return True
+        return loop_all_passed
 
     def _execute_while_loop(self, step, variables: dict, soft_assert_manager, step_number: int) -> bool:
         """Execute a while loop step."""
@@ -4782,6 +4800,11 @@ class TestRunner:
         try:
             # Control-flow constructs — handled before variable substitution
             action_tag = getattr(step, "action", "")
+            # Bind 'action' up front so the except block below can always
+            # report it, even when an exception is raised on one of the
+            # early-return paths (control-flow/conditional) before the
+            # generic-action assignment further down reassigns it.
+            action = action_tag
             if action_tag == "for_loop":
                 return self._execute_for_loop(step, variables, soft_assert_manager, step_number)
             if action_tag == "while_loop":

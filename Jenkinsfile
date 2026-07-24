@@ -61,6 +61,7 @@ pipeline {
                     sh '''
                         ${PIP} install --quiet --upgrade pip
                         ${PIP} install --quiet -r requirements.txt
+                        ${PIP} install --quiet -r frontend/requirements_builder.txt
                         ${PIP} install --quiet -e .
                     '''
                 }
@@ -80,6 +81,7 @@ pipeline {
                 sh '''
                     echo "Restarting dependent services with updated code..."
                     sudo systemctl restart easybdd-testrail-builder || true
+                    sudo systemctl restart easybdd-local-builder || true
                     sudo systemctl restart easy-bdd-mcp || true
                 '''
             }
@@ -99,6 +101,24 @@ pipeline {
                 }
             }
         }
+
+        stage('Ensure manual-run job exists') {
+            // Creates the "EasyBDD - Manual Run" pipeline job that the test
+            // builder's "Run on Jenkins" button triggers (idempotent — skips
+            // when the job already exists). Runs on the server so Jenkins
+            // credentials come from the production .env and never leave the
+            // box. See scripts/create_manual_run_job.py.
+            steps {
+                dir("${PROJECT_DIR}") {
+                    sh '''#!/bin/bash
+                        set -euo pipefail
+                        set -a; . .env; set +a
+                        python3 scripts/create_manual_run_job.py
+                    '''
+                }
+            }
+        }
+
     }
 
     post {

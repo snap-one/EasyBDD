@@ -6,6 +6,7 @@ so that both the local runner and the TestRail runner share a single parse path.
 """
 
 import html as _html_mod
+import platform
 import re as _re_mod
 import yaml
 import json
@@ -382,6 +383,60 @@ def _fix_mapping_then_sequence(text: str) -> str:
     return "\n".join(result)
 
 
+_DASH_CONTROL_LINE_RE = _re_mod.compile(r'^- ([A-Za-z_]\w*)\s*:\s*(\S.*)$')
+
+
+def _fix_dash_control_flow_siblings(text: str) -> str:
+    """Fix a '- for_each: <value>' (or while/condition/if) list item whose
+    nested keys (as:/loop_var:/steps:/then:/else:/etc.) were written flush-left
+    at column 0 instead of indented under the list item.
+
+    This is the sibling case to _fix_mapping_then_sequence: that function
+    handles a control-flow block written as a *bare* root mapping key (no
+    leading dash); this handles the same authoring mistake when the author
+    did include the leading dash on the first line, e.g.::
+
+        - for_each: "[1, 2, 3, 4, 5]"
+        as: loop_number
+        steps:
+          - shared_step: dxGetAbout
+          ...
+
+    fix_step_list_indent leaves this alone because the first line already has
+    a value after the colon, so it assumes the step is self-contained on one
+    line — it never notices the trailing flush-left keys actually belong to
+    it. Detect that shape and indent everything from the second line up to
+    (but not including) the next column-0 '- ' item by 2 spaces, so it nests
+    under the list item and the previously-valid 'steps:' sub-list gains the
+    extra indent level it needs::
+
+        - for_each: "[1, 2, 3, 4, 5]"
+          as: loop_number
+          steps:
+            - shared_step: dxGetAbout
+            ...
+    """
+    lines = text.splitlines()
+    if len(lines) < 2:
+        return text
+    m = _DASH_CONTROL_LINE_RE.match(lines[0])
+    if not m or m.group(1) not in _LOOP_CONTROL_KEYS:
+        return text
+    second = lines[1]
+    # Already indented, or the next line is itself a new top-level item —
+    # nothing broken here.
+    if not second or second[0] in (' ', '\t') or second.startswith('-'):
+        return text
+
+    result = [lines[0]]
+    i = 1
+    while i < len(lines) and not lines[i].startswith('- '):
+        result.append('  ' + lines[i] if lines[i] else lines[i])
+        i += 1
+    result.extend(lines[i:])
+    return '\n'.join(result)
+
+
 def parse_yaml_lenient(text: str) -> Any:
     """Parse YAML text, retrying with repair passes if the first attempt fails.
 
@@ -401,6 +456,7 @@ def parse_yaml_lenient(text: str) -> Any:
         _dedent_root_keys,
         _extract_steps_block,
         _fix_mapping_then_sequence,
+        _fix_dash_control_flow_siblings,
         fix_step_list_indent,
     ):
         fixed = fixer(text)
@@ -488,12 +544,53 @@ class TestDefinition:
             self.variables = {}
 
 
+def load_data_sets(start_dir: Optional[Path] = None) -> Dict[str, List[Dict[str, Any]]]:
+    """Load named data tables from data_sets.yaml files: global (cwd) first,
+    then each ancestor directory between start_dir and cwd (outermost first,
+    so a deeper/more-specific data_sets.yaml still wins) — mirrors
+    YAMLParser._load_shared_steps's resolution exactly, minus the
+    topological sort (data sets don't reference each other).
+
+    Used both by YAMLParser (to resolve a case's `data_ref:`) and directly
+    by the local builder's run orchestration / case listing, which read
+    case files without going through YAMLParser.
+    """
+    dirs: List[Path] = []
+    if start_dir is not None:
+        start_dir = Path(start_dir).resolve()
+        cwd = Path.cwd().resolve()
+        chain = [start_dir]
+        if cwd in start_dir.parents:
+            d = start_dir
+            while d != cwd:
+                d = d.parent
+                chain.append(d)
+        dirs.extend(reversed(chain))
+    candidates = [Path("data_sets.yaml")] + [d / "data_sets.yaml" for d in dirs]
+
+    result: Dict[str, List[Dict[str, Any]]] = {}
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            if isinstance(data, dict):
+                for name, rows in data.items():
+                    if isinstance(rows, list):
+                        result[name] = rows
+        except Exception as e:
+            print(f"Warning: Failed to load data sets from {path}: {e}")
+    return result
+
+
 class YAMLParser:
     """Parser for YAML test definitions"""
 
     def __init__(self):
         self.supported_extensions = {".yaml", ".yml", ".json"}
         self.shared_steps: Dict[str, SharedStep] = {}
+        self.data_sets: Dict[str, List[Dict[str, Any]]] = {}
         self._load_shared_steps()
 
     def _load_shared_steps(self, workspace_dir: Optional[Path] = None) -> None:
@@ -505,10 +602,27 @@ class YAMLParser:
           Pass 2 — parse each entry in dependency order (topological sort) so
                    nested shared_step references are already registered when a
                    dependent entry is parsed.
+
+        Beyond the file's own directory, every ancestor directory between it
+        and the current working directory is also checked (outermost first,
+        so a deeper/more-specific shared_steps.yaml still wins) — this lets a
+        nested folder structure (e.g. tests/cases/<workspace>/<section>/) share
+        one shared_steps.yaml at the workspace level instead of requiring a
+        copy in every leaf section. If workspace_dir isn't under cwd, only
+        workspace_dir itself is checked, same as before.
         """
-        candidates = [Path("shared_steps.yaml")]
+        dirs: List[Path] = []
         if workspace_dir is not None:
-            candidates.append(Path(workspace_dir) / "shared_steps.yaml")
+            workspace_dir = Path(workspace_dir).resolve()
+            cwd = Path.cwd().resolve()
+            chain = [workspace_dir]
+            if cwd in workspace_dir.parents:
+                d = workspace_dir
+                while d != cwd:
+                    d = d.parent
+                    chain.append(d)
+            dirs.extend(reversed(chain))
+        candidates = [Path("shared_steps.yaml")] + [d / "shared_steps.yaml" for d in dirs]
 
         # Pass 1: gather raw data from all candidate files (later files override earlier)
         raw: Dict[str, Dict[str, Any]] = {}
@@ -571,6 +685,8 @@ class YAMLParser:
         file_path = Path(file_path)
         # Reload workspace-local shared steps (local overrides global)
         self._load_shared_steps(workspace_dir=file_path.parent)
+        # Reload workspace-local data sets (local overrides global) — resolves data_ref:
+        self.data_sets = load_data_sets(file_path.parent)
 
         if not file_path.exists():
             error_info = self._create_test_error_info(
@@ -771,6 +887,11 @@ class YAMLParser:
 
         # Extract data-driven fields
         test_data = data.get("data", None)
+        data_ref = data.get("data_ref")
+        if test_data is None and data_ref:
+            test_data = self.data_sets.get(data_ref)
+            if test_data is None:
+                print(f"Warning: data_ref '{data_ref}' not found in any data_sets.yaml")
         async_execution = data.get("async_execution", False)
         max_workers = data.get("max_workers", 1)
 

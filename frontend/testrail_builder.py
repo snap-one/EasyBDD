@@ -20,10 +20,8 @@ Start with:  python frontend/start_testrail_builder.py   (default port 8091)
 
 from __future__ import annotations
 
-import difflib
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -47,18 +45,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from action_definitions import ACTION_DEFINITIONS  # noqa: E402
-
-from easybdd.core.parser import (  # noqa: E402
-    fix_step_list_indent,
-    parse_yaml_lenient,
-    strip_html_to_text,
-)
-from easybdd.core.testrail_utils import _needs_quoting  # noqa: E402
-from easybdd.core.validator import ACTION_SCHEMA  # noqa: E402
+from easybdd.core.parser import fix_step_list_indent, parse_yaml_lenient, strip_html_to_text  # noqa: E402
+from easybdd.services.jenkins_service import JenkinsError, JenkinsService  # noqa: E402
 from easybdd.services.testrail_service import (  # noqa: E402
     TestRailError,
     TestRailService,
+)
+
+from builder_core import (  # noqa: E402
+    CASE_PREFIXES,
+    CATALOG,
+    ImportRecordingRequest,
+    RECORDING_FORMATS,
+    StepNode,
+    VarRow,
+    CaseModel,
+    _ROLE_BY_PREFIX,
+    _classify_role,
+    _dict_to_node,
+    _sanitize_node,
+    _schema_for,
+    case_title,
+    convert_recording_text,
+    parse_case_to_model,
+    serialize_case_body,
+    validate_case,
 )
 
 app = FastAPI(
@@ -76,365 +87,6 @@ app.add_middleware(
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-
-CASE_PREFIXES = {
-    "feature": "Feature:",
-    "var": "Var:",
-    "shared": "Shared:",
-    "setup": "Setup:",
-    "teardown": "Teardown:",
-    "test": "Test:",
-}
-
-_ROLE_BY_PREFIX = {v: k for k, v in CASE_PREFIXES.items()}
-
-# Categories for actions that exist in the runner's ACTION_SCHEMA but have no
-# rich definition in action_definitions.py
-_PREFIX_CATEGORY = {
-    "telnet": "Telnet",
-    "serial": "Serial",
-    "websocket": "WebSocket",
-    "eval": "Eval",
-    "command": "Command",
-    "test": "Test",
-    "aws": "AWS",
-    "browser": "Browser",
-    "api": "API",
-    "ssh": "SSH",
-    "jsonrpc": "JSON-RPC",
-    "ovrc": "OvrC API",
-    "pagerduty": "PagerDuty",
-}
-
-_PREFIX_ICON = {
-    "telnet": "📟",
-    "serial": "🔌",
-    "websocket": "🔄",
-    "eval": "🐍",
-    "command": "💻",
-}
-
-
-# --------------------------------------------------------------------------- #
-# Action catalog                                                               #
-# --------------------------------------------------------------------------- #
-
-# Definitions that override / extend action_definitions.py where it disagrees
-# with what the runner actually dispatches (see runner._handle_assert_action
-# and runner._handle_extract_action).
-def _sel_param(help_text: str = "CSS selector for the element") -> Dict[str, Any]:
-    return {"type": "text", "required": False, "label": "Selector",
-            "placeholder": "#element or .class", "help": help_text}
-
-
-def _timeout_param() -> Dict[str, Any]:
-    return {"type": "number", "required": False, "label": "Timeout (ms)", "placeholder": "10000"}
-
-
-def _browser_assert(label: str, desc: str, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    params: Dict[str, Any] = {"selector": {**_sel_param(), "required": True}}
-    params.update(extra or {})
-    params["timeout"] = _timeout_param()
-    return {"category": "Browser", "label": label, "description": desc, "icon": "✅", "parameters": params}
-
-
-_CATALOG_OVERRIDES: Dict[str, Dict[str, Any]] = {
-    "browser.fill": {
-        "category": "Browser",
-        "label": "Fill Input Field",
-        "description": "Fill a form field with text — target it by CSS selector, role+name, or label",
-        "icon": "✏️",
-        "_one_of": [["selector", "field", "role", "label"]],
-        "parameters": {
-            "selector": _sel_param("CSS selector for the input field"),
-            "value": {"type": "text", "required": True, "label": "Value",
-                      "placeholder": "testuser", "help": "Text to fill in the field"},
-            "role": {"type": "text", "required": False, "label": "Role",
-                     "placeholder": "textbox", "help": "ARIA role (use with Name)"},
-            "name": {"type": "text", "required": False, "label": "Name",
-                     "help": "Accessible name (use with Role)"},
-            "label": {"type": "text", "required": False, "label": "Label",
-                      "help": "Target by form label text"},
-            "field": {"type": "text", "required": False, "label": "Field (alias)",
-                      "help": "Alias of Selector — kept for older cases"},
-            "clear": {"type": "boolean", "required": False, "label": "Clear first",
-                      "help": "Clear the field before typing"},
-        },
-    },
-    "browser.assert_checked": _browser_assert(
-        "Assert Checkbox Checked", "Assert a checkbox/toggle is checked"),
-    "browser.assert_unchecked": _browser_assert(
-        "Assert Checkbox Unchecked", "Assert a checkbox/toggle is NOT checked"),
-    "test.assert_text_contains": _browser_assert(
-        "Assert Text Contains", "Assert an element's text contains a substring",
-        {"text": {"type": "text", "required": True, "label": "Text"}}),
-    "test.assert_text_equals": _browser_assert(
-        "Assert Text Equals", "Assert an element's text equals a value",
-        {"text": {"type": "text", "required": True, "label": "Text"}}),
-    "test.assert_element_visible": _browser_assert(
-        "Assert Element Visible", "Assert an element is visible on the page"),
-    "test.assert_element_not_visible": _browser_assert(
-        "Assert Element Not Visible", "Assert an element is not visible"),
-    "test.assert_element_enabled": _browser_assert(
-        "Assert Element Enabled", "Assert an element is enabled"),
-    "test.assert_element_disabled": _browser_assert(
-        "Assert Element Disabled", "Assert an element is disabled"),
-    "test.assert_element_count": _browser_assert(
-        "Assert Element Count", "Assert how many elements match a selector",
-        {"count": {"type": "number", "required": True, "label": "Count", "placeholder": "1"}}),
-    "browser.get_title": {
-        "category": "Browser",
-        "label": "Get Page Title",
-        "description": "Read the browser tab title (also stored as last_response)",
-        "icon": "🏷️",
-        "parameters": {
-            "store_as": {"type": "text", "required": False, "label": "Store as",
-                         "placeholder": "page_title"},
-        },
-    },
-    "telnet.send": {
-        "category": "Telnet",
-        "label": "Telnet Send",
-        "description": "Run one command (or a list of commands) over telnet",
-        "icon": "📟",
-        "_one_of": [["command", "commands"]],
-        "parameters": {
-            "command": {"type": "text", "required": False, "label": "Command",
-                        "placeholder": "show version"},
-            "commands": {"type": "list", "required": False, "label": "Commands (list)",
-                         "help": "Run several commands in one session — YAML list"},
-            "host": {"type": "text", "required": False, "label": "Host"},
-            "port": {"type": "number", "required": False, "label": "Port", "placeholder": "23"},
-            "username": {"type": "text", "required": False, "label": "Username"},
-            "password": {"type": "text", "required": False, "label": "Password"},
-            "prompt": {"type": "text", "required": False, "label": "Shell prompt",
-                       "placeholder": "#", "help": "Prompt string to wait for after each command"},
-            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "placeholder": "15"},
-            "store_as": {"type": "text", "required": False, "label": "Store as"},
-        },
-    },
-    "test.assert": {
-        "category": "Test",
-        "label": "Assert Condition",
-        "description": "Assert a Python expression is true (e.g. last_status_code == 200)",
-        "icon": "✅",
-        "parameters": {
-            "expression": {
-                "type": "text",
-                "required": True,
-                "label": "Expression",
-                "placeholder": "last_status_code == 200",
-                "help": "Python expression evaluated against test variables",
-            },
-            "message": {
-                "type": "text",
-                "required": False,
-                "label": "Failure message",
-                "help": "Custom message shown when the assertion fails",
-            },
-        },
-    },
-    "websocket.connect": {
-        "category": "WebSocket",
-        "label": "WebSocket Connect",
-        "description": "Open a WebSocket connection (pooled by URL — later send/receive steps reuse it)",
-        "icon": "🔄",
-        "parameters": {
-            "url": {"type": "text", "required": True, "label": "URL",
-                    "placeholder": "wss://host:port/path", "help": "WebSocket endpoint (ws:// or wss://)"},
-            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "placeholder": "10"},
-            "headers": {"type": "json", "required": False, "label": "Headers",
-                        "help": "e.g. {header: '${mac},127.0.0.1,80,plain'}"},
-            "subprotocols": {"type": "list", "required": False, "label": "Subprotocols"},
-            "verify_ssl": {"type": "boolean", "required": False, "label": "Verify SSL"},
-            "session_token": {"type": "text", "required": False, "label": "Session token"},
-            "auth_url": {"type": "text", "required": False, "label": "Auth URL",
-                         "help": "Optional HTTP auth endpoint called before connecting"},
-            "auth_username": {"type": "text", "required": False, "label": "Auth username"},
-            "auth_password": {"type": "text", "required": False, "label": "Auth password"},
-        },
-    },
-    "websocket.send": {
-        "category": "WebSocket",
-        "label": "WebSocket Send",
-        "description": "Send a message and read the reply. With Method set, sends a JSON-RPC envelope; extra parameters become the JSON-RPC params.",
-        "icon": "📨",
-        "parameters": {
-            "url": {"type": "text", "required": True, "label": "URL",
-                    "placeholder": "wss://host:port/path",
-                    "help": "Identifies the pooled connection (reconnects automatically)"},
-            "method": {"type": "text", "required": False, "label": "JSON-RPC method",
-                       "placeholder": "dxGetAbout",
-                       "help": "When set, the message is wrapped in a JSON-RPC 2.0 envelope"},
-            "data": {"type": "json", "required": False, "label": "Data / params",
-                     "help": "Raw message, or the params dict in JSON-RPC mode"},
-            "wait_for": {"type": "text", "required": False, "label": "Wait for",
-                         "help": "Keep reading until the response contains this text"},
-            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "placeholder": "10"},
-            "store_as": {"type": "text", "required": False, "label": "Store as",
-                         "help": "Variable name to store the response"},
-        },
-    },
-    "websocket.receive": {
-        "category": "WebSocket",
-        "label": "WebSocket Receive",
-        "description": "Read the next message from an open WebSocket connection",
-        "icon": "📥",
-        "parameters": {
-            "url": {"type": "text", "required": True, "label": "URL",
-                    "help": "Identifies the pooled connection"},
-            "wait_for": {"type": "text", "required": False, "label": "Wait for",
-                         "help": "Keep reading until the response contains this text"},
-            "timeout": {"type": "number", "required": False, "label": "Timeout (s)", "placeholder": "10"},
-            "store_as": {"type": "text", "required": False, "label": "Store as"},
-        },
-    },
-    "websocket.disconnect": {
-        "category": "WebSocket",
-        "label": "WebSocket Disconnect",
-        "description": "Close a pooled WebSocket connection",
-        "icon": "🔌",
-        "parameters": {
-            "url": {"type": "text", "required": False, "label": "URL",
-                    "help": "Connection to close (omit to no-op)"},
-        },
-    },
-    "test.extract": {
-        "category": "Test",
-        "label": "Extract Value",
-        "description": "Extract a field from a stored response (dict dot-notation or CLI 'Key : Value' text)",
-        "icon": "🔍",
-        "parameters": {
-            "field": {
-                "type": "text",
-                "required": True,
-                "label": "Field",
-                "placeholder": "access_token or data.user.id",
-                "help": "Field name — dot-notation for dict responses, key substring for CLI text",
-            },
-            "from": {
-                "type": "text",
-                "required": False,
-                "label": "From variable",
-                "placeholder": "last_response",
-                "help": "Variable to read from (default: last_response)",
-            },
-            "store_as": {
-                "type": "text",
-                "required": False,
-                "label": "Store as",
-                "help": "Variable name to store the extracted value",
-            },
-            "equals": {
-                "type": "text",
-                "required": False,
-                "label": "Assert equals",
-                "help": "Optionally assert the extracted value equals this",
-            },
-            "contains": {
-                "type": "text",
-                "required": False,
-                "label": "Assert contains",
-                "help": "Optionally assert the extracted value contains this string",
-            },
-            "message": {
-                "type": "text",
-                "required": False,
-                "label": "Failure message",
-            },
-        },
-    },
-}
-
-
-def _build_catalog() -> Dict[str, Dict[str, Any]]:
-    """Merge the rich UI catalog with the runner's ACTION_SCHEMA.
-
-    Actions only known to ACTION_SCHEMA get generic text-field parameter
-    definitions so nothing the runner supports is missing from the palette.
-    Aliases (short names / alias_of entries) are skipped — the builder always
-    emits canonical service.verb names.
-    """
-    catalog: Dict[str, Dict[str, Any]] = {}
-    for action_id, definition in ACTION_DEFINITIONS.items():
-        catalog[action_id] = {
-            "category": definition.get("category", "Other"),
-            "label": definition.get("label", action_id),
-            "description": definition.get("description", ""),
-            "icon": definition.get("icon", "⚙️"),
-            "parameters": definition.get("parameters", {}),
-        }
-
-    for key, schema in ACTION_SCHEMA.items():
-        if "." not in key or "alias_of" in schema or key in catalog:
-            continue
-        # ws.* / pd.* / s3.* style short prefixes are aliases of canonical ones
-        prefix = key.split(".", 1)[0]
-        if prefix in ("ws", "pd", "s3"):
-            continue
-        params: Dict[str, Any] = {}
-        for name in schema.get("required", []):
-            params[name] = {"type": "text", "required": True, "label": name}
-        for name in schema.get("optional", []):
-            params[name] = {"type": "text", "required": False, "label": name}
-        catalog[key] = {
-            "category": _PREFIX_CATEGORY.get(prefix, prefix.title()),
-            "label": key,
-            "description": "",
-            "icon": _PREFIX_ICON.get(prefix, "⚙️"),
-            "parameters": params,
-        }
-
-    catalog.update(_CATALOG_OVERRIDES)
-    return catalog
-
-
-CATALOG = _build_catalog()
-
-
-def _schema_for(action: str) -> Optional[Dict[str, Any]]:
-    """Resolve an action name in ACTION_SCHEMA, following alias_of."""
-    schema = ACTION_SCHEMA.get(action)
-    if schema and "alias_of" in schema:
-        return ACTION_SCHEMA.get(schema["alias_of"])
-    return schema
-
-
-# --------------------------------------------------------------------------- #
-# Case model                                                                    #
-# --------------------------------------------------------------------------- #
-
-class StepNode(BaseModel):
-    kind: str  # action | shared | for_each | while | condition | try | raw
-    action: Optional[str] = None
-    params: Dict[str, Any] = Field(default_factory=dict)
-    name: Optional[str] = None            # shared step name
-    items: Optional[Any] = None           # for_each list (list or "${var}")
-    loop_var: Optional[str] = None
-    expression: Optional[str] = None      # while / condition
-    loop_limit: Optional[int] = None
-    steps: List["StepNode"] = Field(default_factory=list)        # for_each / while / try
-    then_steps: List["StepNode"] = Field(default_factory=list)   # condition
-    else_steps: List["StepNode"] = Field(default_factory=list)   # condition
-    except_steps: List["StepNode"] = Field(default_factory=list)  # try
-    finally_steps: List["StepNode"] = Field(default_factory=list)  # try
-    yaml_text: Optional[str] = None       # raw
-
-
-StepNode.model_rebuild()
-
-
-class VarRow(BaseModel):
-    key: str
-    value: Any = ""
-
-
-class CaseModel(BaseModel):
-    case_type: str  # feature | var | shared | setup | teardown
-    name: str = ""
-    variables: List[VarRow] = Field(default_factory=list)
-    data_rows: Optional[str] = None  # YAML text for parameterized cases
-    steps: List[StepNode] = Field(default_factory=list)
 
 
 class PublishRequest(BaseModel):
@@ -482,739 +134,6 @@ class ChatRequest(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
-# Serialization — model → TestRail Preconditions text                          #
-# --------------------------------------------------------------------------- #
-
-def _scalar(v: Any) -> str:
-    """Format a scalar param value, quoting only when YAML requires it."""
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    if isinstance(v, (int, float)):
-        return str(v)
-    s = str(v)
-    if _needs_quoting(s):
-        return "'" + s.replace("'", "''") + "'"
-    return s
-
-
-def _flow(v: Any) -> str:
-    """Single-line flow-style YAML for dict/list values (safe to re-indent)."""
-    return yaml.safe_dump(v, default_flow_style=True, width=100000).strip()
-
-
-def _coerce_param(value: Any, ptype: str) -> Any:
-    """Coerce a UI-supplied param value to the type the action expects."""
-    if not isinstance(value, str):
-        return value
-    text = value.strip()
-    if ptype == "number":
-        try:
-            return int(text)
-        except ValueError:
-            try:
-                return float(text)
-            except ValueError:
-                return value
-    if ptype == "boolean":
-        if text.lower() in ("true", "yes", "1"):
-            return True
-        if text.lower() in ("false", "no", "0"):
-            return False
-        return value
-    if ptype in ("json", "keyvalue", "list", "object"):
-        if text.startswith(("{", "[")):
-            try:
-                parsed = yaml.safe_load(text)
-                if isinstance(parsed, (dict, list)):
-                    return parsed
-            except yaml.YAMLError:
-                pass
-    return value
-
-
-def _clean_params(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Drop empty params and coerce values to their declared types."""
-    definition = CATALOG.get(action, {})
-    schema = definition.get("parameters", {})
-    cleaned: Dict[str, Any] = {}
-    for k, v in params.items():
-        if v is None:
-            continue
-        if isinstance(v, str) and not v.strip():
-            continue
-        ptype = schema.get(k, {}).get("type", "text")
-        cleaned[k] = _coerce_param(v, ptype)
-    return cleaned
-
-
-def _emit_params(params: Dict[str, Any], lines: List[str], indent: str) -> None:
-    for k, v in params.items():
-        if isinstance(v, (dict, list)):
-            lines.append(f"{indent}{k}: {_flow(v)}")
-        else:
-            lines.append(f"{indent}{k}: {_scalar(v)}")
-
-
-def _emit_nested_steps(steps: List[StepNode], lines: List[str]) -> None:
-    """Emit steps nested inside a control-flow block.
-
-    Nested blocks are written as properly indented YAML (items at two spaces,
-    params at six) — fix_step_list_indent passes indented lines through
-    untouched, so the structure survives the runner's re-indent pass.
-    """
-    for node in steps:
-        if node.kind == "action" and node.action:
-            params = _clean_params(node.action, node.params)
-            if params:
-                lines.append(f"  - {node.action}:")
-                _emit_params(params, lines, "      ")
-            else:
-                lines.append(f"  - {node.action}: {{}}")
-        elif node.kind == "shared" and node.name:
-            lines.append(f"  - shared_step: {_scalar(node.name)}")
-        elif node.kind == "raw" and node.yaml_text:
-            raw: List[str] = []
-            _emit_raw(node.yaml_text, raw)
-            lines.extend("  " + ln for ln in raw)
-        else:
-            raise ValueError(
-                "Nested control-flow blocks are not supported — flatten the "
-                "inner block or move it to a Shared: case."
-            )
-
-
-def _emit_raw(text: str, lines: List[str]) -> None:
-    """Emit a raw YAML step (single list item) exactly as written."""
-    raw_lines = [ln for ln in text.splitlines() if ln.strip()]
-    if not raw_lines:
-        return
-    first = raw_lines[0]
-    if not first.lstrip().startswith("-"):
-        raw_lines[0] = f"- {first.strip()}"
-    lines.extend(raw_lines)
-
-
-def _emit_step(node: StepNode, lines: List[str], number: int) -> None:
-    """Emit one top-level step in flush-left dot-notation."""
-    if node.kind == "action" and node.action:
-        label = node.action
-        params = _clean_params(node.action, node.params)
-        for hint in ("name", "label", "text", "url", "message"):
-            if hint in params and isinstance(params[hint], str):
-                label = f"{node.action} ({params[hint]})"
-                break
-        lines.append(f"# {number}. {label}")
-        if params:
-            lines.append(f"- {node.action}:")
-            _emit_params(params, lines, "")
-        else:
-            lines.append(f"- {node.action}: {{}}")
-
-    elif node.kind == "shared":
-        if not node.name:
-            raise ValueError(f"Step {number}: shared step has no name")
-        lines.append(f"# {number}. shared_step ({node.name})")
-        lines.append(f"- shared_step: {_scalar(node.name)}")
-
-    elif node.kind == "for_each":
-        items = node.items
-        if isinstance(items, str):
-            items = items.strip()
-            if items.startswith(("[", "{")):
-                items = yaml.safe_load(items)
-        lines.append(f"# {number}. for_each loop")
-        lines.append(f"- for_each: {_flow(items) if isinstance(items, (list, dict)) else _scalar(items)}")
-        if node.loop_var:
-            lines.append(f"  loop_var: {node.loop_var}")
-        lines.append("  steps:")
-        _emit_nested_steps(node.steps, lines)
-
-    elif node.kind == "while":
-        if not node.expression:
-            raise ValueError(f"Step {number}: while loop has no condition")
-        lines.append(f"# {number}. while loop")
-        lines.append(f"- while: {_scalar(node.expression)}")
-        if node.loop_limit:
-            lines.append(f"  loop_limit: {node.loop_limit}")
-        lines.append("  steps:")
-        _emit_nested_steps(node.steps, lines)
-
-    elif node.kind == "condition":
-        if not node.expression:
-            raise ValueError(f"Step {number}: condition has no expression")
-        lines.append(f"# {number}. condition")
-        lines.append(f"- condition: {_scalar(node.expression)}")
-        lines.append("  then:")
-        _emit_nested_steps(node.then_steps, lines)
-        if node.else_steps:
-            # Blank line stops the indent fixer's param scan on the previous
-            # nested step — without it 'else:' would be swallowed as a param.
-            lines.append("")
-            lines.append("  else:")
-            _emit_nested_steps(node.else_steps, lines)
-
-    elif node.kind == "try":
-        lines.append(f"# {number}. try / except / finally")
-        lines.append("- try:")
-        _emit_nested_steps(node.steps, lines)
-        if node.except_steps:
-            lines.append("")
-            lines.append("  except:")
-            _emit_nested_steps(node.except_steps, lines)
-        if node.finally_steps:
-            lines.append("")
-            lines.append("  finally:")
-            _emit_nested_steps(node.finally_steps, lines)
-
-    elif node.kind == "raw":
-        lines.append(f"# {number}. raw step")
-        _emit_raw(node.yaml_text or "", lines)
-
-    else:
-        raise ValueError(f"Step {number}: unknown step kind {node.kind!r}")
-
-
-def _coerce_var_value(value: Any) -> Any:
-    """Let engineers type [1, 2] or {a: b} into a variable value field."""
-    if isinstance(value, str) and value.strip().startswith(("[", "{")):
-        try:
-            parsed = yaml.safe_load(value)
-            if isinstance(parsed, (dict, list)):
-                return parsed
-        except yaml.YAMLError:
-            pass
-    return value
-
-
-def serialize_case_body(model: CaseModel) -> str:
-    """Build the TestRail Preconditions text for a case model."""
-    sanitize_model(model)
-    if model.case_type == "var" and not model.steps:
-        lines = []
-        for row in model.variables:
-            if not row.key.strip():
-                continue
-            value = _coerce_var_value(row.value)
-            if isinstance(value, (dict, list)):
-                lines.append(f"{row.key.strip()}: {_flow(value)}")
-            else:
-                lines.append(f"{row.key.strip()}: {_scalar(value)}")
-        return "\n".join(lines)
-
-    lines: List[str] = []
-    var_rows = [r for r in model.variables if r.key.strip()]
-    if var_rows:
-        # Keys must be indented under variables: — flush-left keys become
-        # top-level siblings after parsing and the runner would ignore them.
-        lines.append("variables:")
-        for row in var_rows:
-            value = _coerce_var_value(row.value)
-            if isinstance(value, (dict, list)):
-                lines.append(f"  {row.key.strip()}: {_flow(value)}")
-            else:
-                lines.append(f"  {row.key.strip()}: {_scalar(value)}")
-        lines.append("")
-
-    if model.data_rows and model.data_rows.strip():
-        parsed_rows = yaml.safe_load(model.data_rows)
-        if not isinstance(parsed_rows, list):
-            raise ValueError("Data rows must be a YAML list of mappings")
-        lines.append("data:")
-        lines.append(yaml.safe_dump(parsed_rows, default_flow_style=False, width=100000).rstrip())
-        lines.append("")
-
-    lines.append("steps:")
-    for idx, node in enumerate(model.steps, start=1):
-        _emit_step(node, lines, idx)
-    return "\n".join(lines)
-
-
-def case_title(model: CaseModel) -> str:
-    prefix = CASE_PREFIXES.get(model.case_type)
-    if not prefix:
-        raise ValueError(f"Unknown case type {model.case_type!r}")
-    return f"{prefix} {model.name.strip()}"
-
-
-# --------------------------------------------------------------------------- #
-# Sanitization — strip rich-text artifacts before they reach TestRail          #
-# --------------------------------------------------------------------------- #
-
-# Characters TestRail's rich-text editor (or copy/paste from docs) injects
-# that break YAML/expressions invisibly.
-_INVISIBLE_MAP = str.maketrans({
-    "\u00a0": " ",   # non-breaking space
-    "\u200b": None,  # zero-width space
-    "\u200c": None,  # zero-width non-joiner
-    "\u200d": None,  # zero-width joiner
-    "\ufeff": None,  # BOM
-    "\u2018": "'", "\u2019": "'",  # curly single quotes
-    "\u201c": '"', "\u201d": '"',  # curly double quotes
-})
-
-
-def _sanitize_str(s: str) -> str:
-    return s.translate(_INVISIBLE_MAP)
-
-
-def _sanitize_value(v: Any) -> Any:
-    if isinstance(v, str):
-        return _sanitize_str(v)
-    if isinstance(v, dict):
-        return {(_sanitize_str(k) if isinstance(k, str) else k): _sanitize_value(x) for k, x in v.items()}
-    if isinstance(v, list):
-        return [_sanitize_value(x) for x in v]
-    return v
-
-
-def _sanitize_node(node: StepNode) -> None:
-    if node.action:
-        node.action = _sanitize_str(node.action).strip()
-    node.params = {k: _sanitize_value(v) for k, v in node.params.items()}
-    if isinstance(node.name, str):
-        node.name = _sanitize_str(node.name).strip()
-    if isinstance(node.expression, str):
-        node.expression = _sanitize_str(node.expression)
-    node.items = _sanitize_value(node.items)
-    if isinstance(node.yaml_text, str):
-        node.yaml_text = _sanitize_str(node.yaml_text)
-    for lst in (node.steps, node.then_steps, node.else_steps, node.except_steps, node.finally_steps):
-        for child in lst:
-            _sanitize_node(child)
-
-
-def sanitize_model(model: CaseModel) -> None:
-    """Normalize invisible/rich-text characters everywhere in the model."""
-    model.name = _sanitize_str(model.name)
-    for row in model.variables:
-        row.key = _sanitize_str(row.key).strip()
-        row.value = _sanitize_value(row.value)
-    if isinstance(model.data_rows, str):
-        model.data_rows = _sanitize_str(model.data_rows)
-    for node in model.steps:
-        _sanitize_node(node)
-
-
-# --------------------------------------------------------------------------- #
-# Validation                                                                   #
-# --------------------------------------------------------------------------- #
-
-# Actions where arbitrary extra params are legitimate (websocket.send folds
-# unrecognized params into the JSON-RPC params dict).
-_FREEFORM_PARAM_ACTIONS = {"websocket.send"}
-
-
-def _validate_action_node(node: StepNode, where: str, errors: List[str], warnings: List[str]) -> None:
-    action = node.action or ""
-    definition = CATALOG.get(action)
-    schema = _schema_for(action)
-    if not definition and not schema:
-        suggestions = difflib.get_close_matches(action, list(CATALOG.keys()), n=3, cutoff=0.6)
-        hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
-        errors.append(f"{where}: unknown action '{action}'.{hint}")
-        return
-    params = _clean_params(action, node.params)
-    if definition:
-        for pname, pdef in definition.get("parameters", {}).items():
-            if pdef.get("required") and pname not in params:
-                errors.append(f"{where}: '{action}' is missing required parameter '{pname}'")
-        for group in definition.get("_one_of", []):
-            if not any(p in params for p in group):
-                errors.append(
-                    f"{where}: '{action}' needs one of: {', '.join(group)}"
-                )
-    if schema and action not in _FREEFORM_PARAM_ACTIONS:
-        known = set(schema.get("required", [])) | set(schema.get("optional", []))
-        if definition:
-            known |= set(definition.get("parameters", {}).keys())
-        for pname in params:
-            if known and pname not in known:
-                warnings.append(f"{where}: '{action}' has unrecognized parameter '{pname}'")
-
-
-_CONTROL_FLOW_KEYS = {"for_each", "while", "condition", "if", "try", "shared_step", "test.data"}
-
-
-def _validate_raw_node(node: StepNode, where: str, errors: List[str], warnings: List[str]) -> None:
-    """Raw YAML steps get the same scrutiny: must parse, actions must exist."""
-    text = (node.yaml_text or "").strip()
-    if not text:
-        errors.append(f"{where}: raw YAML step is empty")
-        return
-    lines: List[str] = []
-    _emit_raw(node.yaml_text or "", lines)
-    try:
-        parsed = parse_yaml_lenient(fix_step_list_indent("\n".join(lines)))
-    except Exception as exc:
-        errors.append(f"{where}: raw YAML does not parse: {exc}")
-        return
-    items = parsed if isinstance(parsed, list) else [parsed]
-    for item in items:
-        if not isinstance(item, dict):
-            errors.append(f"{where}: raw YAML must be a step mapping (- service.verb: …)")
-            continue
-        if any(k in item for k in _CONTROL_FLOW_KEYS):
-            continue
-        action = item.get("action") if isinstance(item.get("action"), str) else (
-            next(iter(item)) if len(item) >= 1 and isinstance(next(iter(item)), str) and "." in next(iter(item)) else None
-        )
-        if action and not CATALOG.get(action) and not _schema_for(action):
-            suggestions = difflib.get_close_matches(action, list(CATALOG.keys()), n=3, cutoff=0.6)
-            hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
-            errors.append(f"{where}: raw YAML uses unknown action '{action}'.{hint}")
-
-
-def _slug(name: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_")
-
-
-def _walk_nodes(nodes: List[StepNode], prefix: str, errors: List[str], warnings: List[str],
-                shared_slugs: Optional[set] = None) -> None:
-    for i, node in enumerate(nodes, start=1):
-        where = f"{prefix}step {i}"
-        if node.kind == "action":
-            _validate_action_node(node, where, errors, warnings)
-        elif node.kind == "raw":
-            _validate_raw_node(node, where, errors, warnings)
-        elif node.kind == "shared":
-            if not (node.name or "").strip():
-                errors.append(f"{where}: shared step reference has no name")
-            elif shared_slugs is not None and _slug(node.name) not in shared_slugs:
-                close = difflib.get_close_matches(_slug(node.name), sorted(shared_slugs), n=2, cutoff=0.5)
-                hint = f" Closest in suite: {', '.join(close)}." if close else ""
-                warnings.append(f"{where}: no 'Shared: {node.name}' case found in the selected suite.{hint}")
-        elif node.kind == "for_each":
-            if node.items in (None, "", []):
-                errors.append(f"{where}: for_each loop has no items")
-            if not node.steps:
-                errors.append(f"{where}: for_each loop has no steps")
-            _walk_nodes(node.steps, f"{where} → ", errors, warnings, shared_slugs)
-        elif node.kind == "while":
-            if not (node.expression or "").strip():
-                errors.append(f"{where}: while loop has no condition")
-            if not node.steps:
-                errors.append(f"{where}: while loop has no steps")
-            _walk_nodes(node.steps, f"{where} → ", errors, warnings, shared_slugs)
-        elif node.kind == "condition":
-            if not (node.expression or "").strip():
-                errors.append(f"{where}: condition has no expression")
-            if not node.then_steps:
-                errors.append(f"{where}: condition has no 'then' steps")
-            _walk_nodes(node.then_steps, f"{where} then → ", errors, warnings, shared_slugs)
-            _walk_nodes(node.else_steps, f"{where} else → ", errors, warnings, shared_slugs)
-        elif node.kind == "try":
-            if not node.steps:
-                errors.append(f"{where}: try block has no steps")
-            _walk_nodes(node.steps, f"{where} try → ", errors, warnings, shared_slugs)
-            _walk_nodes(node.except_steps, f"{where} except → ", errors, warnings, shared_slugs)
-            _walk_nodes(node.finally_steps, f"{where} finally → ", errors, warnings, shared_slugs)
-
-
-# Variables the runner provides implicitly at execution time.
-_BUILTIN_VARS = {
-    "last_response", "last_response_dict", "last_status_code",
-    "last_response_headers", "last_response_text",
-}
-
-_VAR_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)")
-
-
-def _collect_strings(v: Any, out: List[str]) -> None:
-    if isinstance(v, str):
-        out.append(v)
-    elif isinstance(v, dict):
-        for x in v.values():
-            _collect_strings(x, out)
-    elif isinstance(v, list):
-        for x in v:
-            _collect_strings(x, out)
-
-
-def _scan_variable_usage(model: CaseModel) -> tuple:
-    """Return (referenced names, names the case itself defines)."""
-    strings: List[str] = []
-    defined = set(_BUILTIN_VARS)
-    for row in model.variables:
-        if row.key.strip():
-            defined.add(row.key.strip())
-        _collect_strings(row.value, strings)
-    if model.data_rows:
-        try:
-            rows = yaml.safe_load(model.data_rows)
-            if isinstance(rows, list):
-                for r in rows:
-                    if isinstance(r, dict):
-                        defined.update(str(k) for k in r.keys())
-        except yaml.YAMLError:
-            pass
-
-    def walk(nodes: List[StepNode]) -> None:
-        for n in nodes:
-            _collect_strings(n.params, strings)
-            if isinstance(n.params.get("store_as"), str) and n.params["store_as"].strip():
-                defined.add(n.params["store_as"].strip())
-            if n.kind == "action" and n.action == "eval.set" and isinstance(n.params.get("key"), str):
-                defined.add(n.params["key"].strip())
-            if n.loop_var:
-                defined.add(n.loop_var.strip())
-            for f in (n.expression, n.yaml_text):
-                if isinstance(f, str):
-                    strings.append(f)
-            _collect_strings(n.items, strings)
-            for lst in (n.steps, n.then_steps, n.else_steps, n.except_steps, n.finally_steps):
-                walk(lst)
-
-    walk(model.steps)
-    refs = set()
-    for s in strings:
-        refs.update(_VAR_REF_RE.findall(s))
-    return refs, defined
-
-
-def validate_case(model: CaseModel,
-                  known_vars: Optional[List[str]] = None,
-                  known_shared: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Validate a case model.
-
-    known_vars / known_shared carry suite context (keys from Var: cases,
-    names of Shared: cases). When provided, cross-reference checks run:
-    unknown ${variable} references and missing shared steps become warnings.
-    """
-    sanitize_model(model)
-    errors: List[str] = []
-    warnings: List[str] = []
-
-    if not model.name.strip():
-        errors.append("Case name is required")
-
-    if model.case_type == "var" and not model.steps:
-        if not any(r.key.strip() for r in model.variables):
-            errors.append("Var: case needs at least one key/value pair")
-        seen = set()
-        for row in model.variables:
-            key = row.key.strip()
-            if key and key in seen:
-                errors.append(f"Duplicate variable key '{key}'")
-            seen.add(key)
-    else:
-        if not model.steps:
-            errors.append("Add at least one step")
-        shared_slugs = {_slug(s) for s in known_shared} if known_shared is not None else None
-        _walk_nodes(model.steps, "", errors, warnings, shared_slugs)
-
-        # Cross-reference ${variables} against everything in scope.
-        if known_vars is not None:
-            refs, defined = _scan_variable_usage(model)
-            defined.update(known_vars)
-            unknown = sorted(
-                r for r in refs
-                if r not in defined and not r.isupper()  # ALL_CAPS = env var convention
-            )
-            if unknown:
-                warnings.append(
-                    "Unknown variable reference(s): "
-                    + ", ".join("${" + u + "}" for u in unknown)
-                    + " — not defined in this case, a Var: case in the suite, or by a store_as."
-                )
-
-    body = ""
-    if not errors:
-        try:
-            body = serialize_case_body(model)
-        except ValueError as exc:
-            errors.append(str(exc))
-
-    # Round-trip: parse the generated body with the exact functions the
-    # runner uses, to guarantee TestRail content will execute.
-    if body and not errors and (model.case_type != "var" or model.steps):
-        try:
-            fixed = fix_step_list_indent(body)
-            parsed = parse_yaml_lenient(fixed)
-            steps = parsed.get("steps") if isinstance(parsed, dict) else parsed
-            if not isinstance(steps, list) or not steps:
-                errors.append("Generated body did not parse into a steps list — please report this")
-        except Exception as exc:  # parser raises plain Exceptions on bad YAML
-            errors.append(f"Generated body failed runner parsing: {exc}")
-    elif body and not errors and model.case_type == "var":
-        try:
-            parsed = yaml.safe_load(body)
-            if not isinstance(parsed, dict):
-                errors.append("Var: body did not parse as key/value pairs")
-        except yaml.YAMLError as exc:
-            errors.append(f"Var: body is not valid YAML: {exc}")
-
-    return {"valid": not errors, "errors": errors, "warnings": warnings, "body": body}
-
-
-# --------------------------------------------------------------------------- #
-# Parsing — existing TestRail case → model (for editing)                       #
-# --------------------------------------------------------------------------- #
-
-_CONTROL_KEYS = ("for_each", "while", "condition", "try")
-
-
-def _dict_to_node(step: Dict[str, Any]) -> StepNode:
-    if "shared_step" in step:
-        return StepNode(kind="shared", name=str(step["shared_step"]))
-
-    if "for_each" in step:
-        return StepNode(
-            kind="for_each",
-            items=step.get("for_each"),
-            loop_var=step.get("loop_var"),
-            steps=[_dict_to_node(s) for s in step.get("steps", []) if isinstance(s, dict)],
-        )
-    if "while" in step:
-        return StepNode(
-            kind="while",
-            expression=str(step.get("while", "")),
-            loop_limit=step.get("loop_limit"),
-            steps=[_dict_to_node(s) for s in step.get("steps", []) if isinstance(s, dict)],
-        )
-    if "condition" in step or "if" in step:
-        return StepNode(
-            kind="condition",
-            expression=str(step.get("condition", step.get("if", ""))),
-            then_steps=[_dict_to_node(s) for s in step.get("then", []) if isinstance(s, dict)],
-            else_steps=[_dict_to_node(s) for s in step.get("else", []) if isinstance(s, dict)],
-        )
-    if "try" in step:
-        return StepNode(
-            kind="try",
-            steps=[_dict_to_node(s) for s in (step.get("try") or []) if isinstance(s, dict)],
-            except_steps=[_dict_to_node(s) for s in (step.get("except") or []) if isinstance(s, dict)],
-            finally_steps=[_dict_to_node(s) for s in (step.get("finally") or []) if isinstance(s, dict)],
-        )
-
-    # action-key format: {"action": "api.get", "url": ...}
-    if "action" in step and isinstance(step["action"], str):
-        params = {k: v for k, v in step.items() if k != "action"}
-        return StepNode(kind="action", action=step["action"], params=params)
-
-    # dot-notation format: {"api.get": {"url": ...}}
-    if len(step) == 1:
-        key, value = next(iter(step.items()))
-        if isinstance(key, str) and "." in key:
-            params = value if isinstance(value, dict) else ({} if value in (None, {}) else {"value": value})
-            return StepNode(kind="action", action=key, params=params)
-
-    # Anything we can't map cleanly → raw YAML node (still round-trips)
-    return StepNode(
-        kind="raw",
-        yaml_text="- " + yaml.safe_dump(step, default_flow_style=True, width=100000).strip(),
-    )
-
-
-def parse_case_to_model(case: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert a TestRail case dict to a builder model (best effort)."""
-    title = case.get("title", "") or ""
-    role = "feature"
-    name = title
-    for prefix, r in _ROLE_BY_PREFIX.items():
-        if title.startswith(prefix):
-            role = r
-            name = title[len(prefix):].strip()
-            break
-
-    text = strip_html_to_text(str(case.get("custom_preconds") or ""))
-    model: Dict[str, Any] = {
-        "case_type": role,
-        "name": name,
-        "variables": [],
-        "data_rows": None,
-        "steps": [],
-    }
-    notes: List[str] = []
-
-    if role == "var":
-        # A Var: case body is usually a flat key/value mapping, but the runner
-        # also supports step-based Var: cases (a steps list whose store_as
-        # results become run variables) — detect those and load them as steps.
-        step_parsed = None
-        if text.lstrip().startswith("-"):
-            try:
-                step_parsed = parse_yaml_lenient(fix_step_list_indent(text))
-            except Exception:
-                step_parsed = None
-        if isinstance(step_parsed, list) and any(isinstance(s, dict) for s in step_parsed):
-            nodes = [_dict_to_node(s) for s in step_parsed if isinstance(s, dict)]
-            model["steps"] = [n.model_dump() for n in nodes]
-            notes.append(
-                "Step-based Var: case — its steps run before the tests and "
-                "store_as results become run variables."
-            )
-            return {"model": model, "notes": notes, "raw_body": text}
-        try:
-            parsed = yaml.safe_load(text) if text else {}
-        except yaml.YAMLError:
-            parsed = None
-        if isinstance(parsed, dict):
-            model["variables"] = [{"key": str(k), "value": v} for k, v in parsed.items()]
-        else:
-            for line in text.splitlines():
-                line = line.strip()
-                if ":" in line and not line.startswith(("#", "-")):
-                    k, _, v = line.partition(":")
-                    if k.strip():
-                        model["variables"].append({"key": k.strip(), "value": v.strip()})
-        return {"model": model, "notes": notes, "raw_body": text}
-
-    if role == "test":
-        notes.append("Test: pointer cases route to local YAML files and are not editable here.")
-        return {"model": model, "notes": notes, "raw_body": text}
-
-    if text:
-        # Parameterized cases may carry a "JSON:\n[...]" data prefix — split it
-        # off the same way the runner does before parsing steps.
-        try:
-            from easybdd.core.testrail_runner import _extract_inline_data
-            data_sets, text = _extract_inline_data(text)
-            if data_sets:
-                model["data_rows"] = yaml.safe_dump(
-                    data_sets, default_flow_style=False, width=100000
-                ).rstrip()
-        except Exception:
-            pass
-        try:
-            fixed = fix_step_list_indent(text)
-            parsed = parse_yaml_lenient(fixed)
-        except Exception as exc:
-            notes.append(f"Could not parse existing body ({exc}); loaded as a single raw step.")
-            model["steps"] = [{"kind": "raw", "yaml_text": text}]
-            return {"model": model, "notes": notes, "raw_body": text}
-
-        steps: List[Any] = []
-        if isinstance(parsed, list):
-            steps = parsed
-        elif isinstance(parsed, dict):
-            variables = parsed.get("variables")
-            if isinstance(variables, dict):
-                model["variables"] = [{"key": str(k), "value": v} for k, v in variables.items()]
-            data = parsed.get("data")
-            if isinstance(data, list):
-                model["data_rows"] = yaml.safe_dump(data, default_flow_style=False, width=100000).rstrip()
-            if isinstance(parsed.get("steps"), list):
-                steps = parsed["steps"]
-            elif "action" in parsed:
-                steps = [parsed]
-        nodes = [_dict_to_node(s) for s in steps if isinstance(s, dict)]
-        model["steps"] = [n.model_dump() for n in nodes]
-        if any(n.kind == "raw" for n in nodes):
-            notes.append("Some steps could not be mapped to forms and were loaded as raw YAML steps.")
-
-        if not model["steps"] and text.strip():
-            # Legacy-format body (e.g. old pipe-delimited syntax) — surface it
-            # as a raw step so publishing never silently wipes the case.
-            notes.append(
-                "This case body is not in Easy BDD dot-notation (legacy format?) — "
-                "loaded as a raw step. Use the BDD migrator to convert legacy cases."
-            )
-            model["steps"] = [{"kind": "raw", "yaml_text": text}]
-
-    return {"model": model, "notes": notes, "raw_body": text}
-
-
-# --------------------------------------------------------------------------- #
 # TestRail client                                                               #
 # --------------------------------------------------------------------------- #
 
@@ -1240,6 +159,45 @@ def _tr_call(fn, *args, **kwargs):
         raise HTTPException(status_code=502, detail=f"TestRail request failed: {exc}")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected TestRail client error: {exc}")
+
+
+_jenkins_service: Optional[JenkinsService] = None
+
+# TestRail project id -> the exact PROJECT_ID choice string declared in
+# Jenkinsfile.manual's `choice(name: 'PROJECT_ID', choices: [...])` block.
+# Jenkins rejects any value that isn't a verbatim match for one of those
+# choices, so these two lists must be kept in sync.
+_JENKINS_PROJECT_CHOICES: Dict[int, str] = {
+    59: "59 - JDM Automation",
+    74: "74 - Audio",
+    76: "76 - Routers",
+    77: "77 - Power",
+    78: "78 - Surveillance",
+    79: "79 - Switches",
+    80: "80 - Access Points",
+    81: "81 - Media Distribution",
+}
+
+
+def _jenkins() -> JenkinsService:
+    global _jenkins_service
+    if _jenkins_service is None:
+        try:
+            _jenkins_service = JenkinsService()
+        except JenkinsError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+    return _jenkins_service
+
+
+def _jenkins_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except JenkinsError as exc:
+        raise HTTPException(status_code=502, detail=f"Jenkins error: {exc}")
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Jenkins request failed: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Jenkins client error: {exc}")
 
 
 def _allowed_project_ids() -> Optional[set]:
@@ -1663,12 +621,6 @@ async def testrail_sections(project_id: int = Query(...), suite_id: Optional[int
     ]
 
 
-def _classify_role(title: str) -> str:
-    for prefix, r in _ROLE_BY_PREFIX.items():
-        if title.startswith(prefix):
-            return r
-    return "other"
-
 
 def _var_keys_from_body(text: str) -> List[str]:
     """Extract variable keys from a Var: case body (YAML or line-based)."""
@@ -1769,103 +721,6 @@ async def testrail_case(case_id: int):
 # ---------------------------------------------------------------------------
 # Import recorded steps (clipboard paste)
 # ---------------------------------------------------------------------------
-
-# Formats accepted by /api/import/recording.  JSON exports route through
-# RecorderConverter.detect_format; raw code routes by language heuristics.
-RECORDING_FORMATS = [
-    "auto", "playwright-js", "playwright-python", "chrome-devtools",
-    "selenium", "katalon", "playwright", "codegen", "cypress", "puppeteer",
-]
-
-_JS_CODE_RE = re.compile(
-    r"getBy[A-Z]|waitFor[A-Z]|toHave[A-Z]|toBe[A-Z]|frameLocator\(|"
-    r"@playwright/test|\bawait\s+expect\(|=>"
-)
-_PY_CODE_RE = re.compile(
-    r"\bget_by_\w+|\bwait_for_\w+|sync_playwright|async_playwright|"
-    r"to_be_\w+|to_have_\w+"
-)
-
-
-def convert_recording_text(raw: str, format_hint: str = "auto") -> Dict[str, Any]:
-    """Convert clipboard-pasted recorder output to Easy BDD test data.
-
-    Accepts JSON recorder exports (Chrome DevTools Recorder, Selenium IDE
-    .side, Katalon, Playwright test-generator, Cypress, Puppeteer) and raw
-    Playwright codegen source (JS/TS or Python).
-
-    Returns the converter's test-data dict plus a "format" label.
-    Raises ValueError when the text can't be recognized or converted.
-    """
-    import json
-
-    from easybdd.core.recorder_converter import RecorderConverter
-    from easybdd.crawler.crx_converter import PlaywrightTsConverter
-
-    text = (raw or "").strip()
-    if not text:
-        raise ValueError("Nothing to import — paste a recording first.")
-    fmt = (format_hint or "auto").strip().lower()
-    if fmt not in RECORDING_FORMATS:
-        raise ValueError(f"Unknown format '{format_hint}'. Supported: {', '.join(RECORDING_FORMATS)}")
-
-    converter = RecorderConverter()
-
-    # ── JSON recorder exports ──────────────────────────────────────────────
-    data = None
-    if text.startswith(("{", "[")):
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            if fmt in converter.converters:
-                raise ValueError(f"'{fmt}' expects a JSON export, but the text is not valid JSON: {exc}")
-            data = None
-    if data is not None:
-        detected = fmt if fmt in converter.converters else converter.detect_format(data)
-        if not detected:
-            raise ValueError(
-                "Could not recognize this JSON as a known recorder export. "
-                "Pick the format explicitly (chrome-devtools, selenium, katalon, "
-                "playwright, cypress, puppeteer)."
-            )
-        try:
-            if detected == "codegen":
-                # "codegen" JSON is a wrapper around raw code lines — its
-                # converter takes a code string, not (data, path)
-                code = "\n".join(str(s) for s in data.get("steps", []))
-                result = converter.convert_playwright_native_code(code)
-            else:
-                result = converter.convert(data, detected, Path("clipboard.json"))
-        except ValueError:
-            raise
-        except Exception as exc:
-            raise ValueError(f"Failed to convert '{detected}' recording: {exc}")
-        result["format"] = detected
-        return result
-
-    # ── Raw code: Playwright codegen JS/TS vs Python ───────────────────────
-    if fmt == "playwright-js" or (fmt == "auto" and _JS_CODE_RE.search(text)):
-        result = PlaywrightTsConverter().convert(text, "clipboard")
-        result["format"] = "playwright-js"
-        return result
-    if fmt in ("playwright-python", "codegen") or (
-        fmt == "auto" and (_PY_CODE_RE.search(text) or "page." in text)
-    ):
-        result = converter.convert_playwright_native_code(text)
-        result["format"] = "playwright-python"
-        return result
-
-    raise ValueError(
-        "Could not recognize the pasted text as a recording. Supported: "
-        "Playwright codegen (JS/TS or Python), Chrome DevTools Recorder JSON, "
-        "Selenium IDE .side, Katalon, Cypress and Puppeteer JSON exports."
-    )
-
-
-class ImportRecordingRequest(BaseModel):
-    text: str
-    format: str = "auto"
-    include_logs: bool = False  # keep the auto-generated test.log narration steps
 
 
 @app.post("/api/import/recording")
@@ -2216,15 +1071,21 @@ def _run_summary(r: Dict[str, Any]) -> Dict[str, Any]:
         k: int(r.get(f"{k}_count") or 0)
         for k in ("passed", "blocked", "untested", "retest", "failed")
     }
+    run_vars = TestRailService.parse_run_vars(r.get("description"))
     return {
         "id": r["id"],
         "name": r.get("name", ""),
+        "project_id": r.get("project_id"),
         "is_completed": bool(r.get("is_completed")),
         "created_on": r.get("created_on"),
         "completed_on": r.get("completed_on"),
         "counts": counts,
         "total": sum(counts.values()),
         "url": _run_link(r["id"]),
+        "jenkins_job": run_vars.jenkins_job,
+        "jenkins_build_url": run_vars.jenkins_build_url,
+        "jenkins_build_number": run_vars.jenkins_build_number,
+        "jenkins_available": r.get("project_id") in _JENKINS_PROJECT_CHOICES,
     }
 
 
@@ -2282,6 +1143,50 @@ async def testrail_run_results(run_id: int, req: RunResultsRequest):
         "updated": len(results),
         "status_id": req.status_id,
         "status": _status_map().get(req.status_id, ""),
+        "run_url": _run_link(run_id),
+    }
+
+
+class JenkinsTriggerRequest(BaseModel):
+    find_only: bool = False
+
+
+@app.post("/api/jenkins/run/{run_id}/trigger")
+async def jenkins_trigger_run(run_id: int, req: JenkinsTriggerRequest):
+    """Kick off the Jenkins job that executes this TestRail run right now,
+    instead of waiting for the next cron poll, and link the resulting build
+    back onto the run."""
+    run = _tr_call(_tr().get_run, run_id)
+    project_id = run.get("project_id")
+    project_choice = _JENKINS_PROJECT_CHOICES.get(project_id)
+    if not project_choice:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No Jenkins job is mapped to TestRail project {project_id}.",
+        )
+
+    job_name = os.getenv("JENKINS_MANUAL_JOB", "EasyBDD - Manual Run")
+    params = {
+        "PROJECT_ID": project_choice,
+        "RUN_ID": str(run_id),
+        "RUN_PREFIX": os.getenv("TESTRAIL_RUN_PREFIX", "EASYBDD:"),
+        "FIND_ONLY": "true" if req.find_only else "false",
+    }
+    queue_url = _jenkins_call(_jenkins().trigger_build, job_name, params)
+    build = _jenkins_call(_jenkins().resolve_queue_item, queue_url)
+
+    run_vars = TestRailService.parse_run_vars(run.get("description"))
+    run_vars.jenkins_job = job_name
+    run_vars.jenkins_build_url = build["url"] if build else None
+    run_vars.jenkins_build_number = build["number"] if build else None
+    _tr_call(_tr().update_run, run_id, description=json.dumps(run_vars.to_dict()))
+
+    return {
+        "job": job_name,
+        "queue_url": queue_url,
+        "queued": build is None,
+        "build_url": build["url"] if build else None,
+        "build_number": build["number"] if build else None,
         "run_url": _run_link(run_id),
     }
 

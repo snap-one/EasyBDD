@@ -10,6 +10,10 @@ Both integrations here are **remote HTTP MCP servers** authenticated with a
 static `Authorization` header (Bearer for GitHub, Basic for Jenkins) — no local
 process to run, just a URL and a credential.
 
+The self-hosted **Jira** and **Confluence** MCP servers follow the same
+static-header pattern but have their own deployment/operations doc:
+[atlassian-mcp-setup.md](./atlassian-mcp-setup.md).
+
 > **Security note:** this repo is public. Never commit a real token, API key,
 > or internal hostname/IP into a checked-in config file — use a placeholder
 > (e.g. `<jenkins_url>`, `<github_token>`) in anything that goes into git, and

@@ -32,6 +32,10 @@ class RunVariables:
         self.execute_options: Dict[str, Any] = data.get("execute_options", {})
         # Extra variables injected into every test run from this run
         self.extra: Dict[str, Any] = data.get("data", {})
+        # Last Jenkins build manually triggered for this run (see JenkinsService)
+        self.jenkins_job: Optional[str] = data.get("jenkins_job")
+        self.jenkins_build_url: Optional[str] = data.get("jenkins_build_url")
+        self.jenkins_build_number: Optional[int] = data.get("jenkins_build_number")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -41,6 +45,9 @@ class RunVariables:
             "test_order": self.test_order,
             "execute_options": self.execute_options,
             "data": self.extra,
+            "jenkins_job": self.jenkins_job,
+            "jenkins_build_url": self.jenkins_build_url,
+            "jenkins_build_number": self.jenkins_build_number,
         }
 
 

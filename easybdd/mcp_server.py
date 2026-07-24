@@ -2326,11 +2326,195 @@ async def route_setup_ps1(request):
     return _onboarding_script("setup-easybdd-mcp.ps1")
 
 
+@mcp.custom_route("/jenkins-mcp-config", methods=["GET"])
+async def route_jenkins_mcp_config(request):
+    """Client config for the Jenkins MCP plugin — gated by the bearer token.
+
+    Returns the Jenkins MCP endpoint plus a ready-made Basic Authorization
+    header so the onboarding scripts can add a "jenkins" MCP server to
+    engineers' Claude clients without anyone handling the Jenkins API token
+    directly. The credentials live only in the production .env
+    (JENKINS_URL / JENKINS_USERNAME / JENKINS_API_TOKEN — the same variables
+    JenkinsService uses). 404s when they are not configured, which the
+    setup scripts treat as "skip quietly".
+
+    Not in _PUBLIC_PATHS on purpose: without EASYBDD_MCP_TOKEN set this
+    would hand Jenkins credentials to anyone who can reach the port (the
+    server already logs a loud warning when running unauthenticated).
+    """
+    import base64
+
+    from starlette.responses import JSONResponse
+
+    jenkins_url = os.environ.get("JENKINS_URL", "").strip().rstrip("/")
+    username = os.environ.get("JENKINS_USERNAME", "").strip()
+    api_token = os.environ.get("JENKINS_API_TOKEN", "").strip()
+    if not (jenkins_url and username and api_token):
+        return JSONResponse(
+            {
+                "error": "not_configured",
+                "detail": "JENKINS_URL, JENKINS_USERNAME and JENKINS_API_TOKEN "
+                          "are not all set in the server .env.",
+            },
+            status_code=404,
+        )
+    basic = base64.b64encode(f"{username}:{api_token}".encode()).decode()
+    return JSONResponse(
+        {
+            "url": f"{jenkins_url}/mcp-server/mcp",
+            "authorization": f"Basic {basic}",
+        }
+    )
+
+
+@mcp.custom_route("/jira-mcp-config", methods=["GET"])
+async def route_jira_mcp_config(request):
+    """Client config for the self-hosted Jira MCP server — gated by the bearer token.
+
+    Returns the mcp-atlassian endpoint plus a ready-made Basic Authorization
+    header (Atlassian account email + Jira Cloud API token, the same shape
+    mcp-atlassian's multi-user mode expects per-request) so the onboarding
+    scripts can add a "jira" MCP server without anyone handling the Jira API
+    token directly. Credentials live only in the production .env
+    (JIRA_MCP_URL / JIRA_USERNAME / JIRA_API_TOKEN). 404s when they are not
+    configured, which the setup scripts treat as "skip quietly".
+
+    Not in _PUBLIC_PATHS on purpose: without EASYBDD_MCP_TOKEN set this
+    would hand Jira credentials to anyone who can reach the port (the
+    server already logs a loud warning when running unauthenticated).
+    """
+    import base64
+
+    from starlette.responses import JSONResponse
+
+    jira_mcp_url = os.environ.get("JIRA_MCP_URL", "").strip().rstrip("/")
+    username = os.environ.get("JIRA_USERNAME", "").strip()
+    api_token = os.environ.get("JIRA_API_TOKEN", "").strip()
+    if not (jira_mcp_url and username and api_token):
+        return JSONResponse(
+            {
+                "error": "not_configured",
+                "detail": "JIRA_MCP_URL, JIRA_USERNAME and JIRA_API_TOKEN "
+                          "are not all set in the server .env.",
+            },
+            status_code=404,
+        )
+    basic = base64.b64encode(f"{username}:{api_token}".encode()).decode()
+    return JSONResponse(
+        {
+            "url": jira_mcp_url,
+            "authorization": f"Basic {basic}",
+        }
+    )
+
+
+@mcp.custom_route("/confluence-mcp-config", methods=["GET"])
+async def route_confluence_mcp_config(request):
+    """Client config for the self-hosted Confluence MCP server — gated by the bearer token.
+
+    Same shape as /jira-mcp-config: returns the mcp-atlassian (Confluence mode)
+    endpoint plus a ready-made Basic Authorization header (Atlassian account
+    email + API token). Credentials live only in the production .env
+    (CONFLUENCE_MCP_URL / CONFLUENCE_USERNAME / CONFLUENCE_API_TOKEN). 404s
+    when they are not configured, which the setup scripts treat as
+    "skip quietly".
+
+    Not in _PUBLIC_PATHS on purpose: without EASYBDD_MCP_TOKEN set this
+    would hand Confluence credentials to anyone who can reach the port (the
+    server already logs a loud warning when running unauthenticated).
+    """
+    import base64
+
+    from starlette.responses import JSONResponse
+
+    confluence_mcp_url = os.environ.get("CONFLUENCE_MCP_URL", "").strip().rstrip("/")
+    username = os.environ.get("CONFLUENCE_USERNAME", "").strip()
+    api_token = os.environ.get("CONFLUENCE_API_TOKEN", "").strip()
+    if not (confluence_mcp_url and username and api_token):
+        return JSONResponse(
+            {
+                "error": "not_configured",
+                "detail": "CONFLUENCE_MCP_URL, CONFLUENCE_USERNAME and "
+                          "CONFLUENCE_API_TOKEN are not all set in the server .env.",
+            },
+            status_code=404,
+        )
+    basic = base64.b64encode(f"{username}:{api_token}".encode()).decode()
+    return JSONResponse(
+        {
+            "url": confluence_mcp_url,
+            "authorization": f"Basic {basic}",
+        }
+    )
+
+
 @mcp.custom_route("/onboard", methods=["GET"])
 async def route_onboard(request):
     from starlette.responses import HTMLResponse
 
     base = f"http://{request.url.hostname}:{request.url.port or 80}"
+    jenkins_enabled = all(
+        os.environ.get(v, "").strip()
+        for v in ("JENKINS_URL", "JENKINS_USERNAME", "JENKINS_API_TOKEN")
+    )
+    jenkins_note = (
+        """<li><code>jenkins</code> &mdash; control the Jenkins CI server (inspect jobs,
+        trigger builds, read consoles). Currently <strong>enabled</strong>; the same
+        commands below set it up automatically &mdash; no extra steps, no Jenkins
+        credentials to handle.</li>"""
+        if jenkins_enabled
+        else """<li><code>jenkins</code> &mdash; control the Jenkins CI server. Currently
+        <strong>not enabled</strong> on this server (an admin must set
+        <code>JENKINS_URL</code> / <code>JENKINS_USERNAME</code> /
+        <code>JENKINS_API_TOKEN</code> in the production <code>.env</code>); the setup
+        commands below will skip it until then.</li>"""
+    )
+    jenkins_try = (
+        """<li>Try: <em>"Using the jenkins tools, list the Jenkins jobs."</em></li>"""
+        if jenkins_enabled
+        else ""
+    )
+    jira_enabled = all(
+        os.environ.get(v, "").strip()
+        for v in ("JIRA_MCP_URL", "JIRA_USERNAME", "JIRA_API_TOKEN")
+    )
+    jira_note = (
+        """<li><code>jira</code> &mdash; look up and update Jira issues. Currently
+        <strong>enabled</strong>; the same commands below set it up automatically
+        &mdash; no extra steps, no Jira credentials to handle.</li>"""
+        if jira_enabled
+        else """<li><code>jira</code> &mdash; look up and update Jira issues. Currently
+        <strong>not enabled</strong> on this server (an admin must set
+        <code>JIRA_MCP_URL</code> / <code>JIRA_USERNAME</code> /
+        <code>JIRA_API_TOKEN</code> in the production <code>.env</code>); the setup
+        commands below will skip it until then.</li>"""
+    )
+    jira_try = (
+        """<li>Try: <em>"Using the jira tools, show me my open issues."</em></li>"""
+        if jira_enabled
+        else ""
+    )
+    confluence_enabled = all(
+        os.environ.get(v, "").strip()
+        for v in ("CONFLUENCE_MCP_URL", "CONFLUENCE_USERNAME", "CONFLUENCE_API_TOKEN")
+    )
+    confluence_note = (
+        """<li><code>confluence</code> &mdash; search and read Confluence pages.
+        Currently <strong>enabled</strong>; the same commands below set it up
+        automatically &mdash; no extra steps, no Confluence credentials to
+        handle.</li>"""
+        if confluence_enabled
+        else """<li><code>confluence</code> &mdash; search and read Confluence pages.
+        Currently <strong>not enabled</strong> on this server (an admin must set
+        <code>CONFLUENCE_MCP_URL</code> / <code>CONFLUENCE_USERNAME</code> /
+        <code>CONFLUENCE_API_TOKEN</code> in the production <code>.env</code>); the
+        setup commands below will skip it until then.</li>"""
+    )
+    confluence_try = (
+        """<li>Try: <em>"Using the confluence tools, search for our onboarding docs."</em></li>"""
+        if confluence_enabled
+        else ""
+    )
     return HTMLResponse(textwrap.dedent(f"""\
         <!doctype html>
         <html><head><meta charset="utf-8"><title>Easy BDD MCP setup</title>
@@ -2346,6 +2530,15 @@ async def route_onboard(request):
         <strong>access token</strong> (ask Mark Fomin). No other tools, no repository
         checkout, no coding.</p>
 
+        <h2>What gets set up</h2>
+        <ul>
+          <li><code>easybdd</code> &mdash; run and fix tests, browse TestRail runs, and
+          drive the Easy BDD framework from Claude.</li>
+          {jenkins_note}
+          {jira_note}
+          {confluence_note}
+        </ul>
+
         <h2>Windows</h2>
         <p>Open <strong>PowerShell</strong> (Start menu &rarr; type "PowerShell") and paste
         (replace <code>PASTE-TOKEN-HERE</code> with the token):</p>
@@ -2360,8 +2553,11 @@ async def route_onboard(request):
         <h2>Then</h2>
         <ol>
           <li>Fully quit Claude Desktop (system tray / menu bar &rarr; Quit) and reopen it.</li>
-          <li>In a new chat, click the tools (sliders) icon under the message box &mdash; you should see <code>easybdd</code>.</li>
+          <li>In a new chat, click the tools (sliders) icon under the message box &mdash; you should see <code>easybdd</code>{" and <code>jenkins</code>" if jenkins_enabled else ""}{" and <code>jira</code>" if jira_enabled else ""}{" and <code>confluence</code>" if confluence_enabled else ""}.</li>
           <li>Try: <em>"Using the easybdd tools, list the available tests."</em></li>
+          {jenkins_try}
+          {jira_try}
+          {confluence_try}
         </ol>
 
         <p>Problems? Contact Mark Fomin.</p>
