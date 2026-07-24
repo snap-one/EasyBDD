@@ -252,56 +252,49 @@ foreach ($ConfigPath in $ConfigPaths) {
         try { $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json } catch { $cfg = $null }
     }
     if ($null -eq $cfg) { $cfg = [pscustomobject]@{} }
-    if (-not $cfg.PSObject.Properties["mcpServers"]) {
-        $cfg | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{})
-    }
-    if ($cfg.mcpServers.PSObject.Properties["easybdd"]) {
-        $cfg.mcpServers.easybdd = $serverEntry
-    } else {
-        $cfg.mcpServers | Add-Member -NotePropertyName easybdd -NotePropertyValue $serverEntry
+
+    # Rebuild mcpServers as a hashtable to avoid Add-Member corruption on
+    # JSON-loaded objects. ConvertFrom-Json -> Add-Member -> ConvertTo-Json
+    # can lose or corrupt nested properties.
+    $mcp_hash = @{}
+    if ($cfg.PSObject.Properties["mcpServers"]) {
+        # Preserve existing MCP servers (except the ones we're updating)
+        $cfg.mcpServers.PSObject.Properties | ForEach-Object {
+            if ($_.Name -notin @("easybdd", "jenkins", "jira", "confluence")) {
+                $mcp_hash[$_.Name] = $_.Value
+            }
+        }
     }
 
+    # Add/update our servers
+    $mcp_hash["easybdd"] = $serverEntry
     if ($JenkinsUrl) {
-        $jenkinsEntry = [pscustomobject]@{
+        $mcp_hash["jenkins"] = [pscustomobject]@{
             command = "npx"
             args    = @("-y", "mcp-remote", $JenkinsUrl, "--allow-http", "--transport", "http-only",
                         "--header", 'Authorization:${JENKINS_AUTH}')
             env     = [pscustomobject]@{ JENKINS_AUTH = $JenkinsAuth }
         }
-        if ($cfg.mcpServers.PSObject.Properties["jenkins"]) {
-            $cfg.mcpServers.jenkins = $jenkinsEntry
-        } else {
-            $cfg.mcpServers | Add-Member -NotePropertyName jenkins -NotePropertyValue $jenkinsEntry
-        }
     }
-
     if ($JiraUrl) {
-        $jiraEntry = [pscustomobject]@{
+        $mcp_hash["jira"] = [pscustomobject]@{
             command = "npx"
             args    = @("-y", "mcp-remote", $JiraUrl, "--allow-http", "--transport", "http-only",
                         "--header", 'Authorization:${JIRA_AUTH}')
             env     = [pscustomobject]@{ JIRA_AUTH = $JiraAuth }
         }
-        if ($cfg.mcpServers.PSObject.Properties["jira"]) {
-            $cfg.mcpServers.jira = $jiraEntry
-        } else {
-            $cfg.mcpServers | Add-Member -NotePropertyName jira -NotePropertyValue $jiraEntry
-        }
     }
-
     if ($ConfluenceUrl) {
-        $confluenceEntry = [pscustomobject]@{
+        $mcp_hash["confluence"] = [pscustomobject]@{
             command = "npx"
             args    = @("-y", "mcp-remote", $ConfluenceUrl, "--allow-http", "--transport", "http-only",
                         "--header", 'Authorization:${CONFLUENCE_AUTH}')
             env     = [pscustomobject]@{ CONFLUENCE_AUTH = $ConfluenceAuth }
         }
-        if ($cfg.mcpServers.PSObject.Properties["confluence"]) {
-            $cfg.mcpServers.confluence = $confluenceEntry
-        } else {
-            $cfg.mcpServers | Add-Member -NotePropertyName confluence -NotePropertyValue $confluenceEntry
-        }
     }
+
+    # Rebuild config with the cleaned mcpServers
+    $cfg.mcpServers = [pscustomobject]$mcp_hash
 
     try {
         $cfg | ConvertTo-Json -Depth 20 | Set-Content -Path $ConfigPath -Encoding UTF8
